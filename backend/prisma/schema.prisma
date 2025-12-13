@@ -1,0 +1,62 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         Int       @id @default(autoincrement())
+  externalId String    @unique
+  workouts   Workout[]
+  createdAt  DateTime  @default(now())
+
+  @@index([externalId])
+}
+
+model Workout {
+  id         Int            @id @default(autoincrement())
+  userId     Int
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action     String
+  kind       String
+  summary    String
+  raceMeta   String?
+  // SQLite does not support native JSON; store as textified JSON string
+  workoutMeta String?
+  tcxRaw     String?        
+  raw        WorkoutRawTcx?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@index([userId])
+  @@index([userId, createdAt])
+}
+
+model WorkoutRawTcx {
+  id         Int      @id @default(autoincrement())
+  workoutId  Int      @unique
+  xml        String
+  createdAt  DateTime @default(now())
+  workout    Workout  @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+}
+
+model AuthUser {
+  id           Int       @id @default(autoincrement())
+  username     String    @unique
+  passwordHash String
+  createdAt    DateTime  @default(now())
+  sessions     Session[]
+}
+
+model Session {
+  id        Int       @id @default(autoincrement())
+  token     String    @unique
+  userId    Int
+  user      AuthUser  @relation(fields: [userId], references: [id])
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+}
+
