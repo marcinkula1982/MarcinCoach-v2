@@ -8,5 +8,6 @@ import { PrismaService } from '../prisma.service'
   imports: [AuthModule],
   controllers: [WorkoutsController],
   providers: [WorkoutsService, PrismaService],
+  exports: [WorkoutsService],
 })
 export class WorkoutsModule {}

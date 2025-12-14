@@ -22,6 +22,7 @@ import type { Request } from 'express'
 import { WorkoutsService } from './workouts.service'
 import { SaveWorkoutDto } from './dto/save-workout.dto'
 import { UpdateWorkoutMetaDto } from './dto/update-workout-meta.dto'
+import { ImportWorkoutDto } from './dto/import-workout.dto'
 import { SessionAuthGuard } from '../auth/session-auth.guard'
 
 @UseGuards(SessionAuthGuard)
@@ -45,6 +46,16 @@ export class WorkoutsController {
   @Get('analytics')
   getAnalytics(@Req() req: Request & { authUser?: { username: string } }) {
     return this.workoutsService.getAnalyticsForUser(this.getUsername(req))
+  }
+
+  @Get('analytics/summary')
+  getAnalyticsSummary(
+    @Req() req: Request & { authUser?: { username: string } },
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const userId = req.authUser!.username
+    return this.workoutsService.getAnalyticsSummaryForUser(userId, from, to)
   }
 
   @Post()
@@ -75,6 +86,15 @@ export class WorkoutsController {
       throw new BadRequestException('Brak pliku')
     }
     return this.workoutsService.uploadTcxFile(file, this.getUsername(req))
+  }
+
+  @Post('import')
+  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
+  async importWorkout(
+    @Req() req: Request & { authUser?: { username: string } },
+    @Body() dto: ImportWorkoutDto,
+  ) {
+    return this.workoutsService.importWorkout(this.getUsername(req), dto)
   }
 
   @Patch(':id/meta')

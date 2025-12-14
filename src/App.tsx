@@ -5,19 +5,20 @@ import { parseTcx } from './utils/tcxParser'
 import type {
   ParsedTcx,
   RaceMeta,
-  SaveAction,
-  SaveWorkoutPayload,
   WorkoutKind,
 } from './types'
 import {
   getWorkouts,
   getWorkout,
   deleteWorkout,
+  uploadTcxFile,
+  updateWorkoutMeta,
   type WorkoutListItem,
 } from './api/workouts'
 import { login } from './api/auth'
 import client from './api/client'
 import WorkoutsList from './components/WorkoutsList'
+import AnalyticsSummary from './components/AnalyticsSummary'
 
 // ---------- Format helpers ----------
 const formatSeconds = (value: number) => {
@@ -100,6 +101,8 @@ const useTrimmedSelection = (parsed: ParsedTcx | null, startIndex: number, endIn
 // ======================================================
 
 const App = () => {
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string
+  const [backendHealth, setBackendHealth] = useState<string>('(sprawdzam...)')
   const [username, setUsername] = useState<string>(() => {
     return localStorage.getItem('tcx-username') || ''
   })
@@ -111,6 +114,7 @@ const App = () => {
     return localStorage.getItem('tcx-username') || null
   })
   const [currentFileName, setCurrentFileName] = useState<string | null>(null)
+  const [currentFile, setCurrentFile] = useState<File | null>(null)
   const [currentWorkoutDate, setCurrentWorkoutDate] = useState<string | null>(null)
   const [currentWorkoutId, setCurrentWorkoutId] = useState<string | null>(null)
   const [parsed, setParsed] = useState<ParsedTcx | null>(null)
@@ -118,7 +122,6 @@ const App = () => {
   const [startIndex, setStartIndex] = useState(0)
   const [endIndex, setEndIndex] = useState(0)
   const [isParsing, setIsParsing] = useState(false)
-  const [saveAction, setSaveAction] = useState<SaveAction>('preview-only')
   const [kind, setKind] = useState<WorkoutKind>('training')
   const [raceMeta, setRaceMeta] = useState<RaceMeta>({
     name: '',
@@ -165,6 +168,14 @@ const App = () => {
     }
   }, [])
 
+  useEffect(() => {
+    client.get('/health')
+      .then((res) => {
+        setBackendHealth(`${res.status} ${JSON.stringify(res.data)}`)
+      })
+      .catch((e) => setBackendHealth(`ERR ${String(e)}`))
+  }, [])
+
   const baseMetrics = useMemo(
     () => (parsed ? computeMetrics(parsed.trackpoints) : null),
     [parsed],
@@ -204,6 +215,7 @@ const App = () => {
     try {
       if (file) {
         setCurrentFileName(file.name)
+        setCurrentFile(file)
         setCurrentWorkoutDate(null)
         setCurrentWorkoutId(null)
       }
@@ -258,29 +270,10 @@ const App = () => {
     }
   }, [summary, rpe])
 
-  const currentStart = parsed?.startTimeIso ?? null
-  const currentDuration =
-    summary?.trimmed?.durationSec ?? summary?.original?.durationSec ?? null
-  const currentDistance =
-    summary?.trimmed?.distanceM ?? summary?.original?.distanceM ?? null
-
-  const isDuplicate = useMemo(() => {
-    if (!currentStart || currentDuration == null || currentDistance == null) return false
-
-    return workouts.some((w) => {
-      const s = w.summary
-      const start = s?.startTimeIso ?? null
-      const dur = s?.trimmed?.durationSec ?? s?.original?.durationSec ?? null
-      const dist = s?.trimmed?.distanceM ?? s?.original?.distanceM ?? null
-
-      return start === currentStart && dur === currentDuration && dist === currentDistance
-    })
-  }, [workouts, currentStart, currentDuration, currentDistance])
-
   const loadWorkouts = useCallback(
-    async (userId: string) => {
+    async () => {
       try {
-        const data = await getWorkouts(userId)
+        const data = await getWorkouts()
         setWorkouts(data)
       } catch (err) {
         console.warn('Nie udało się pobrać workoutów', err)
@@ -298,7 +291,7 @@ const App = () => {
       return
     }
 
-    loadWorkouts(u)
+    loadWorkouts()
   }, [loggedInUser, loadWorkouts])
 
   const handleLogout = () => {
@@ -341,37 +334,11 @@ const App = () => {
       return
     }
 
-    if (!summary || rawTcx === null) {
-      setSaveError('Brak pliku TCX lub podsumowania')
-      setSaveSuccess(null)
-      return
-    }
-
-    if (saveAction === 'preview-only') {
-      setSaveError('Akcja ustawiona na tylko podgląd – zmień na zapis')
-      setSaveSuccess(null)
-      return
-    }
-
-    const payload: SaveWorkoutPayload = {
-      userId: u,
-      summary,
-      action: saveAction,
-      kind,
-      raceMeta: kind === 'race' ? raceMeta : undefined,
-    }
-
     setIsSaving(true)
     setSaveError(null)
     setSaveSuccess(null)
 
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      }
-      headers['x-session-token'] = t
-      headers['x-user-id'] = u
-
       const durationMin = summary?.trimmed?.durationSec
         ? summary.trimmed.durationSec / 60
         : summary?.original?.durationSec
@@ -409,57 +376,47 @@ const App = () => {
 
       if (currentWorkoutId) {
         // Update existing workout meta
-        const res = await fetch(`http://localhost:3000/workouts/${currentWorkoutId}/meta`, {
-          method: 'PATCH',
-          headers,
-          body: JSON.stringify({ workoutMeta }),
-        })
-
-        if (!res.ok) {
-          const text = await res.text()
-          setSaveError(`Backend błąd: ${res.status} ${text || ''}`.trim())
+        try {
+          await updateWorkoutMeta(Number(currentWorkoutId), workoutMeta)
+          const fresh = await getWorkouts()
+          setWorkouts(fresh)
+          setNote('')
+          setSaveSuccess('WorkoutMeta zaktualizowane')
+          return
+        } catch (error: any) {
+          const msg = error?.response?.data?.message || error?.message || String(error)
+          setSaveError(`Backend błąd: ${msg}`)
           return
         }
+      }
 
-        await res.json()
-        const fresh = await getWorkouts(loggedInUser || u)
+      // Create new workout via upload endpoint
+      if (!currentFile) {
+        setSaveError('Brak pliku do wysłania')
+        return
+      }
+
+      try {
+        const uploadedWorkout = await uploadTcxFile(currentFile)
+        const workoutId = uploadedWorkout.id
+
+        // Update workout meta
+        await updateWorkoutMeta(workoutId, workoutMeta)
+
+        const fresh = await getWorkouts()
         setWorkouts(fresh)
         setNote('')
-        setSaveSuccess('WorkoutMeta zaktualizowane')
-        return
-      }
-
-      // Create new workout
-      const fullPayload = {
-        ...payload,
-        tcxRaw: rawTcx,
-        workoutMeta,
-      }
-      console.log('SAVE payload', fullPayload)
-
-      const res = await fetch('http://localhost:3000/workouts', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(fullPayload),
-      })
-
-      if (!res.ok) {
-        if (res.status === 409) {
+        setSaveSuccess('Trening zapisany w bazie')
+      } catch (error: any) {
+        if (error?.response?.status === 409) {
           setSaveSuccess('Ten trening już jest w bazie (duplikat).')
           setSaveError(null)
-          await loadWorkouts(u)
+          await loadWorkouts()
           return
         }
-        const text = await res.text()
-        setSaveError(`Backend błąd: ${res.status} ${text || ''}`.trim())
-        return
+        const msg = error?.response?.data?.message || error?.message || String(error)
+        setSaveError(`Backend błąd: ${msg}`)
       }
-
-      await res.json()
-      const fresh = await getWorkouts(loggedInUser || u)
-      setWorkouts(fresh)
-      setNote('')
-      setSaveSuccess('Trening zapisany w bazie')
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Błąd zapisu do backendu'
@@ -545,6 +502,9 @@ const App = () => {
             ) : (
               <span>Nie zalogowano</span>
             )}
+            <div className="text-xs text-slate-400">
+              API: {API_BASE_URL} | /health: {backendHealth}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {!loggedInUser && (
@@ -617,6 +577,8 @@ const App = () => {
               <FilePicker onChange={handleFile} disabled={isParsing} />
             </header>
 
+            <AnalyticsSummary />
+
             {error && (
               <div className="mt-6 rounded-lg border border-red-500/40 bg-red-900/40 p-4 text-sm text-red-100">
                 {error}
@@ -673,19 +635,6 @@ const App = () => {
                         Wybierz, czy tylko podglądasz, czy przygotowujesz dane do
                         zapisu.
                       </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <label className="flex items-center gap-2 text-sm text-slate-200">
-                        <input
-                          type="checkbox"
-                          checked={saveAction === 'preview-only'}
-                          onChange={(e) =>
-                            setSaveAction(e.target.checked ? 'preview-only' : 'save')
-                          }
-                          className="h-4 w-4 accent-indigo-400"
-                        />
-                        Tylko odczytaj (nie zapisuj do bazy)
-                      </label>
                     </div>
                   </div>
 
@@ -850,9 +799,9 @@ const App = () => {
                       <button
                         type="button"
                         onClick={handleSaveToBackend}
-                    disabled={isSaving || !summary || isDuplicate}
+                        disabled={isSaving || (currentWorkoutId ? !summary : !currentFile)}
                     className={`rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-lg transition ${
-                      isSaving || !summary || isDuplicate
+                      isSaving || (currentWorkoutId ? !summary : !currentFile)
                         ? 'bg-slate-600 cursor-not-allowed opacity-60'
                         : 'bg-emerald-500 shadow-emerald-500/30 hover:bg-emerald-400'
                     }`}
@@ -860,11 +809,6 @@ const App = () => {
                         {isSaving ? 'Zapisywanie...' : 'Zapisz do bazy'}
                       </button>
                     </div>
-                {isDuplicate && (
-                  <div className="mt-2 text-sm text-slate-400">
-                    Ten trening już jest w bazie.
-                  </div>
-                )}
                   </div>
 
                   {(saveError || saveSuccess) && (

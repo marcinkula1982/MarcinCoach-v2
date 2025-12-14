@@ -38,9 +38,8 @@ export type Workout = {
   tcxRaw?: string | null
 }
 
-export async function getWorkouts(userId: string): Promise<WorkoutListItem[]> {
+export async function getWorkouts(): Promise<WorkoutListItem[]> {
   const response = await client.get<WorkoutListItem[]>('/workouts', {
-    params: { userId },
     headers: buildAuthHeaders(),
   })
   return response.data
@@ -69,5 +68,11 @@ export const uploadTcxFile = async (file: File): Promise<Workout> => {
   })
 
   return response.data
+}
+
+export async function updateWorkoutMeta(id: number, workoutMeta: WorkoutMeta): Promise<void> {
+  await client.patch(`/workouts/${id}/meta`, { workoutMeta }, {
+    headers: buildAuthHeaders(),
+  })
 }
 

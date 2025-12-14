@@ -4,34 +4,55 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common'
-import { Request } from 'express'
-import { AuthService } from './auth.service'
+import type { Request } from 'express'
+import { PrismaService } from '../prisma.service'
 
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
-  constructor(private readonly authService: AuthService) {}
+  private readonly IDLE_MS = 24 * 60 * 60 * 1000 // 24h
 
-  async canActivate(context: ExecutionContext): Promise<boolean> {
-    const req = context.switchToHttp().getRequest<Request>()
+  constructor(private prisma: PrismaService) {}
 
-    const tokenHeader = req.headers['x-session-token']
-    const token =
-      typeof tokenHeader === 'string'
-        ? tokenHeader
-        : Array.isArray(tokenHeader)
-        ? tokenHeader[0]
-        : undefined
+  async canActivate(ctx: ExecutionContext): Promise<boolean> {
+    const req = ctx.switchToHttp().getRequest<Request & { authUser?: any }>()
 
-    if (!token) {
-      throw new UnauthorizedException('Missing session token')
+    const token = req.header('x-session-token') || ''
+    const username = req.header('x-user-id') || '' // u Ciebie to username
+
+    if (!token || !username) {
+      throw new UnauthorizedException('MISSING_SESSION_HEADERS')
     }
 
-    const user = await this.authService.validateSession(token)
-    if (!user) {
-      throw new UnauthorizedException('Invalid session token')
+    const session = await this.prisma.session.findUnique({
+      where: { token },
+      include: { user: true }, // AuthUser
+    })
+
+    if (!session) {
+      throw new UnauthorizedException('INVALID_SESSION')
     }
 
-    ;(req as any).authUser = user
+    // (opcjonalnie, ale warto) token musi należeć do tego username
+    if (session.user.username !== username) {
+      throw new UnauthorizedException('SESSION_USER_MISMATCH')
+    }
+
+    const now = Date.now()
+    const last = (session.lastSeenAt ?? session.createdAt).getTime()
+
+    if (now - last > this.IDLE_MS) {
+      // porządek: kasujemy przeterminowaną sesję
+      await this.prisma.session.delete({ where: { token } }).catch(() => {})
+      throw new UnauthorizedException('SESSION_EXPIRED')
+    }
+
+    // sliding refresh
+    await this.prisma.session.update({
+      where: { token },
+      data: { lastSeenAt: new Date() },
+    })
+
+    req.authUser = { username: session.user.username, userId: session.userId }
     return true
   }
 }

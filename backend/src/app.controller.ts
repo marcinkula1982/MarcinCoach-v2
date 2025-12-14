@@ -6,6 +6,11 @@ export class AppController {
   getRoot() {
     return { status: 'ok', service: 'MarcinCoach API' }
   }
+
+  @Get('health')
+  health() {
+    return { status: 'ok' }
+  }
 }
 
 

@@ -5,6 +5,8 @@ import { randomUUID } from 'crypto'
 
 @Injectable()
 export class AuthService {
+  private readonly IDLE_MS = 24 * 60 * 60 * 1000 // 24 godziny
+
   constructor(private prisma: PrismaService) {}
 
   async register(username: string, password: string) {
@@ -40,6 +42,7 @@ export class AuthService {
         token,
         userId: user.id,
         expiresAt: null,
+        lastSeenAt: new Date(),
       },
     })
 
@@ -53,6 +56,22 @@ export class AuthService {
     })
 
     if (!session) return null
+
+    // Sprawdzenie wygaśnięcia
+    const last = session.lastSeenAt ?? session.createdAt
+    const now = Date.now()
+    const lastTime = new Date(last).getTime()
+
+    if (now - lastTime > this.IDLE_MS) {
+      throw new UnauthorizedException('SESSION_EXPIRED')
+    }
+
+    // Sliding refresh - aktualizacja lastSeenAt
+    await this.prisma.session.update({
+      where: { id: session.id },
+      data: { lastSeenAt: new Date() },
+    })
+
     return session.user
   }
 }
