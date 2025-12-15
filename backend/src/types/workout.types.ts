@@ -1,3 +1,5 @@
+import type { IntensityBuckets } from './metrics.types'
+
 export type Metrics = {
   durationSec: number
   distanceM: number
@@ -9,8 +11,11 @@ export type Metrics = {
 
 export type WorkoutSummary = {
   fileName?: string
+  /** ISO start time of the workout, when available */
+  startTimeIso?: string | null
   original?: Metrics | null
   trimmed?: Metrics | null
+  intensity?: IntensityBuckets | null
   totalPoints: number
   selectedPoints: number
 }

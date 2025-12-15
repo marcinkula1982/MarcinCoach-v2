@@ -17,24 +17,18 @@ export class SessionAuthGuard implements CanActivate {
     const req = ctx.switchToHttp().getRequest<Request & { authUser?: any }>()
 
     const token = req.header('x-session-token') || ''
-    const username = req.header('x-user-id') || '' // u Ciebie to username
 
-    if (!token || !username) {
+    if (!token) {
       throw new UnauthorizedException('MISSING_SESSION_HEADERS')
     }
 
     const session = await this.prisma.session.findUnique({
       where: { token },
-      include: { user: true }, // AuthUser
+      include: { user: true }, // AuthUser (linked to canonical User via userId)
     })
 
     if (!session) {
       throw new UnauthorizedException('INVALID_SESSION')
-    }
-
-    // (opcjonalnie, ale warto) token musi należeć do tego username
-    if (session.user.username !== username) {
-      throw new UnauthorizedException('SESSION_USER_MISMATCH')
     }
 
     const now = Date.now()
@@ -52,7 +46,12 @@ export class SessionAuthGuard implements CanActivate {
       data: { lastSeenAt: new Date() },
     })
 
-    req.authUser = { username: session.user.username, userId: session.userId }
+    const authUser: any = session.user
+    req.authUser = {
+      authUserId: authUser.id,
+      userId: authUser.userId,
+      username: authUser.username,
+    }
     return true
   }
 }

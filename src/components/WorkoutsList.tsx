@@ -1,6 +1,7 @@
 import type React from 'react'
 import { useMemo } from 'react'
 import type { WorkoutListItem } from '../api/workouts'
+import { getWorkoutDate } from '../api/workouts'
 
 // ---------- Format helpers ----------
 const formatSeconds = (value: number) => {
@@ -37,14 +38,15 @@ const WorkoutsList = ({
   onLoadWorkout,
   onDeleteWorkout,
 }: WorkoutsListProps) => {
+  const safeWorkouts = Array.isArray(workouts) ? workouts : []
   const totals = useMemo(() => {
-    const totalWorkouts = workouts.length
-    const totalDistanceMeters = workouts.reduce(
+    const totalWorkouts = safeWorkouts.length
+    const totalDistanceMeters = safeWorkouts.reduce(
       (sum, w) => sum + (w.summary.trimmed?.distanceM ?? w.summary.original?.distanceM ?? 0),
       0,
     )
     const totalDistanceKm = totalDistanceMeters / 1000
-    const totalDurationSeconds = workouts.reduce(
+    const totalDurationSeconds = safeWorkouts.reduce(
       (sum, w) =>
         sum +
         (w.summary.trimmed?.durationSec ??
@@ -67,7 +69,7 @@ const WorkoutsList = ({
       return d >= startOfWeek && d <= endOfToday
     }
 
-    const weekWorkouts = workouts.filter((w) => isThisWeek(w.createdAt))
+    const weekWorkouts = safeWorkouts.filter((w) => isThisWeek(getWorkoutDate(w)))
     const weekTotalWorkouts = weekWorkouts.length
     const weekTotalDistanceMeters = weekWorkouts.reduce(
       (sum, w) =>
@@ -85,31 +87,6 @@ const WorkoutsList = ({
       0,
     )
 
-    const fatigueDates = workouts
-      .filter((w) => {
-        if (!w.workoutMeta?.fatigueFlag) return false
-        const dateStr = w.summary?.startTimeIso ?? w.createdAt
-        const d = new Date(dateStr)
-        const now = new Date()
-        const diffDays = (now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24)
-        return diffDays <= 7
-      })
-      .map((w) => new Date(w.summary?.startTimeIso ?? w.createdAt))
-      .sort((a, b) => b.getTime() - a.getTime())
-
-    const fatigueLast7Days = fatigueDates.length
-
-    const lastFatigueDate = fatigueDates[0] ?? null
-
-    const fatigueRec = (() => {
-      if (!lastFatigueDate) return null
-      const now = new Date()
-      const diffDays = (now.getTime() - lastFatigueDate.getTime()) / (1000 * 60 * 60 * 24)
-      return diffDays < 1.5
-        ? 'Rekomendacja: dziś tylko easy 30–50 min albo wolne (bez akcentu).'
-        : 'Rekomendacja: kolejny akcent dopiero po 1 dniu spokojnym.'
-    })()
-
     return {
       totalWorkouts,
       totalDistanceKm,
@@ -117,10 +94,8 @@ const WorkoutsList = ({
       weekTotalWorkouts,
       weekTotalDistanceKm,
       weekTotalDurationSeconds,
-      fatigueLast7Days,
-      fatigueRec,
     }
-  }, [workouts])
+  }, [safeWorkouts])
 
   return (
     <section className="max-w-4xl mx-auto px-4 py-6">
@@ -167,17 +142,8 @@ const WorkoutsList = ({
         </div>
       </div>
 
-      {totals.fatigueLast7Days >= 2 && (
-        <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-          ⚠️ W ostatnich 7 dniach wykryto {totals.fatigueLast7Days} treningi z możliwym zmęczeniem.
-          {totals.fatigueRec && (
-            <div className="mt-1 text-amber-100">{totals.fatigueRec}</div>
-          )}
-        </div>
-      )}
-
       <div className="space-y-3">
-        {workouts.map((w) => {
+        {safeWorkouts.map((w) => {
           const distanceM =
             w.summary.trimmed?.distanceM ??
             w.summary.original?.distanceM ??
@@ -187,7 +153,7 @@ const WorkoutsList = ({
             w.summary.original?.durationSec ??
             0
           const distanceKm = (distanceM / 1000).toFixed(2)
-          const displayedDate = w.summary.startTimeIso ?? w.createdAt
+          const displayedDate = getWorkoutDate(w)
 
           return (
             <div
@@ -198,9 +164,6 @@ const WorkoutsList = ({
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <div className="font-semibold flex items-center gap-2">
                   <span>{displayedDate ? new Date(displayedDate).toLocaleString('pl-PL') : '—'}</span>
-                  {w.workoutMeta?.fatigueFlag === true && (
-                    <span title="Możliwe zmęczenie (wysokie RPE przy niskim obciążeniu)">⚠️</span>
-                  )}
                 </div>
                 <div className="flex items-center gap-4 text-slate-200">
                   <span>Dystans: {distanceKm} km</span>
@@ -216,7 +179,7 @@ const WorkoutsList = ({
             </div>
           )
         })}
-        {workouts.length === 0 && (
+        {safeWorkouts.length === 0 && (
           <div className="rounded-lg border border-dashed border-slate-700 bg-slate-900/30 px-4 py-3 text-sm text-slate-300">
             Brak zapisanych treningów.
           </div>

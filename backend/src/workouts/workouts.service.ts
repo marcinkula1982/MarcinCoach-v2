@@ -11,6 +11,8 @@ import { ImportWorkoutDto } from './dto/import-workout.dto'
 import { parseTcx } from '../utils/tcxParser'
 import { computeMetrics } from '../utils/metrics'
 import type { Express } from 'express'
+import type { WorkoutSummary } from '../types/workout.types'
+import type { IntensityBuckets } from '../types/metrics.types'
 
 @Injectable()
 export class WorkoutsService {
@@ -28,38 +30,92 @@ export class WorkoutsService {
     return val as T
   }
 
-  async create(userExternalId: string, dto: SaveWorkoutDto) {
-    if (!userExternalId) {
-      throw new BadRequestException('Missing user from session')
+  private safeReadSummary(raw: string | null | undefined) {
+    return this.safeJsonParse(raw) ?? {}
+  }
+
+  private safeReadMeta(raw: string | null | undefined) {
+    return this.safeJsonParse(raw) ?? undefined
+  }
+
+  private computeIntensityBucketsFromTrackpoints(
+    trackpoints: Array<{ time: string; distanceMeters: number | null }>,
+  ): IntensityBuckets {
+    const buckets: IntensityBuckets = { z1Sec: 0, z2Sec: 0, z3Sec: 0, z4Sec: 0, z5Sec: 0 }
+
+    const toSec = (iso: string) => Math.floor(new Date(iso).getTime() / 1000)
+
+    // progi tempa w sekundach / km (Twoje strefy)
+    const P = {
+      z1Min: 6 * 60 + 45, // 6:45
+      z1Max: 7 * 60 + 30, // 7:30
+      z2Min: 5 * 60 + 45, // 5:45
+      z2Max: 6 * 60 + 45, // 6:45
+      z3Min: 4 * 60 + 45, // 4:45
+      z3Max: 5 * 60 + 5, // 5:05
+      z4Min: 4 * 60 + 30, // 4:30
+      z4Max: 4 * 60 + 45, // 4:45
+      z5Max: 4 * 60 + 30, // <4:30
     }
 
-    const user = await this.prisma.user.upsert({
-      where: { externalId: userExternalId },
-      update: {},
-      create: { externalId: userExternalId },
-    })
+    const assign = (paceSecPerKm: number, dtSec: number) => {
+      if (!Number.isFinite(paceSecPerKm) || dtSec <= 0) return
+
+      // jeśli poza zakresem (wolniej niż Z1Max albo w „dziurze” 4:25–4:30), ignorujemy
+      if (paceSecPerKm >= P.z1Min && paceSecPerKm <= P.z1Max) buckets.z1Sec += dtSec
+      else if (paceSecPerKm >= P.z2Min && paceSecPerKm < P.z2Max) buckets.z2Sec += dtSec
+      else if (paceSecPerKm >= P.z3Min && paceSecPerKm <= P.z3Max) buckets.z3Sec += dtSec
+      else if (paceSecPerKm >= P.z4Min && paceSecPerKm < P.z4Max) buckets.z4Sec += dtSec
+      else if (paceSecPerKm < P.z5Max) buckets.z5Sec += dtSec
+    }
+
+    for (let i = 1; i < trackpoints.length; i++) {
+      const prev = trackpoints[i - 1]
+      const cur = trackpoints[i]
+
+      if (!prev?.time || !cur?.time) continue
+      const t0 = toSec(prev.time)
+      const t1 = toSec(cur.time)
+      const dt = t1 - t0
+      if (dt <= 0 || dt > 30) continue // twardy filtr na dziury/artefakty
+
+      const d0 = prev.distanceMeters
+      const d1 = cur.distanceMeters
+      if (d0 == null || d1 == null) continue
+
+      const dd = d1 - d0
+      if (dd <= 0) continue
+
+      // pace = dt / (dd/1000)
+      const pace = dt / (dd / 1000)
+      assign(pace, dt)
+    }
+
+    return buckets
+  }
+
+  async create(userId: number, username: string | undefined, dto: SaveWorkoutDto) {
+    if (!userId) {
+      throw new BadRequestException('Missing user from session')
+    }
 
     // anti-duplicate (same user + same tcx start time + same duration + same distance)
     // NOTE: Race condition possible - two parallel requests may both pass this check.
     // TODO: Use unique hash (e.g., sha1(startTime + duration + distance + userId)) or partial unique index
-    const startTimeIso = (dto as any)?.summary?.startTimeIso ?? null
+    const startTimeIso = dto.summary?.startTimeIso ?? null
     const durationSec =
-      (dto as any)?.summary?.trimmed?.durationSec ??
-      (dto as any)?.summary?.original?.durationSec ??
-      null
+      dto.summary?.trimmed?.durationSec ?? dto.summary?.original?.durationSec ?? null
     const distanceM =
-      (dto as any)?.summary?.trimmed?.distanceM ??
-      (dto as any)?.summary?.original?.distanceM ??
-      null
+      dto.summary?.trimmed?.distanceM ?? dto.summary?.original?.distanceM ?? null
 
-    console.log('[CREATE] userExternalId:', userExternalId)
+    console.log('[CREATE] userId:', userId, 'username:', username)
     console.log('[CREATE] startTimeIso:', startTimeIso)
     console.log('[CREATE] durationSec:', durationSec)
     console.log('[CREATE] distanceM:', distanceM)
 
     if (startTimeIso && durationSec != null && distanceM != null) {
       const recent = await this.prisma.workout.findMany({
-        where: { userId: user.id },
+        where: { userId },
         orderBy: { createdAt: 'desc' },
         take: 50,
         select: { id: true, summary: true },
@@ -92,15 +148,19 @@ export class WorkoutsService {
       }
     }
 
+    // dla ręcznych zapisów używamy prostego, unikalnego klucza (brak deduplikacji)
+    const dedupeKey = `MANUAL:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`
+
     const workout = await this.prisma.workout.create({
       data: {
-        userId: user.id,
+        userId,
         action: dto.action,
         kind: dto.kind,
         summary: JSON.stringify(dto.summary),
         raceMeta: dto.raceMeta ? JSON.stringify(dto.raceMeta) : null,
         workoutMeta: dto.workoutMeta ? JSON.stringify(dto.workoutMeta) : null,
         tcxRaw: dto.tcxRaw,
+        dedupeKey,
         raw: {
           create: {
             xml: dto.tcxRaw,
@@ -114,7 +174,7 @@ export class WorkoutsService {
 
     return {
       id: workout.id,
-      userId: userExternalId,
+      userId,
       action: workout.action,
       kind: workout.kind,
       summary: this.safeJsonParse(workout.summary) ?? {},
@@ -124,15 +184,9 @@ export class WorkoutsService {
     }
   }
 
-  async findAllForUser(userExternalId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { externalId: userExternalId },
-    })
-
-    if (!user) return []
-
+  async findAllForUser(userId: number) {
     const workouts = await this.prisma.workout.findMany({
-      where: { userId: user.id },
+      where: { userId },
       select: {
         id: true,
         action: true,
@@ -148,7 +202,7 @@ export class WorkoutsService {
 
     return workouts.map((w) => ({
       id: w.id,
-      userId: userExternalId,
+      userId,
       action: w.action,
       kind: w.kind,
       summary: this.safeJsonParse(w.summary) ?? {},
@@ -158,7 +212,7 @@ export class WorkoutsService {
     }))
   }
 
-  async uploadTcxFile(file: Express.Multer.File, userExternalId: string) {
+  async uploadTcxFile(file: Express.Multer.File, userId: number, username: string | undefined) {
     if (!file || !file.buffer) {
       throw new BadRequestException('Brak pliku do zapisu')
     }
@@ -171,25 +225,27 @@ export class WorkoutsService {
     const parsed = parseTcx(rawTcx)
     const metrics = computeMetrics(parsed.trackpoints)
 
-    const summary = {
+    const intensity = this.computeIntensityBucketsFromTrackpoints(
+      parsed.trackpoints.map((tp) => ({
+        time: tp.time,
+        distanceMeters: tp.distanceMeters ?? null,
+      })),
+    )
+
+    const summary: WorkoutSummary = {
       fileName: file.originalname ?? 'upload.tcx',
       startTimeIso: parsed.startTimeIso,
       original: metrics,
       trimmed: metrics,
+      intensity,
       totalPoints: parsed.trackpoints.length,
       selectedPoints: parsed.trackpoints.length,
     }
 
-    console.log('[UPLOAD] userExternalId:', userExternalId)
+    console.log('[UPLOAD] userId:', userId, 'username:', username)
     console.log('[UPLOAD] startTimeIso:', summary.startTimeIso)
     console.log('[UPLOAD] durationSec:', summary.trimmed?.durationSec ?? summary.original?.durationSec)
     console.log('[UPLOAD] distanceM:', summary.trimmed?.distanceM ?? summary.original?.distanceM)
-
-    const user = await this.prisma.user.upsert({
-      where: { externalId: userExternalId },
-      update: {},
-      create: { externalId: userExternalId },
-    })
 
     // anti-duplicate (same user + same tcx start time + same duration + same distance)
     // NOTE: Race condition possible - two parallel requests may both pass this check.
@@ -200,7 +256,7 @@ export class WorkoutsService {
 
     if (startTimeIso && durationSec != null && distanceM != null) {
       const recent = await this.prisma.workout.findMany({
-        where: { userId: user.id },
+        where: { userId },
         orderBy: { createdAt: 'desc' },
         take: 50,
         select: { id: true, summary: true },
@@ -236,14 +292,23 @@ export class WorkoutsService {
       }
     }
 
+    // DedupeKey dla uploadów lokalnych – traktujemy jak MANUAL_UPLOAD bez sourceActivityId
+    const { dedupeKey } = this.buildDedupeKey({
+      source: 'MANUAL_UPLOAD',
+      sourceActivityId: null,
+      summary,
+      fallbackStartIso: summary.startTimeIso ?? null,
+    })
+
     const workout = await this.prisma.workout.create({
       data: {
-        userId: user.id,
+        userId,
         action: 'upload',
         kind: 'training',
         summary: JSON.stringify(summary),
         raceMeta: null,
         tcxRaw: rawTcx,
+        dedupeKey,
         source: 'MANUAL_UPLOAD',
         sourceActivityId: null,
         sourceUserId: null,
@@ -258,7 +323,7 @@ export class WorkoutsService {
 
     return {
       id: workout.id,
-      userId: userExternalId,
+      userId,
       action: workout.action,
       kind: workout.kind,
       summary: this.safeJsonParse(workout.summary) ?? {},
@@ -268,16 +333,10 @@ export class WorkoutsService {
     }
   }
 
-  async importWorkout(userExternalId: string, dto: ImportWorkoutDto) {
-    if (!userExternalId) {
+  async importWorkout(userId: number, username: string | undefined, dto: ImportWorkoutDto) {
+    if (!userId) {
       throw new BadRequestException('Missing user from session')
     }
-
-    const user = await this.prisma.user.upsert({
-      where: { externalId: userExternalId },
-      update: {},
-      create: { externalId: userExternalId },
-    })
 
     // Walidacja: co najmniej jedno z tcxRaw/fitRaw lub sourceActivityId
     const hasRaw = Boolean(dto.tcxRaw) || Boolean(dto.fitRaw)
@@ -287,67 +346,19 @@ export class WorkoutsService {
       throw new BadRequestException('Either tcxRaw/fitRaw or sourceActivityId is required')
     }
 
-    // Normalizacja: trim i uppercase
-    const normalizedSource = dto.source.toUpperCase() as 'MANUAL_UPLOAD' | 'GARMIN' | 'STRAVA'
-    const normalizedSourceActivityId = dto.sourceActivityId?.trim() ?? null
+    const {
+      source: normalizedSource,
+      sourceActivityId: normalizedSourceActivityId,
+      dedupeKey,
+    } = this.buildDedupeKey({
+      source: dto.source,
+      sourceActivityId: dto.sourceActivityId ?? null,
+      summary: dto.summary,
+      fallbackStartIso: dto.startTimeIso,
+    })
 
-    // Deduplikacja priorytetowo po (userId, source, sourceActivityId)
-    if (normalizedSourceActivityId) {
-      const existing = await this.prisma.workout.findFirst({
-        where: {
-          userId: user.id,
-          source: normalizedSource,
-          sourceActivityId: normalizedSourceActivityId,
-        },
-      })
-
-      if (existing) {
-        throw new ConflictException('Workout already exists')
-      }
-    }
-
-    // Fallback do obecnej logiki (start+duration+distance) jeśli brak sourceActivityId
-    if (!normalizedSourceActivityId) {
-      const startTimeIso = dto.startTimeIso ?? null
-      const durationSec =
-        dto.summary?.trimmed?.durationSec ?? dto.summary?.original?.durationSec ?? null
-      const distanceM =
-        dto.summary?.trimmed?.distanceM ?? dto.summary?.original?.distanceM ?? null
-
-      if (startTimeIso && durationSec != null && distanceM != null) {
-        const recent = await this.prisma.workout.findMany({
-          where: { userId: user.id },
-          orderBy: { createdAt: 'desc' },
-          take: 50,
-          select: { id: true, summary: true },
-        })
-
-        // Normalizacja liczb (zaokrąglenie do int) dla porównania
-        const norm = (v: number | null) => (v != null ? Math.round(v) : null)
-
-        for (const w of recent) {
-          const parsedSummary = this.safeJsonParse(w.summary)
-          if (!parsedSummary) continue
-
-          const candidateStart = parsedSummary?.startTimeIso ?? null
-          const candidateDuration =
-            parsedSummary?.trimmed?.durationSec ?? parsedSummary?.original?.durationSec ?? null
-          const candidateDistance =
-            parsedSummary?.trimmed?.distanceM ?? parsedSummary?.original?.distanceM ?? null
-
-          if (
-            candidateStart === startTimeIso &&
-            norm(candidateDuration) === norm(durationSec) &&
-            norm(candidateDistance) === norm(distanceM)
-          ) {
-            throw new ConflictException('Workout already exists')
-          }
-        }
-      }
-    }
-
-    const workoutData: any = {
-      userId: user.id,
+    const workoutData = {
+      userId,
       action: 'import',
       kind: 'training',
       summary: JSON.stringify(dto.summary),
@@ -360,29 +371,41 @@ export class WorkoutsService {
       sourceUserId: dto.sourceUserId ?? null,
     }
 
-    // raw relacja tylko dla TCX
-    if (dto.tcxRaw) {
-      workoutData.raw = {
-        create: {
-          xml: dto.tcxRaw,
-        },
+    try {
+      const created = await this.prisma.workout.create({
+        data: { ...workoutData, dedupeKey },
+      })
+
+      return {
+        id: created.id,
+        userId,
+        action: created.action,
+        kind: created.kind,
+        summary: this.safeJsonParse(created.summary) ?? {},
+        raceMeta: this.safeJsonParse(created.raceMeta) ?? undefined,
+        workoutMeta: this.safeJsonParse(created.workoutMeta) ?? undefined,
+        createdAt: created.createdAt,
       }
-    }
-
-    const workout = await this.prisma.workout.create({
-      data: workoutData,
-      include: { raw: false },
-    })
-
-    return {
-      id: workout.id,
-      userId: userExternalId,
-      action: workout.action,
-      kind: workout.kind,
-      summary: this.safeJsonParse(workout.summary) ?? {},
-      raceMeta: this.safeJsonParse(workout.raceMeta) ?? undefined,
-      workoutMeta: this.safeJsonParse(workout.workoutMeta) ?? undefined,
-      createdAt: workout.createdAt,
+    } catch (e: any) {
+      // P2002 = unique constraint failed on (userId, dedupeKey) -> traktujemy jako istniejący trening
+      if (e?.code === 'P2002') {
+        const existing = await this.prisma.workout.findFirst({
+          where: { userId, dedupeKey },
+        })
+        if (existing) {
+          return {
+            id: existing.id,
+            userId,
+            action: existing.action,
+            kind: existing.kind,
+            summary: this.safeReadSummary(existing.summary),
+            raceMeta: this.safeReadMeta(existing.raceMeta),
+            workoutMeta: this.safeReadMeta(existing.workoutMeta),
+            createdAt: existing.createdAt,
+          }
+        }
+      }
+      throw e
     }
   }
 
@@ -399,7 +422,7 @@ export class WorkoutsService {
         workoutMeta: true,
         createdAt: true,
         updatedAt: true,
-        tcxRaw: includeRaw,
+        tcxRaw: true,
       },
     })
 
@@ -415,15 +438,15 @@ export class WorkoutsService {
       workoutMeta: this.safeJsonParse(w.workoutMeta) ?? undefined,
       createdAt: w.createdAt,
       updatedAt: w.updatedAt,
-      tcxRaw: includeRaw ? (w as any).tcxRaw : undefined,
+      tcxRaw: includeRaw ? w.tcxRaw : undefined,
     }
   }
 
-  async findOneForUser(id: number, username: string, includeRaw = false) {
+  async findOneForUser(id: number, userId: number, includeRaw = false) {
     const workout = await this.prisma.workout.findFirst({
       where: {
         id,
-        user: { externalId: username },
+        userId,
       },
       select: {
         id: true,
@@ -435,7 +458,7 @@ export class WorkoutsService {
         workoutMeta: true,
         createdAt: true,
         updatedAt: true,
-        tcxRaw: includeRaw,
+        tcxRaw: true,
       },
     })
 
@@ -445,7 +468,7 @@ export class WorkoutsService {
 
     return {
       id: workout.id,
-      userId: username,
+      userId,
       action: workout.action,
       kind: workout.kind,
       summary: this.safeJsonParse(workout.summary) ?? {},
@@ -453,19 +476,19 @@ export class WorkoutsService {
       workoutMeta: this.safeJsonParse(workout.workoutMeta) ?? undefined,
       createdAt: workout.createdAt,
       updatedAt: workout.updatedAt,
-      tcxRaw: includeRaw ? (workout as any).tcxRaw : undefined,
+      tcxRaw: includeRaw ? workout.tcxRaw : undefined,
     }
   }
 
   async updateMeta(
     id: number,
     workoutMeta: UpdateWorkoutMetaDto['workoutMeta'],
-    username: string,
+    userId: number,
   ) {
     const workout = await this.prisma.workout.findFirst({
       where: {
         id,
-        user: { externalId: username },
+        userId,
       },
       select: { id: true },
     })
@@ -493,11 +516,11 @@ export class WorkoutsService {
     }
   }
 
-  async deleteByIdForUser(id: number, username: string) {
+  async deleteByIdForUser(id: number, userId: number) {
     const workout = await this.prisma.workout.findFirst({
       where: {
         id,
-        user: { externalId: username },
+        userId,
       },
       select: { id: true },
     })
@@ -515,18 +538,12 @@ export class WorkoutsService {
    * Returns workout analytics data in a flattened format
    * Similar to SQL query extracting workout_dt, distance_km, duration_min, and workoutMeta fields
    */
-  async getAnalyticsForUser(userExternalId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { externalId: userExternalId },
-    })
-
-    if (!user) return []
-
+  async getAnalyticsForUser(userId: number) {
     const round = (v: number | null, d = 2) =>
       typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 10 ** d) / 10 ** d : null
 
     const workouts = await this.prisma.workout.findMany({
-      where: { userId: user.id },
+      where: { userId },
       select: {
         id: true,
         createdAt: true,
@@ -590,7 +607,7 @@ export class WorkoutsService {
     return `${year}-W${String(weekNo).padStart(2, '0')}`
   }
 
-  async getAnalyticsSummaryForUser(userId: string, from?: string, to?: string) {
+  async getAnalyticsSummaryForUser(userId: number, from?: string, to?: string) {
     const rows = await this.getAnalyticsForUser(userId)
 
     // Parse dates with proper time formatting
@@ -656,6 +673,56 @@ export class WorkoutsService {
       .sort((a, b) => a.day.localeCompare(b.day)) // rosnąco po dniu
 
     return { totals, byWeek, byDay }
+  }
+
+  // ---------- Dedupe helpers ----------
+
+  private normalizeSource(source?: string | null): string {
+    if (!source) return 'MANUAL_UPLOAD'
+    const trimmed = source.trim().toUpperCase()
+    return trimmed || 'MANUAL_UPLOAD'
+  }
+
+  private normalizeId(value?: string | null): string | null {
+    if (!value) return null
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : null
+  }
+
+  private buildDedupeKey(params: {
+    source?: string | null
+    sourceActivityId?: string | null
+    summary: WorkoutSummary
+    fallbackStartIso?: string | null
+  }): { source: string; sourceActivityId: string | null; dedupeKey: string } {
+    const sourceNorm = this.normalizeSource(params.source)
+    const idNorm = this.normalizeId(params.sourceActivityId ?? null)
+
+    if (idNorm) {
+      return {
+        source: sourceNorm,
+        sourceActivityId: idNorm,
+        dedupeKey: `${sourceNorm}:${idNorm}`,
+      }
+    }
+
+    const summary = params.summary
+    const workoutDtIso =
+      summary.startTimeIso ?? params.fallbackStartIso ?? new Date().toISOString()
+
+    const durationSec =
+      summary.trimmed?.durationSec ?? summary.original?.durationSec ?? 0
+    const distanceM =
+      summary.trimmed?.distanceM ?? summary.original?.distanceM ?? 0
+
+    const durationSecNorm = Math.round(durationSec / 5) * 5
+    const distanceMNorm = Math.round(distanceM / 10) * 10
+
+    return {
+      source: sourceNorm,
+      sourceActivityId: idNorm,
+      dedupeKey: `${sourceNorm}:t=${workoutDtIso}:d=${durationSecNorm}:m=${distanceMNorm}`,
+    }
   }
 }
 

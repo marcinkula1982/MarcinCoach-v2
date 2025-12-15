@@ -13,39 +13,48 @@ model User {
   workouts   Workout[]
   createdAt  DateTime  @default(now())
 
+  /// Nawigacyjna relacja do konta logowania (AuthUser) – nie używana do logiki domenowej.
+  authUser AuthUser? @relation("AuthUserToUser")
+
+  /// Nawigacyjna relacja do profilu – dane preferencji/limitów.
+  profile UserProfile? @relation("UserProfileToUser")
+
   @@index([externalId])
 }
 
 model Workout {
-  id         Int            @id @default(autoincrement())
-  userId     Int
-  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  action     String
-  kind       String
-  summary    String
-  raceMeta   String?
+  id               Int            @id @default(autoincrement())
+  userId           Int
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action           String
+  kind             String
+  summary          String
+  raceMeta         String?
   // SQLite does not support native JSON; store as textified JSON string
-  workoutMeta String?
-  tcxRaw     String?        
-  fitRaw     String?  // base64 albo tekst (na start)
-  raw        WorkoutRawTcx?
-  source           String @default("MANUAL_UPLOAD")
+  workoutMeta      String?
+  tcxRaw           String?
+  fitRaw           String? // base64 albo tekst (na start)
+  raw              WorkoutRawTcx?
+  source           String         @default("MANUAL_UPLOAD")
   sourceActivityId String?
   sourceUserId     String?
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
+  /// Stabilny klucz deduplikacji per użytkownik (source + aktywność lub znormalizowany start/długość/dystans)
+  dedupeKey        String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
+ @@unique([userId, dedupeKey], name: "userId_dedupeKey")
   @@index([userId])
   @@index([userId, createdAt])
   @@index([userId, source, sourceActivityId])
 }
 
 model WorkoutRawTcx {
-  id         Int      @id @default(autoincrement())
-  workoutId  Int      @unique
-  xml        String
-  createdAt  DateTime @default(now())
-  workout    Workout  @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  id        Int      @id @default(autoincrement())
+  workoutId Int      @unique
+  xml       String
+  createdAt DateTime @default(now())
+  workout   Workout  @relation(fields: [workoutId], references: [id], onDelete: Cascade)
 }
 
 model AuthUser {
@@ -54,15 +63,32 @@ model AuthUser {
   passwordHash String
   createdAt    DateTime  @default(now())
   sessions     Session[]
+  userId       Int       @unique
+  user         User      @relation("AuthUserToUser", fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Session {
   id         Int       @id @default(autoincrement())
   token      String    @unique
-  userId     Int
-  user       AuthUser  @relation(fields: [userId], references: [id])
+  authUserId Int
+  user       AuthUser  @relation(fields: [authUserId], references: [id])
   createdAt  DateTime  @default(now())
-  expiresAt DateTime?
+  expiresAt  DateTime?
   lastSeenAt DateTime?
 }
 
+model UserProfile {
+  id               Int      @id @default(autoincrement())
+  userId           Int      @unique
+  user             User     @relation("UserProfileToUser", fields: [userId], references: [id], onDelete: Cascade)
+  /// JSON/text, np. "[1,2,4,6]" – preferowane dni biegania (ISO: pon=1)
+  preferredRunDays String? // textified JSON
+  /// Preferowana nawierzchnia (np. "ROAD", "TRAIL") – na razie jako string
+  preferredSurface String?
+  /// Cele treningowe w formie JSON/text
+  goals            String? // textified JSON
+  /// Ograniczenia / konta w formie JSON/text
+  constraints      String? // textified JSON
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}

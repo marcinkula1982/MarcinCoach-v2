@@ -7,6 +7,14 @@ export type Metrics = {
   count: number
 }
 
+export type IntensityBuckets = {
+  z1Sec: number
+  z2Sec: number
+  z3Sec: number
+  z4Sec: number
+  z5Sec: number
+}
+
 
 
 

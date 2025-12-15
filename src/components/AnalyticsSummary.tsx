@@ -1,201 +1,314 @@
 import { useEffect, useState } from 'react'
 import client from '../api/client'
 
-type PlanComplianceCounts = {
-  planned: number
-  modified: number
-  unplanned: number
-}
-
-type Totals = {
-  workouts: number
-  distanceKm: number
-  durationMin: number
-  planCompliance: PlanComplianceCounts
-  fatigueFlags: number
-}
-
-type ByWeekRow = {
-  week: string
-  workouts: number
-  distanceKm: number
-  durationMin: number
-}
-
-type ByDayRow = {
-  day: string // YYYY-MM-DD
-  workouts: number
-  distanceKm: number
-  durationMin: number
-}
-
-type SummaryResponse = {
-  totals: Totals
-  byWeek: ByWeekRow[]
-  byDay?: ByDayRow[]
+type Summary = {
+  totals: {
+    workouts: number
+    distanceKm: number
+    durationMin: number
+    planCompliance: {
+      planned: number
+      modified: number
+      unplanned: number
+    }
+  }
+  byWeek: { week: string; workouts: number; distanceKm: number; durationMin: number }[]
+  byDay?: { day: string; workouts: number; distanceKm: number; durationMin: number }[]
 }
 
 export default function AnalyticsSummary() {
-  const [data, setData] = useState<SummaryResponse | null>(null)
-  const [err, setErr] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [data, setData] = useState<Summary | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // pola zakresu startują puste – pierwszy fetch bez filtrów
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+
+  const load = async (useFilters: boolean) => {
+    setError(null)
+    try {
+      const res = await client.get<Summary>('/workouts/analytics/summary', {
+        params: useFilters
+          ? {
+              ...(from ? { from } : {}),
+              ...(to ? { to } : {}),
+            }
+          : undefined,
+      })
+      setData(res.data)
+    } catch (e: any) {
+      setData(null)
+      setError(e?.response?.data?.message ?? 'Błąd pobierania analytics')
+    }
+  }
 
   useEffect(() => {
-    let alive = true
-    setLoading(true)
-    setErr(null)
-
-    client
-      .get<SummaryResponse>('/workouts/analytics/summary')
-      .then((res) => {
-        if (!alive) return
-        setData(res.data)
-      })
-      .catch((e) => {
-        if (!alive) return
-        const msg =
-          e?.response?.data?.message ||
-          e?.response?.data ||
-          e?.message ||
-          String(e)
-        setErr(String(msg))
-      })
-      .finally(() => {
-        if (!alive) return
-        setLoading(false)
-      })
-
-    return () => {
-      alive = false
-    }
+    load(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  if (loading) {
+  if (error) {
     return (
-      <div className="mt-8 rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-300">
-        Ładowanie analytics…
+      <div className="mt-6 rounded border border-red-500/40 bg-red-900/30 p-4 text-sm">
+        {error}
       </div>
     )
   }
 
-  if (err) {
-    return (
-      <div className="mt-8 rounded-xl border border-red-500/40 bg-red-900/30 p-4 text-sm text-red-100">
-        Analytics error: {err}
-      </div>
-    )
+  if (!data) {
+    return <div className="mt-6 text-sm text-slate-400">Ładowanie analytics…</div>
   }
 
-  if (!data) return null
+  const totals = data.totals
+  const byWeek = data.byWeek ?? []
+  const byDay = data.byDay ?? []
+  const avgKmPerWorkout =
+    totals.workouts > 0 ? totals.distanceKm / totals.workouts : 0
+  const avgMinPerWorkout =
+    totals.workouts > 0 ? totals.durationMin / totals.workouts : 0
 
-  const t = data.totals
+  const topDays = [...byDay]
+    .sort((a, b) => (b.distanceKm ?? 0) - (a.distanceKm ?? 0))
+    .slice(0, 3)
+
+  // === Focus tygodnia + Wnioski (MVP) ===
+  const totalWorkouts = totals?.workouts ?? 0
+  const totalKm = totals?.distanceKm ?? 0
+  const totalMin = totals?.durationMin ?? 0
+
+  const plan = totals?.planCompliance ?? { planned: 0, modified: 0, unplanned: 0 }
+  const unplanned = plan.unplanned ?? 0
+  const planned = plan.planned ?? 0
+  const modified = plan.modified ?? 0
+
+  let plannedPct: number | null = null
+  let modifiedPct: number | null = null
+  let unplannedPct: number | null = null
+
+  if (totalWorkouts > 0) {
+    const rawPlanned = (planned / totalWorkouts) * 100
+    const rawModified = (modified / totalWorkouts) * 100
+    plannedPct = Math.round(rawPlanned)
+    modifiedPct = Math.round(rawModified)
+    unplannedPct = 100 - plannedPct - modifiedPct
+
+    // zabezpieczenie na wypadek zaokrągleń spoza [0,100]
+    if (unplannedPct < 0) {
+      unplannedPct = 0
+    }
+  }
+
+  // Posortowane tygodnie – kanoniczna kolejność zarówno dla logiki trendu,
+  // jak i dla renderowanej tabeli tygodni.
+  const weeksSorted = [...byWeek].sort((a, b) => String(a.week).localeCompare(String(b.week)))
+  const lastWeek = weeksSorted.length >= 1 ? weeksSorted[weeksSorted.length - 1] : null
+  const prevWeek = weeksSorted.length >= 2 ? weeksSorted[weeksSorted.length - 2] : null
+
+  const lastKm = lastWeek?.distanceKm ?? 0
+  const prevKm = prevWeek?.distanceKm ?? 0
+  const lastMin = lastWeek?.durationMin ?? 0
+  const prevMin = prevWeek?.durationMin ?? 0
+  const deltaKmPct = prevKm > 0 ? ((lastKm - prevKm) / prevKm) * 100 : null
+  const volumeJump = deltaKmPct !== null && deltaKmPct > 30
+  const trendBadge =
+    deltaKmPct === null ? '—' : deltaKmPct > 0 ? '▲' : deltaKmPct < 0 ? '▼' : '—'
+
+  const focusText = (() => {
+    if (totalWorkouts === 0) {
+      return 'Zacznij od regularności — 3 spokojne biegi w tygodniu.'
+    }
+    if (totalWorkouts <= 2) {
+      return 'Regularność — celuj w 3 treningi tygodniowo (spokojnie).'
+    }
+
+    if (unplanned > planned + modified) {
+      return 'Planowanie — zaplanuj szkic tygodnia (pon–nd) i trzymaj easy jako bazę.'
+    }
+
+    if (totalWorkouts >= 3 && avgMinPerWorkout < 40) {
+      return 'Objętość — wydłuż jeden trening easy do 45–60 min.'
+    }
+    if (totalWorkouts >= 4 && avgMinPerWorkout > 70) {
+      return 'Regeneracja — bez dokładania intensywności, trzymaj łatwo.'
+    }
+    return 'Baza — trzymaj spokojne biegi i dokładność zapisu (meta / plan).'
+  })()
+
+  const wnioskiText = (() => {
+    const s1 = `W okresie: ${totalWorkouts} treningów, ${totalKm.toFixed(1)} km, ${totalMin.toFixed(0)} min.`
+    let s2 = ''
+    if (lastWeek && prevWeek) {
+      const pct =
+        deltaKmPct === null ? '—' : `${deltaKmPct >= 0 ? '+' : ''}${deltaKmPct.toFixed(0)}%`
+      s2 = `Ostatni tydzień ${String(lastWeek.week)}: ${lastKm.toFixed(1)} km vs ${prevKm.toFixed(
+        1,
+      )} km (${pct}); ${lastMin.toFixed(0)} min vs ${prevMin.toFixed(0)} min.`
+    }
+    const s3 = volumeJump
+      ? 'Uwaga: skok objętości >30% — ryzyko przeciążenia, trzymaj easy.'
+      : ''
+
+    return [s1, s2, s3].filter(Boolean).slice(0, 3).join(' ')
+  })()
 
   return (
-    <section className="mt-8 rounded-2xl bg-slate-900/60 p-6 shadow-lg ring-1 ring-white/5">
-      <div className="flex items-start justify-between gap-4">
+    <section className="mt-10 space-y-6" aria-label="Twoja historia (analytics)">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-indigo-300/80">
-            Analytics
-          </p>
-          <h2 className="text-xl font-semibold text-white">Podsumowanie</h2>
-          <p className="mt-1 text-sm text-slate-300">
-            Read-only z backendu: <span className="font-mono">/workouts/analytics/summary</span>
-          </p>
+          <p className="text-xs uppercase tracking-[0.25em] text-indigo-300/80">Twoja historia</p>
+          <h2 className="text-xl font-semibold">Analityka (read-only)</h2>
         </div>
-      </div>
 
-      {/* Totals */}
-      <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card label="Treningi" value={t.workouts} />
-        <Card label="Dystans" value={`${t.distanceKm.toFixed(2)} km`} />
-        <Card label="Czas" value={`${t.durationMin.toFixed(2)} min`} />
-        <Card label="Fatigue flags" value={t.fatigueFlags} />
-      </div>
-
-      {/* Compliance */}
-      <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/30 p-4">
-        <div className="text-sm text-slate-200">Zgodność z planem</div>
-        <div className="mt-2 grid gap-3 sm:grid-cols-3">
-          <Mini label="planned" value={t.planCompliance.planned} />
-          <Mini label="modified" value={t.planCompliance.modified} />
-          <Mini label="unplanned" value={t.planCompliance.unplanned} />
-        </div>
-      </div>
-
-      {/* byWeek */}
-      <div className="mt-6">
-        <div className="text-sm text-slate-200">Tygodnie (ISO)</div>
-        <div className="mt-2 overflow-hidden rounded-xl border border-slate-800">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-950/40 text-slate-300">
-              <tr>
-                <th className="px-3 py-2 text-left">Tydzień</th>
-                <th className="px-3 py-2 text-right">Treningi</th>
-                <th className="px-3 py-2 text-right">km</th>
-                <th className="px-3 py-2 text-right">min</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              {data.byWeek.map((w) => (
-                <tr key={w.week} className="text-slate-100">
-                  <td className="px-3 py-2 font-mono">{w.week}</td>
-                  <td className="px-3 py-2 text-right">{w.workouts}</td>
-                  <td className="px-3 py-2 text-right">{w.distanceKm.toFixed(2)}</td>
-                  <td className="px-3 py-2 text-right">{w.durationMin.toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* byDay */}
-      {data.byDay?.length ? (
-        <div className="mt-6">
-          <div className="text-sm text-slate-200">Dni</div>
-          <div className="mt-2 overflow-hidden rounded-xl border border-slate-800">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-950/40 text-slate-300">
-                <tr>
-                  <th className="px-3 py-2 text-left">Dzień</th>
-                  <th className="px-3 py-2 text-right">Treningi</th>
-                  <th className="px-3 py-2 text-right">km</th>
-                  <th className="px-3 py-2 text-right">min</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {data.byDay.map((d) => (
-                  <tr key={d.day} className="text-slate-100">
-                    <td className="px-3 py-2 font-mono">{d.day}</td>
-                    <td className="px-3 py-2 text-right">{d.workouts}</td>
-                    <td className="px-3 py-2 text-right">{d.distanceKm.toFixed(2)}</td>
-                    <td className="px-3 py-2 text-right">{d.durationMin.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div className="flex flex-wrap items-end gap-2 text-sm" aria-label="Filtry historii">
+          <div className="flex flex-col">
+            <label className="text-xs text-slate-400">Od</label>
+            <input
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              className="rounded border border-slate-700 bg-slate-900 px-2 py-1"
+            />
           </div>
+          <div className="flex flex-col">
+            <label className="text-xs text-slate-400">Do</label>
+            <input
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              className="rounded border border-slate-700 bg-slate-900 px-2 py-1"
+            />
+          </div>
+          <button
+            onClick={() => load(true)}
+            className="rounded bg-slate-700 px-3 py-2 hover:bg-slate-600"
+          >
+            Odśwież
+          </button>
         </div>
-      ) : null}
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded bg-slate-800 p-4">
+          <div className="text-sm text-slate-400">Treningi</div>
+          <div className="text-2xl">{totals.workouts}</div>
+        </div>
+        <div className="rounded bg-slate-800 p-4">
+          <div className="text-sm text-slate-400">Dystans</div>
+          <div className="text-2xl">{totals.distanceKm.toFixed(1)} km</div>
+        </div>
+        <div className="rounded bg-slate-800 p-4">
+          <div className="text-sm text-slate-400">Czas</div>
+          <div className="text-2xl">{totals.durationMin.toFixed(0)} min</div>
+        </div>
+        <div className="rounded bg-slate-800 p-4">
+          <div className="text-sm text-slate-400">Średnio / trening</div>
+          <div className="text-2xl">{avgKmPerWorkout.toFixed(1)} km</div>
+          <div className="text-sm text-slate-400">{avgMinPerWorkout.toFixed(0)} min</div>
+        </div>
+      </div>
+
+      {/* Focus tygodnia */}
+      <div className="rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3">
+        <div className="text-xs uppercase tracking-wider text-slate-400">Focus tygodnia</div>
+        <div className="mt-1 text-sm text-slate-100">{focusText}</div>
+      </div>
+
+      {/* Wnioski */}
+      <div
+        className={`rounded-xl border px-4 py-3 ${
+          volumeJump ? 'border-amber-500/40 bg-amber-500/10' : 'border-slate-800 bg-slate-900/40'
+        }`}
+      >
+        <div className="text-xs uppercase tracking-wider text-slate-400">Wnioski</div>
+        <div className={`mt-1 text-sm ${volumeJump ? 'text-amber-100' : 'text-slate-200'}`}>
+          {wnioskiText || 'Brak szczegółowych wniosków.'}
+        </div>
+        {totalWorkouts > 0 && plannedPct !== null && modifiedPct !== null && unplannedPct !== null && (
+          <div className="mt-2 text-xs text-slate-300">
+            Plan: {plannedPct}% planned · {modifiedPct}% modified · {unplannedPct}% unplanned
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h3 className="mb-2 text-lg font-semibold">Tygodnie</h3>
+        <table className="w-full border border-slate-700 text-sm">
+          <thead className="bg-slate-800">
+            <tr>
+              <th className="p-2 text-left">Tydzień</th>
+              <th className="p-2 text-right">Treningi</th>
+              <th className="p-2 text-right">km</th>
+              <th className="p-2 text-right">min</th>
+              <th className="p-2 text-center w-10">Trend</th>
+            </tr>
+          </thead>
+          <tbody>
+            {weeksSorted.map((w) => (
+              <tr key={w.week} className="border-t border-slate-700">
+                <td className="p-2">{w.week}</td>
+                <td className="p-2 text-right">{w.workouts}</td>
+                <td className="p-2 text-right">{w.distanceKm.toFixed(1)}</td>
+                <td className="p-2 text-right">{w.durationMin.toFixed(0)}</td>
+                <td className="p-2 text-center">
+                  {lastWeek && w.week === lastWeek.week ? trendBadge : ''}
+                </td>
+              </tr>
+            ))}
+            {weeksSorted.length === 0 && (
+              <tr className="border-t border-slate-700">
+                <td className="p-2 text-slate-400" colSpan={5}>
+                  Brak danych.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <h3 className="mb-2 text-lg font-semibold">Dni</h3>
+        <div className="rounded border border-slate-800 bg-slate-900/40 p-4 text-sm">
+          <div className="font-semibold mb-2">Top 3 dni (dystans)</div>
+          {topDays.length === 0 ? (
+            <div className="text-slate-400">Brak danych.</div>
+          ) : (
+            <ol className="list-decimal pl-5 space-y-1">
+              {topDays.map((d) => (
+                <li key={d.day}>
+                  {d.day} — {d.distanceKm.toFixed(1)} km ({d.workouts} trening)
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+        <table className="w-full border border-slate-700 text-sm">
+          <thead className="bg-slate-800">
+            <tr>
+              <th className="p-2 text-left">Dzień</th>
+              <th className="p-2 text-right">Treningi</th>
+              <th className="p-2 text-right">km</th>
+              <th className="p-2 text-right">min</th>
+            </tr>
+          </thead>
+          <tbody>
+            {byDay.map((d) => (
+              <tr key={d.day} className="border-t border-slate-700">
+                <td className="p-2">{d.day}</td>
+                <td className="p-2 text-right">{d.workouts}</td>
+                <td className="p-2 text-right">{d.distanceKm.toFixed(1)}</td>
+                <td className="p-2 text-right">{d.durationMin.toFixed(0)}</td>
+              </tr>
+            ))}
+            {byDay.length === 0 && (
+              <tr className="border-t border-slate-700">
+                <td className="p-2 text-slate-400" colSpan={4}>
+                  Brak danych.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }
-
-function Card({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="rounded-xl bg-slate-800/70 p-4 shadow-sm ring-1 ring-white/5">
-      <p className="text-sm text-slate-300">{label}</p>
-      <p className="mt-2 text-xl font-semibold text-white">{value}</p>
-    </div>
-  )
-}
-
-function Mini({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2">
-      <div className="text-xs uppercase tracking-wide text-slate-400">{label}</div>
-      <div className="mt-1 text-lg font-semibold text-white">{value}</div>
-    </div>
-  )
-}
-

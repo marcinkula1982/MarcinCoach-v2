@@ -21,11 +21,18 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(password, 10)
 
-    const user = await this.prisma.authUser.create({
-      data: { username, passwordHash },
+    // Znajdź lub utwórz domenowego Usera, ale linkuj WYŁĄCZNIE po ID
+    const domainUser =
+      (await this.prisma.user.findUnique({ where: { externalId: username } })) ??
+      (await this.prisma.user.create({
+        data: { externalId: username },
+      }))
+
+    const authUser = await this.prisma.authUser.create({
+      data: { username, passwordHash, userId: domainUser.id },
     })
 
-    return { success: true, userId: user.id }
+    return { success: true, userId: domainUser.id, authUserId: authUser.id }
   }
 
   async login(username: string, password: string) {
@@ -40,7 +47,7 @@ export class AuthService {
     await this.prisma.session.create({
       data: {
         token,
-        userId: user.id,
+        authUserId: user.id,
         expiresAt: null,
         lastSeenAt: new Date(),
       },

@@ -4,21 +4,17 @@ import client from './client'
 
 const buildAuthHeaders = (): Record<string, string> => {
   const sessionToken = localStorage.getItem('tcx-session-token')
-  const username = localStorage.getItem('tcx-username')
 
   const headers: Record<string, string> = {}
   if (sessionToken) {
     headers['x-session-token'] = sessionToken
-  }
-  if (username) {
-    headers['x-user-id'] = username
   }
   return headers
 }
 
 export type WorkoutListItem = {
   id: number
-  userId: string
+  userId: number
   action: string
   kind: string
   summary: WorkoutSummary
@@ -29,7 +25,7 @@ export type WorkoutListItem = {
 
 export type Workout = {
   id: number
-  userId: string
+  userId: number
   action: string
   kind: string
   summary: WorkoutSummary
@@ -37,6 +33,15 @@ export type Workout = {
   createdAt: string
   tcxRaw?: string | null
 }
+
+/**
+ * Kanoniczna data treningu.
+ * UWAGA: wszystkie widoki oparte na WorkoutListItem (lista, this week, itp.)
+ * MUSZĄ używać tej funkcji, zamiast sięgać bezpośrednio po createdAt / startTimeIso,
+ * żeby uniknąć rozjazdów tygodni / dni między różnymi ekranami.
+ */
+export const getWorkoutDate = (w: WorkoutListItem) =>
+  w.summary?.startTimeIso ?? w.createdAt
 
 export async function getWorkouts(): Promise<WorkoutListItem[]> {
   const response = await client.get<WorkoutListItem[]>('/workouts', {

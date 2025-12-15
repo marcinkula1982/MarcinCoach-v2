@@ -14,6 +14,7 @@ import {
   uploadTcxFile,
   updateWorkoutMeta,
   type WorkoutListItem,
+  getWorkoutDate,
 } from './api/workouts'
 import { login } from './api/auth'
 import client from './api/client'
@@ -468,10 +469,7 @@ const App = () => {
       }
 
       setCurrentFileName(s.fileName ?? null)
-
-      setCurrentWorkoutDate(
-        workout.createdAt ? new Date(workout.createdAt).toLocaleString('pl-PL') : null,
-      )
+      setCurrentWorkoutDate(getWorkoutDate(workout) ?? null)
 
       loadTcx(workout.tcxRaw, s.fileName ?? undefined)
     } catch (err) {
@@ -542,14 +540,22 @@ const App = () => {
         </div>
         {loggedInUser ? (
           <>
-            <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <header
+              className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+              aria-label="TCX workspace"
+            >
               <div>
-                <p className="text-sm uppercase tracking-[0.2em] text-indigo-300/80">
-                  TCX Toolkit
-                </p>
-                <h1 className="mt-2 text-3xl font-bold leading-tight text-white sm:text-4xl">
-                  TCX Editor
-                </h1>
+                <div className="flex flex-col gap-1">
+                  <div className="text-xs uppercase tracking-[0.25em] text-indigo-300/80">
+                    Ten konkretny trening
+                  </div>
+                  <h1 className="text-3xl font-bold leading-tight text-white sm:text-4xl">
+                    TCX Toolkit
+                  </h1>
+                  <p className="text-sm text-slate-400">
+                    Podgląd i edycja pojedynczego TCX (oddzielone od analityki historycznej).
+                  </p>
+                </div>
                 {(currentFileName || currentWorkoutDate) && (
                   <p className="mt-1 text-sm text-slate-400">
                     {currentFileName && (
@@ -560,7 +566,8 @@ const App = () => {
                     {currentWorkoutDate && (
                       <>
                         {' '}
-                        • Data treningu: {currentWorkoutDate}
+                        • Data treningu:{' '}
+                        {new Date(currentWorkoutDate).toLocaleString('pl-PL')}
                       </>
                     )}
                   </p>
