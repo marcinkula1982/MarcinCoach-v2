@@ -43,7 +43,7 @@ model Workout {
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
- @@unique([userId, dedupeKey], name: "userId_dedupeKey")
+  @@unique([userId, dedupeKey], name: "userId_dedupeKey")
   @@index([userId])
   @@index([userId, createdAt])
   @@index([userId, source, sourceActivityId])

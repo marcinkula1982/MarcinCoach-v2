@@ -4,105 +4,102 @@ import {
   Controller,
   Delete,
   Get,
-  Post,
-  Patch,
-  Query,
-  UploadedFile,
-  UsePipes,
-  UseInterceptors,
-  ValidationPipe,
+  HttpCode,
   Param,
   ParseIntPipe,
-  UseGuards,
+  Patch,
+  Post,
+  Query,
   Req,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common'
 import { FileInterceptor } from '@nestjs/platform-express'
 import type { Express } from 'express'
 import type { Request } from 'express'
+
 import { WorkoutsService } from './workouts.service'
 import { SaveWorkoutDto } from './dto/save-workout.dto'
 import { UpdateWorkoutMetaDto } from './dto/update-workout-meta.dto'
 import { ImportWorkoutDto } from './dto/import-workout.dto'
 import { SessionAuthGuard } from '../auth/session-auth.guard'
 
+type AuthedRequest = Request & {
+  authUser?: {
+    userId?: number
+    authUserId?: number
+    username?: string
+  }
+}
+
 @UseGuards(SessionAuthGuard)
 @Controller('workouts')
 export class WorkoutsController {
   constructor(private readonly workoutsService: WorkoutsService) {}
 
-  private getUserContext(
-    req: Request & { authUser?: { userId: number; username: string } },
-  ): { userId: number; username: string } {
-    const ctx = req.authUser
-    if (!ctx || typeof ctx.userId !== 'number') {
-      throw new BadRequestException('Brak użytkownika w sesji')
-    }
-    return { userId: ctx.userId, username: ctx.username }
+  private getUserId(req: AuthedRequest): number {
+    const userId = req.authUser?.userId
+    if (!userId) throw new BadRequestException('Brak userId w sesji')
+    return userId
+  }
+
+  private getUsername(req: AuthedRequest): string | undefined {
+    return req.authUser?.username
   }
 
   @Get()
-  getAll(@Req() req: Request & { authUser?: { userId: number; username: string } }) {
-    const { userId } = this.getUserContext(req)
-    return this.workoutsService.findAllForUser(userId)
+  getAll(@Req() req: AuthedRequest) {
+    return this.workoutsService.findAllForUser(this.getUserId(req))
   }
 
   @Get('analytics')
-  getAnalytics(@Req() req: Request & { authUser?: { userId: number; username: string } }) {
-    const { userId } = this.getUserContext(req)
-    return this.workoutsService.getAnalyticsForUser(userId)
+  getAnalytics(@Req() req: AuthedRequest) {
+    return this.workoutsService.getAnalyticsForUser(this.getUserId(req))
   }
 
   @Get('analytics/summary')
   getAnalyticsSummary(
-    @Req() req: Request & { authUser?: { userId: number; username: string } },
+    @Req() req: AuthedRequest,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
-    const { userId } = this.getUserContext(req)
-    return this.workoutsService.getAnalyticsSummaryForUser(userId, from, to)
+    return this.workoutsService.getAnalyticsSummaryForUser(this.getUserId(req), from, to)
   }
 
   @Post()
   @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
-  create(
-    @Req() req: Request & { authUser?: { userId: number; username: string } },
-    @Body() dto: SaveWorkoutDto,
-  ) {
-    const { userId, username } = this.getUserContext(req)
-    return this.workoutsService.create(userId, username, dto)
+  create(@Req() req: AuthedRequest, @Body() dto: SaveWorkoutDto) {
+    return this.workoutsService.create(this.getUserId(req), this.getUsername(req), dto)
   }
 
   @Get(':id')
-  async getOne(
+  getOne(
     @Param('id', ParseIntPipe) id: number,
-    @Req() req: Request & { authUser?: { userId: number; username: string } },
+    @Req() req: AuthedRequest,
     @Query('includeRaw') includeRaw?: string,
   ) {
-    const { userId } = this.getUserContext(req)
-    return this.workoutsService.findOneForUser(id, userId, includeRaw === 'true')
+    return this.workoutsService.findOneForUser(id, this.getUserId(req), includeRaw === 'true')
   }
 
   @Post('upload')
+  @HttpCode(200)
   @UseInterceptors(FileInterceptor('file'))
-  async uploadTcxFile(
-    @Req() req: Request & { authUser?: { userId: number; username: string } },
+  uploadTcxFile(
+    @Req() req: AuthedRequest,
     @UploadedFile() file: Express.Multer.File | undefined,
   ) {
-    if (!file) {
-      throw new BadRequestException('Brak pliku')
-    }
-    const { userId, username } = this.getUserContext(req)
-    return this.workoutsService.uploadTcxFile(file, userId, username)
+    if (!file || !file.buffer) throw new BadRequestException('Brak pliku')
+    return this.workoutsService.uploadTcxFile(file, this.getUserId(req), this.getUsername(req))
   }
 
   @Post('import')
+  @HttpCode(200)
   @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
-  async importWorkout(
-    @Req() req: Request & { authUser?: { userId: number; username: string } },
-    @Body() dto: ImportWorkoutDto,
-  ) {
-    const { userId, username } = this.getUserContext(req)
-    return this.workoutsService.importWorkout(userId, username, dto)
+  importWorkout(@Req() req: AuthedRequest, @Body() dto: ImportWorkoutDto) {
+    return this.workoutsService.importWorkout(this.getUserId(req), this.getUsername(req), dto)
   }
 
   @Patch(':id/meta')
@@ -110,21 +107,13 @@ export class WorkoutsController {
   updateMeta(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateWorkoutMetaDto,
-    @Req() req: Request & { authUser?: { userId: number; username: string } },
+    @Req() req: AuthedRequest,
   ) {
-    const { userId } = this.getUserContext(req)
-    return this.workoutsService.updateMeta(id, dto.workoutMeta, userId)
+    return this.workoutsService.updateMeta(id, dto.workoutMeta, this.getUserId(req))
   }
 
   @Delete(':id')
-  async remove(
-    @Param('id', ParseIntPipe) id: number,
-    @Req() req: Request & { authUser?: { userId: number; username: string } },
-  ) {
-    const { userId } = this.getUserContext(req)
-    await this.workoutsService.deleteByIdForUser(id, userId)
-    return { success: true }
+  remove(@Param('id', ParseIntPipe) id: number, @Req() req: AuthedRequest) {
+    return this.workoutsService.deleteByIdForUser(id, this.getUserId(req))
   }
 }
-
-
