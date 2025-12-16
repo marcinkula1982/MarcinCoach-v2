@@ -112,6 +112,12 @@ export class WorkoutsService {
     return buckets
   }
 
+/**
+ * @deprecated
+ * Docelowo JEDYNY zapis treningu odbywa się przez importWorkout().
+ * create() pozostaje wyłącznie jako tymczasowa ścieżka manualna.
+ */
+
   async create(userId: number, username: string | undefined, dto: SaveWorkoutDto) {
     if (!userId) {
       throw new BadRequestException('Missing user from session')
@@ -462,6 +468,11 @@ export class WorkoutsService {
     })
   }
 
+  /**
+   * @deprecated LEGACY (M1) analityka oparta o summary + workoutMeta.
+   * Narusza założenia Milestone 2 (kanoniczny świat AnalyticsRows).
+   * Nie używać w nowych endpointach – zostawione tymczasowo dla starego UI/meta.
+   */
   async getAnalyticsForUser(userId: number) {
     const round = (v: number | null, d = 2) =>
       typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 10 ** d) / 10 ** d : null
@@ -523,6 +534,11 @@ export class WorkoutsService {
     return `${year}-W${String(weekNo).padStart(2, '0')}`
   }
 
+  /**
+   * @deprecated LEGACY (M1) agregaty tygodniowe/dzienne z getAnalyticsForUser().
+   * Narusza Milestone 2 – nowe analityki mają bazować na AnalyticsRows (buildAnalyticsRow).
+   * Nie używać w nowych endpointach; wymaga refaktoru na getAnalyticsRowsForUser().
+   */
   async getAnalyticsSummaryForUser(userId: number, from?: string, to?: string) {
     const rows = await this.getAnalyticsForUser(userId)
 
@@ -589,6 +605,142 @@ export class WorkoutsService {
     return { totals, byWeek, byDay }
   }
 
+  // Milestone 2: Analytics summary computed from AnalyticsRows
+  async getAnalyticsSummaryForUserV2(userId: number, from?: string, to?: string) {
+    const rows = await this.getAnalyticsRowsForUser(userId)
+
+    const fromDate = from ? new Date(`${from}T00:00:00.000Z`) : null
+    const toDate = to ? new Date(`${to}T23:59:59.999Z`) : null
+
+    const filtered = rows.filter((it) => {
+      const dt = new Date(it.workoutDt)
+      if (fromDate && dt < fromDate) return false
+      if (toDate && dt > toDate) return false
+      return true
+    })
+
+    const sum = (fn: (row: (typeof filtered)[number]) => number | undefined | null) =>
+      filtered.reduce((acc, row) => {
+        const v = fn(row)
+        return acc + (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+      }, 0)
+
+    const totals = {
+      workouts: filtered.length,
+      distanceKm: Number(sum((r) => r.distanceKm).toFixed(2)),
+      durationMin: Number(sum((r) => r.durationMin).toFixed(2)),
+      intensity: {
+        z1Min: Number(sum((r) => r.intensity?.z1Min).toFixed(2)),
+        z2Min: Number(sum((r) => r.intensity?.z2Min).toFixed(2)),
+        z3Min: Number(sum((r) => r.intensity?.z3Min).toFixed(2)),
+        z4Min: Number(sum((r) => r.intensity?.z4Min).toFixed(2)),
+        z5Min: Number(sum((r) => r.intensity?.z5Min).toFixed(2)),
+      },
+    }
+
+    const byWeekMap = new Map<
+      string,
+      {
+        week: string
+        workouts: number
+        distanceKm: number
+        durationMin: number
+        intensity: { z1Min: number; z2Min: number; z3Min: number; z4Min: number; z5Min: number }
+      }
+    >()
+
+    for (const r of filtered) {
+      const dt = new Date(r.workoutDt)
+      const week = this.isoWeekKey(dt)
+      const cur =
+        byWeekMap.get(week) ?? {
+          week,
+          workouts: 0,
+          distanceKm: 0,
+          durationMin: 0,
+          intensity: { z1Min: 0, z2Min: 0, z3Min: 0, z4Min: 0, z5Min: 0 },
+        }
+
+      cur.workouts += 1
+      cur.distanceKm += r.distanceKm ?? 0
+      cur.durationMin += r.durationMin ?? 0
+      cur.intensity.z1Min += r.intensity?.z1Min ?? 0
+      cur.intensity.z2Min += r.intensity?.z2Min ?? 0
+      cur.intensity.z3Min += r.intensity?.z3Min ?? 0
+      cur.intensity.z4Min += r.intensity?.z4Min ?? 0
+      cur.intensity.z5Min += r.intensity?.z5Min ?? 0
+
+      byWeekMap.set(week, cur)
+    }
+
+    const byWeek = Array.from(byWeekMap.values())
+      .map((w) => ({
+        ...w,
+        distanceKm: Number(w.distanceKm.toFixed(2)),
+        durationMin: Number(w.durationMin.toFixed(2)),
+        intensity: {
+          z1Min: Number(w.intensity.z1Min.toFixed(2)),
+          z2Min: Number(w.intensity.z2Min.toFixed(2)),
+          z3Min: Number(w.intensity.z3Min.toFixed(2)),
+          z4Min: Number(w.intensity.z4Min.toFixed(2)),
+          z5Min: Number(w.intensity.z5Min.toFixed(2)),
+        },
+      }))
+      .sort((a, b) => a.week.localeCompare(b.week))
+
+    const byDayMap = new Map<
+      string,
+      {
+        day: string
+        workouts: number
+        distanceKm: number
+        durationMin: number
+        intensity: { z1Min: number; z2Min: number; z3Min: number; z4Min: number; z5Min: number }
+      }
+    >()
+
+    for (const r of filtered) {
+      const dt = new Date(r.workoutDt)
+      const day = dt.toISOString().split('T')[0]!
+      const cur =
+        byDayMap.get(day) ?? {
+          day,
+          workouts: 0,
+          distanceKm: 0,
+          durationMin: 0,
+          intensity: { z1Min: 0, z2Min: 0, z3Min: 0, z4Min: 0, z5Min: 0 },
+        }
+
+      cur.workouts += 1
+      cur.distanceKm += r.distanceKm ?? 0
+      cur.durationMin += r.durationMin ?? 0
+      cur.intensity.z1Min += r.intensity?.z1Min ?? 0
+      cur.intensity.z2Min += r.intensity?.z2Min ?? 0
+      cur.intensity.z3Min += r.intensity?.z3Min ?? 0
+      cur.intensity.z4Min += r.intensity?.z4Min ?? 0
+      cur.intensity.z5Min += r.intensity?.z5Min ?? 0
+
+      byDayMap.set(day, cur)
+    }
+
+    const byDay = Array.from(byDayMap.values())
+      .map((d) => ({
+        ...d,
+        distanceKm: Number(d.distanceKm.toFixed(2)),
+        durationMin: Number(d.durationMin.toFixed(2)),
+        intensity: {
+          z1Min: Number(d.intensity.z1Min.toFixed(2)),
+          z2Min: Number(d.intensity.z2Min.toFixed(2)),
+          z3Min: Number(d.intensity.z3Min.toFixed(2)),
+          z4Min: Number(d.intensity.z4Min.toFixed(2)),
+          z5Min: Number(d.intensity.z5Min.toFixed(2)),
+        },
+      }))
+      .sort((a, b) => a.day.localeCompare(b.day))
+
+    return { totals, byWeek, byDay }
+  }
+
   // ---------- Dedupe helpers ----------
 
   private normalizeSource(source?: string | null): string {
@@ -635,5 +787,74 @@ export class WorkoutsService {
       sourceActivityId: idNorm,
       dedupeKey: `${sourceNorm}:t=${workoutDtIso}:d=${durationSecNorm}:m=${distanceMNorm}`,
     }
+  }
+
+  // Milestone 2: jeden kanoniczny rekord analityczny z jednego workoutu
+  private buildAnalyticsRow(workout: {
+    id: number
+    createdAt: Date
+    summary: string | null
+  }): {
+    workoutId: number
+    workoutDt: string
+    distanceKm: number
+    durationMin: number
+    type: 'run' | 'other'
+    intensity: { z1Min: number; z2Min: number; z3Min: number; z4Min: number; z5Min: number }
+  } | null {
+    const summary =
+      this.safeJsonParse<{
+        startTimeIso?: string | null
+        trimmed?: { distanceM?: number; durationSec?: number }
+        original?: { distanceM?: number; durationSec?: number }
+        intensity?: { z1Sec?: number; z2Sec?: number; z3Sec?: number; z4Sec?: number; z5Sec?: number }
+        kind?: string
+        sport?: string
+      }>(workout.summary) ?? {}
+
+    const workoutDt = summary.startTimeIso ? new Date(summary.startTimeIso) : workout.createdAt
+
+    const distanceM = summary.trimmed?.distanceM ?? summary.original?.distanceM
+    const durationSec = summary.trimmed?.durationSec ?? summary.original?.durationSec
+
+    if (typeof distanceM !== 'number' || !Number.isFinite(distanceM)) return null
+    if (typeof durationSec !== 'number' || !Number.isFinite(durationSec)) return null
+    if (distanceM <= 0 || durationSec <= 0) return null
+
+    const intensity = summary.intensity ?? {}
+    const secToMin = (v: unknown) =>
+      typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round((v / 60) * 100) / 100 : 0
+
+    // Na tym etapie nie mamy wiarygodnego sportType z Garmina/Stravy w kontrakcie,
+    // więc deterministycznie: jeśli kind/sport w summary wygląda na bieg -> run, inaczej other.
+    const sportGuess = `${summary.kind ?? ''} ${summary.sport ?? ''}`.toLowerCase()
+    const type: 'run' | 'other' = sportGuess.includes('run') || sportGuess.includes('bieg') ? 'run' : 'other'
+
+    return {
+      workoutId: workout.id,
+      workoutDt: workoutDt.toISOString(),
+      distanceKm: Math.round((distanceM / 1000) * 100) / 100,
+      durationMin: Math.round((durationSec / 60) * 100) / 100,
+      type,
+      intensity: {
+        z1Min: secToMin(intensity.z1Sec),
+        z2Min: secToMin(intensity.z2Sec),
+        z3Min: secToMin(intensity.z3Sec),
+        z4Min: secToMin(intensity.z4Sec),
+        z5Min: secToMin(intensity.z5Sec),
+      },
+    }
+  }
+
+  async getAnalyticsRowsForUser(userId: number) {
+    const workouts = await this.prisma.workout.findMany({
+      where: { userId },
+      select: { id: true, createdAt: true, summary: true },
+      orderBy: { createdAt: 'desc' },
+    })
+
+    return workouts
+      .map((w) => this.buildAnalyticsRow(w))
+      .filter((x): x is NonNullable<typeof x> => x !== null)
   }
 }

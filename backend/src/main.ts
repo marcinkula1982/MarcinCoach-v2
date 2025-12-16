@@ -8,7 +8,7 @@ async function bootstrap() {
     origin: 'http://localhost:5173',
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'x-session-token', 'x-user-id'],
+    allowedHeaders: ['Content-Type', 'x-username', 'x-session-token', 'authorization'],
   })
 
   await app.listen(3000)

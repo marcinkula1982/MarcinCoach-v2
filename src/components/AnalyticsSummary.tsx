@@ -6,14 +6,40 @@ type Summary = {
     workouts: number
     distanceKm: number
     durationMin: number
-    planCompliance: {
-      planned: number
-      modified: number
-      unplanned: number
+    intensity: {
+      z1Min: number
+      z2Min: number
+      z3Min: number
+      z4Min: number
+      z5Min: number
     }
   }
-  byWeek: { week: string; workouts: number; distanceKm: number; durationMin: number }[]
-  byDay?: { day: string; workouts: number; distanceKm: number; durationMin: number }[]
+  byWeek: Array<{
+    week: string
+    workouts: number
+    distanceKm: number
+    durationMin: number
+    intensity: {
+      z1Min: number
+      z2Min: number
+      z3Min: number
+      z4Min: number
+      z5Min: number
+    }
+  }>
+  byDay: Array<{
+    day: string
+    workouts: number
+    distanceKm: number
+    durationMin: number
+    intensity: {
+      z1Min: number
+      z2Min: number
+      z3Min: number
+      z4Min: number
+      z5Min: number
+    }
+  }>
 }
 
 export default function AnalyticsSummary() {
@@ -27,7 +53,7 @@ export default function AnalyticsSummary() {
   const load = async (useFilters: boolean) => {
     setError(null)
     try {
-      const res = await client.get<Summary>('/workouts/analytics/summary', {
+      const res = await client.get<Summary>('/workouts/analytics/summary-v2', {
         params: useFilters
           ? {
               ...(from ? { from } : {}),
@@ -76,27 +102,15 @@ export default function AnalyticsSummary() {
   const totalKm = totals?.distanceKm ?? 0
   const totalMin = totals?.durationMin ?? 0
 
-  const plan = totals?.planCompliance ?? { planned: 0, modified: 0, unplanned: 0 }
-  const unplanned = plan.unplanned ?? 0
-  const planned = plan.planned ?? 0
-  const modified = plan.modified ?? 0
+  // M2: summary-v2 does not provide planCompliance (will return in TrainingSignals / M3)
+  const plan = null
+  const unplanned = 0
+  const planned = 0
+  const modified = 0
 
   let plannedPct: number | null = null
   let modifiedPct: number | null = null
   let unplannedPct: number | null = null
-
-  if (totalWorkouts > 0) {
-    const rawPlanned = (planned / totalWorkouts) * 100
-    const rawModified = (modified / totalWorkouts) * 100
-    plannedPct = Math.round(rawPlanned)
-    modifiedPct = Math.round(rawModified)
-    unplannedPct = 100 - plannedPct - modifiedPct
-
-    // zabezpieczenie na wypadek zaokrągleń spoza [0,100]
-    if (unplannedPct < 0) {
-      unplannedPct = 0
-    }
-  }
 
   // Posortowane tygodnie – kanoniczna kolejność zarówno dla logiki trendu,
   // jak i dla renderowanej tabeli tygodni.
@@ -121,7 +135,7 @@ export default function AnalyticsSummary() {
       return 'Regularność — celuj w 3 treningi tygodniowo (spokojnie).'
     }
 
-    if (unplanned > planned + modified) {
+    if (plan != null && unplanned > planned + modified) {
       return 'Planowanie — zaplanuj szkic tygodnia (pon–nd) i trzymaj easy jako bazę.'
     }
 
@@ -223,7 +237,7 @@ export default function AnalyticsSummary() {
         <div className={`mt-1 text-sm ${volumeJump ? 'text-amber-100' : 'text-slate-200'}`}>
           {wnioskiText || 'Brak szczegółowych wniosków.'}
         </div>
-        {totalWorkouts > 0 && plannedPct !== null && modifiedPct !== null && unplannedPct !== null && (
+        {plan != null && totalWorkouts > 0 && plannedPct !== null && modifiedPct !== null && unplannedPct !== null && (
           <div className="mt-2 text-xs text-slate-300">
             Plan: {plannedPct}% planned · {modifiedPct}% modified · {unplannedPct}% unplanned
           </div>

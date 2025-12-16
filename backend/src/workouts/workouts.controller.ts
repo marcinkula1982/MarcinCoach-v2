@@ -57,7 +57,13 @@ export class WorkoutsController {
 
   @Get('analytics')
   getAnalytics(@Req() req: AuthedRequest) {
+    // TODO[M2-BLOCKER]: endpoint legacy – wymaga refaktoru na getAnalyticsRowsForUser()
     return this.workoutsService.getAnalyticsForUser(this.getUserId(req))
+  }
+
+  @Get('analytics/rows')
+  getAnalyticsRows(@Req() req: AuthedRequest) {
+    return this.workoutsService.getAnalyticsRowsForUser(this.getUserId(req))
   }
 
   @Get('analytics/summary')
@@ -66,7 +72,17 @@ export class WorkoutsController {
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
+    // TODO[M2-BLOCKER]: endpoint legacy – wymaga refaktoru na AnalyticsRows + agregaty po stronie serwisu
     return this.workoutsService.getAnalyticsSummaryForUser(this.getUserId(req), from, to)
+  }
+
+  @Get('analytics/summary-v2')
+  getAnalyticsSummaryV2(
+    @Req() req: AuthedRequest,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.workoutsService.getAnalyticsSummaryForUserV2(this.getUserId(req), from, to)
   }
 
   @Post()

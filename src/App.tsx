@@ -20,6 +20,7 @@ import { login } from './api/auth'
 import client from './api/client'
 import WorkoutsList from './components/WorkoutsList'
 import AnalyticsSummary from './components/AnalyticsSummary'
+import WeeklyPlanSection from './components/WeeklyPlanSection'
 
 // ---------- Format helpers ----------
 const formatSeconds = (value: number) => {
@@ -103,7 +104,6 @@ const useTrimmedSelection = (parsed: ParsedTcx | null, startIndex: number, endIn
 
 const App = () => {
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string
-  const [backendHealth, setBackendHealth] = useState<string>('(sprawdzam...)')
   const [username, setUsername] = useState<string>(() => {
     return localStorage.getItem('tcx-username') || ''
   })
@@ -150,9 +150,9 @@ const App = () => {
     }
 
     if (loggedInUser) {
-      client.defaults.headers.common['x-user-id'] = loggedInUser
+      client.defaults.headers.common['x-username'] = loggedInUser
     } else {
-      delete client.defaults.headers.common['x-user-id']
+      delete client.defaults.headers.common['x-username']
     }
   }, [sessionToken, loggedInUser])
 
@@ -162,19 +162,11 @@ const App = () => {
 
     if (t && u) {
       client.defaults.headers.common['x-session-token'] = t
-      client.defaults.headers.common['x-user-id'] = u
+      client.defaults.headers.common['x-username'] = u
 
       setSessionToken(t)
       setLoggedInUser(u)
     }
-  }, [])
-
-  useEffect(() => {
-    client.get('/health')
-      .then((res) => {
-        setBackendHealth(`${res.status} ${JSON.stringify(res.data)}`)
-      })
-      .catch((e) => setBackendHealth(`ERR ${String(e)}`))
   }, [])
 
   const baseMetrics = useMemo(
@@ -320,7 +312,7 @@ const App = () => {
       localStorage.setItem('tcx-session-token', result.sessionToken)
       localStorage.setItem('tcx-username', result.username)
       client.defaults.headers.common['x-session-token'] = result.sessionToken
-      client.defaults.headers.common['x-user-id'] = result.username
+      client.defaults.headers.common['x-username'] = result.username
       setPassword('')
     } catch (err) {
       console.error('Login failed', err)
@@ -501,7 +493,7 @@ const App = () => {
               <span>Nie zalogowano</span>
             )}
             <div className="text-xs text-slate-400">
-              API: {API_BASE_URL} | /health: {backendHealth}
+              API: {API_BASE_URL}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -585,6 +577,8 @@ const App = () => {
             </header>
 
             <AnalyticsSummary />
+
+            <WeeklyPlanSection />
 
             {error && (
               <div className="mt-6 rounded-lg border border-red-500/40 bg-red-900/40 p-4 text-sm text-red-100">

@@ -1,36 +1,25 @@
-\# ADR 0001: Ingest jako pojedynczy punkt prawdy (Single Source of Truth)
+# ADR 0001: Ingest jako pojedynczy punkt prawdy (Single Source of Truth)
 
-
-
-\## Status
-
+## Status
 Accepted
 
+## Context
+System MarcinCoach ingestuje treningi z różnych źródeł:
+- ręczny upload plików (TCX/FIT),
+- importy zewnętrzne (Garmin, Strava – w przyszłości),
+- potencjalne integracje API.
 
+Wcześniej logika zapisu, deduplikacji i walidacji treningów była rozproszona
+między różne endpointy (`/upload`, `/import`) i warstwy aplikacji, co prowadziło
+do niespójności danych, trudności w utrzymaniu oraz ryzyka duplikatów.
 
-\## Context
+Kluczowym wymaganiem projektu jest **jeden, niepodważalny zapis historii treningów**,
+na którym będą budowane:
+- analityka,
+- TrainingSignals,
+- planowanie treningów,
+- warstwa AI.
 
-Projekt potrzebuje jednego, deterministycznego sposobu zapisu historii treningów, bez duplikatów i bez rozjazdów między różnymi ścieżkami importu (upload/import, Garmin/Strava, ręczne dodawanie). Wcześniej logika deduplikacji i format danych rozjeżdżały się między endpointami, co powodowało chaos i brak pewności „ile treningów mamy naprawdę”.
-
-
-
-\## Decision
-
-Ustalamy, że jedynym punktem prawdy dla zapisu treningu jest `POST /workouts/import`.
-
-Wszystkie inne wejścia (np. `POST /workouts/upload`) są tylko adapterami, które zamieniają wejście (np. TCX) na `ImportWorkoutDto` i wywołują tę samą logikę (`importWorkout()` w serwisie).
-
-Deduplikacja jest deterministyczna i oparta o `(source + sourceActivityId)`; gdy `sourceActivityId` brak, stosujemy stabilny fallback na podstawie `(startTimeIso + duration + distance)` po normalizacji.
-
-
-
-\## Consequences
-
-\- Logika deduplikacji nie może istnieć w wielu miejscach.
-
-\- „Strefy/intensity” w imporcie są liczone jako metryka techniczna (np. z tempa), ale personalizacja (HR zones) to osobny etap i nie może wpływać na ingest.
-
-\- Zmiana tej decyzji wymaga nowego ADR (łamie fundament historii danych).
-
-
+## Decision
+Ustalamy, że **jedynym punktem prawdy dla zapisu treningu jest endpoint:**
 

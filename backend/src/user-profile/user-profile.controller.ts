@@ -7,7 +7,7 @@ import {
   UseGuards,
 } from '@nestjs/common'
 import type { Request } from 'express'
-import { SessionAuthGuard } from './session-auth.guard'
+import { SessionAuthGuard } from '../auth/session-auth.guard'
 import { UserProfileService } from './user-profile.service'
 import { GetProfileResponseDto, UpdateProfileDto } from './dto/profile.dto'
 
@@ -35,5 +35,4 @@ export class UserProfileController {
     return profile
   }
 }
-
 

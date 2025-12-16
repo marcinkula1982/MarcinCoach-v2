@@ -6,7 +6,7 @@ const baseURL =
 
 const client = axios.create({
   baseURL,
-  // używamy headerów x-user-id / x-session-token, nie cookies
+  // używamy headerów x-session-token / x-username, nie cookies
   withCredentials: false,
   timeout: 15_000,
 })
@@ -23,7 +23,7 @@ client.interceptors.request.use(
     config.headers = config.headers ?? {}
 
     if (token) (config.headers as any)['x-session-token'] = token
-    if (user) (config.headers as any)['x-user-id'] = user
+    if (user) (config.headers as any)['x-username'] = user
 
     return config
   },

@@ -1,13 +1,18 @@
 import type { WorkoutSummary } from '../types'
 import type { WorkoutMeta } from '../types/workoutMeta'
+import type { WeeklyPlan } from '../types/weekly-plan'
 import client from './client'
 
 const buildAuthHeaders = (): Record<string, string> => {
   const sessionToken = localStorage.getItem('tcx-session-token')
+  const username = localStorage.getItem('tcx-username')
 
   const headers: Record<string, string> = {}
   if (sessionToken) {
     headers['x-session-token'] = sessionToken
+  }
+  if (username) {
+    headers['x-username'] = username
   }
   return headers
 }
@@ -79,5 +84,12 @@ export async function updateWorkoutMeta(id: number, workoutMeta: WorkoutMeta): P
   await client.patch(`/workouts/${id}/meta`, { workoutMeta }, {
     headers: buildAuthHeaders(),
   })
+}
+
+export async function fetchWeeklyPlan(days = 28): Promise<WeeklyPlan> {
+  const res = await client.get<WeeklyPlan>('/weekly-plan', {
+    params: { days },
+  })
+  return res.data
 }
 
