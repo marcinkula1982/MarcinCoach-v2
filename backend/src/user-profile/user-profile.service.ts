@@ -69,6 +69,13 @@ export class UserProfileService {
       runningDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
       surfaces: { preferTrail: true, avoidAsphalt: true },
       shoes: { avoidZeroDrop: true },
+      hrZones: {
+        z1: [0, 0],
+        z2: [0, 0],
+        z3: [0, 0],
+        z4: [0, 0],
+        z5: [0, 0],
+      },
     }
 
     if (!profile) {
@@ -114,7 +121,7 @@ export class UserProfileService {
 
     // Parse constraints JSON (extract shoes, hrZones)
     let shoes = defaults.shoes
-    let hrZones: UserProfileConstraints['hrZones'] = undefined
+    let hrZones: UserProfileConstraints['hrZones'] = defaults.hrZones
     if (profile.constraints) {
       try {
         const parsed = JSON.parse(profile.constraints)
@@ -158,9 +165,7 @@ export class UserProfileService {
       runningDays,
       surfaces,
       shoes,
-    }
-    if (hrZones !== undefined) {
-      result.hrZones = hrZones
+      hrZones,
     }
     return result
   }

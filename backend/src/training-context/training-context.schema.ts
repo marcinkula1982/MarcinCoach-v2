@@ -10,7 +10,6 @@ const hrZonesSchema = z
     z4: z.tuple([z.number(), z.number()]),
     z5: z.tuple([z.number(), z.number()]),
   })
-  .optional()
 
 const userProfileConstraintsSchema = z.object({
   timezone: z.string(),

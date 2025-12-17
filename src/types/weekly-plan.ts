@@ -18,6 +18,7 @@ export type WeeklyPlan = {
   weekEndIso: string
   windowDays: number
   inputsHash: string
+  appliedAdjustmentsCodes?: string[]
   sessions: PlannedSession[]
   summary: {
     totalDurationMin: number

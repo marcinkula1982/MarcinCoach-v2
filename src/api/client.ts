@@ -6,7 +6,7 @@ const baseURL =
 
 const client = axios.create({
   baseURL,
-  // używamy headerów x-session-token / x-username, nie cookies
+  // używamy headera x-session-token, nie cookies
   withCredentials: false,
   timeout: 15_000,
 })
@@ -17,13 +17,11 @@ console.log('API BASE URL:', baseURL)
 client.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('tcx-session-token')
-    const user = localStorage.getItem('tcx-username')
 
     // axios ma różne typy headers; to najprostsza forma
     config.headers = config.headers ?? {}
 
     if (token) (config.headers as any)['x-session-token'] = token
-    if (user) (config.headers as any)['x-username'] = user
 
     return config
   },

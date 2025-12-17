@@ -2,6 +2,49 @@ import { useEffect, useState } from 'react'
 import { fetchWeeklyPlan } from '../api/workouts'
 import type { WeeklyPlan, TrainingDay } from '../types/weekly-plan'
 
+const ADJUSTMENT_LABELS: Record<string, string> = {
+  reduce_load: 'Zmniejszono obciążenie (−20%)',
+  increase_load: 'Zwiększono obciążenie',
+  add_long_run: 'Dodano długie wybieganie',
+  reduce_intensity: 'Zmniejszono intensywność',
+  increase_intensity: 'Zwiększono intensywność',
+  add_rest_day: 'Dodano dzień odpoczynku',
+  swap_quality_day: 'Zmieniono dzień akcentu',
+  surface_constraint: 'Preferuj teren / unikaj asfaltu',
+  shoe_constraint: 'Ograniczenie obuwia',
+}
+
+const RATIONALE_PL: Record<string, string> = {
+  'Weekly plan based on last 28 days window':
+    'Plan tygodniowy oparty o dane z ostatnich 28 dni',
+  'Quality session scheduled based on volume and recovery status':
+    'Akcent zaplanowany na podstawie objętości i regeneracji',
+  'Long run scheduled on trail due to surface preference':
+    'Długie wybieganie zaplanowane w terenie zgodnie z preferencjami nawierzchni',
+  'Strides included in easy session (≥3 running days)':
+    'Przebieżki dodane do treningu easy (≥3 dni biegania)',
+}
+
+const SURFACE_PL: Record<string, string> = {
+  track: 'bieżnia',
+  trail: 'teren',
+  road: 'asfalt',
+}
+
+const NOTES_PL: Record<string, string> = {
+  strides: 'przebieżki',
+  hills: 'podbiegi',
+  recovery: 'akcent regeneracyjny',
+}
+
+const HR_ZONE_LABELS: Record<string, string> = {
+  Z1: 'Strefa tętna 1 – bardzo lekko (regeneracja)',
+  Z2: 'Strefa tętna 2 – lekko (tlen)',
+  Z3: 'Strefa tętna 3 – umiarkowanie (tempo)',
+  Z4: 'Strefa tętna 4 – mocno (próg)',
+  Z5: 'Strefa tętna 5 – bardzo mocno (VO₂max)',
+}
+
 // ---------- Helpers ----------
 const dayToPl = (day: TrainingDay): string => {
   const map: Record<TrainingDay, string> = {
@@ -86,6 +129,15 @@ export default function WeeklyPlanSection() {
             Okno: {weeklyPlan.windowDays} dni | Tydzień: {isoToDate(weeklyPlan.weekStartIso)} – {isoToDate(weeklyPlan.weekEndIso)}
           </div>
 
+          {weeklyPlan.appliedAdjustmentsCodes && weeklyPlan.appliedAdjustmentsCodes.length > 0 && (
+            <div className="text-xs text-slate-400 mb-4">
+              Wprowadzone korekty:{' '}
+              {weeklyPlan.appliedAdjustmentsCodes
+                .map((c) => ADJUSTMENT_LABELS[c] ?? c)
+                .join(', ')}
+            </div>
+          )}
+
           {/* Sessions table */}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -105,13 +157,25 @@ export default function WeeklyPlanSection() {
                     <td className="py-2 px-3 text-white font-medium">{dayToPl(session.day)}</td>
                     <td className="py-2 px-3 text-slate-300">{session.type}</td>
                     <td className="py-2 px-3 text-slate-300">{session.durationMin} min</td>
-                    <td className="py-2 px-3 text-slate-300">{session.intensityHint || '–'}</td>
-                    <td className="py-2 px-3 text-slate-300">{session.surfaceHint || '–'}</td>
+                    <td className="py-2 px-3 text-slate-300">
+                      {session.intensityHint
+                        ? HR_ZONE_LABELS[session.intensityHint] ?? session.intensityHint
+                        : '–'}
+                    </td>
+                    <td className="py-2 px-3 text-slate-300">
+                      {session.surfaceHint
+                        ? SURFACE_PL[session.surfaceHint] || session.surfaceHint
+                        : '–'}
+                    </td>
                     <td className="py-2 px-3 text-slate-300">
                       {session.notes && session.notes.length > 0 ? (
                         <ul className="list-disc list-inside space-y-1">
                           {session.notes.map((note, i) => (
-                            <li key={i} className="text-xs">{note}</li>
+                            <li key={i} className="text-xs">
+                              {note === 'Include 4-6 strides (20-30s each)'
+                                ? 'Dodaj 4–6 przebieżek (po 20–30 s)'
+                                : NOTES_PL[note] ?? note}
+                            </li>
                           ))}
                         </ul>
                       ) : (
@@ -130,7 +194,7 @@ export default function WeeklyPlanSection() {
               <h3 className="text-sm font-semibold text-slate-300 mb-2">Uzasadnienie:</h3>
               <ul className="list-disc list-inside space-y-1 text-xs text-slate-400">
                 {weeklyPlan.rationale.map((point, i) => (
-                  <li key={i}>{point}</li>
+                  <li key={i}>{RATIONALE_PL[point] ?? point}</li>
                 ))}
               </ul>
             </div>

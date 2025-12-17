@@ -5,7 +5,7 @@ export type UserProfileConstraints = {
   runningDays: Array<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'>
   surfaces: { preferTrail: boolean; avoidAsphalt: boolean }
   shoes: { avoidZeroDrop: boolean }
-  hrZones?: {
+  hrZones: {
     z1: [number, number]
     z2: [number, number]
     z3: [number, number]

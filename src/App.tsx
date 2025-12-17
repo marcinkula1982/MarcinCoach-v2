@@ -17,10 +17,10 @@ import {
   getWorkoutDate,
 } from './api/workouts'
 import { login } from './api/auth'
-import client from './api/client'
 import WorkoutsList from './components/WorkoutsList'
 import AnalyticsSummary from './components/AnalyticsSummary'
 import WeeklyPlanSection from './components/WeeklyPlanSection'
+import AiPlanSection from './components/AiPlanSection'
 
 // ---------- Format helpers ----------
 const formatSeconds = (value: number) => {
@@ -108,9 +108,6 @@ const App = () => {
     return localStorage.getItem('tcx-username') || ''
   })
   const [password, setPassword] = useState<string>('')
-  const [sessionToken, setSessionToken] = useState<string | null>(() => {
-    return localStorage.getItem('tcx-session-token')
-  })
   const [loggedInUser, setLoggedInUser] = useState<string | null>(() => {
     return localStorage.getItem('tcx-username') || null
   })
@@ -130,7 +127,6 @@ const App = () => {
     priority: 'B',
     customDistance: '',
   })
-  const [rawTcx, setRawTcx] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
@@ -142,32 +138,7 @@ const App = () => {
   const [suggestion, setSuggestion] = useState<'planned' | 'modified' | 'unplanned' | null>(null)
   const [suggestionReason, setSuggestionReason] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (sessionToken) {
-      client.defaults.headers.common['x-session-token'] = sessionToken
-    } else {
-      delete client.defaults.headers.common['x-session-token']
-    }
-
-    if (loggedInUser) {
-      client.defaults.headers.common['x-username'] = loggedInUser
-    } else {
-      delete client.defaults.headers.common['x-username']
-    }
-  }, [sessionToken, loggedInUser])
-
-  useEffect(() => {
-    const t = localStorage.getItem('tcx-session-token')
-    const u = localStorage.getItem('tcx-username')
-
-    if (t && u) {
-      client.defaults.headers.common['x-session-token'] = t
-      client.defaults.headers.common['x-username'] = u
-
-      setSessionToken(t)
-      setLoggedInUser(u)
-    }
-  }, [])
+  // Auth headers are injected by the axios interceptor in `src/api/client.ts`
 
   const baseMetrics = useMemo(
     () => (parsed ? computeMetrics(parsed.trackpoints) : null),
@@ -190,7 +161,6 @@ const App = () => {
       }
 
       setParsed(result)
-      setRawTcx(raw)
       if (name) setCurrentFileName(name)
       setStartIndex(0)
       setEndIndex(result.trackpoints.length - 1)
@@ -199,7 +169,6 @@ const App = () => {
         err instanceof Error ? err.message : 'Nie udało się sparsować pliku.'
       setError(message)
       setParsed(null)
-      setRawTcx(null)
     }
   }
 
@@ -288,7 +257,6 @@ const App = () => {
   }, [loggedInUser, loadWorkouts])
 
   const handleLogout = () => {
-    setSessionToken(null)
     setLoggedInUser(null)
     localStorage.removeItem('tcx-session-token')
     localStorage.removeItem('tcx-username')
@@ -297,7 +265,6 @@ const App = () => {
     setCurrentFileName(null)
     setCurrentWorkoutDate(null)
     setParsed(null)
-    setRawTcx(null)
     setStartIndex(0)
     setEndIndex(0)
     setSaveError(null)
@@ -307,12 +274,9 @@ const App = () => {
   const handleLogin = async () => {
     try {
       const result = await login(username, password)
-      setSessionToken(result.sessionToken)
       setLoggedInUser(result.username)
       localStorage.setItem('tcx-session-token', result.sessionToken)
       localStorage.setItem('tcx-username', result.username)
-      client.defaults.headers.common['x-session-token'] = result.sessionToken
-      client.defaults.headers.common['x-username'] = result.username
       setPassword('')
     } catch (err) {
       console.error('Login failed', err)
@@ -579,6 +543,8 @@ const App = () => {
             <AnalyticsSummary />
 
             <WeeklyPlanSection />
+
+            <AiPlanSection />
 
             {error && (
               <div className="mt-6 rounded-lg border border-red-500/40 bg-red-900/40 p-4 text-sm text-red-100">

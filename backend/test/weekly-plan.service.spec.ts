@@ -23,6 +23,13 @@ describe('WeeklyPlanService', () => {
         runningDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
         surfaces: { preferTrail: false, avoidAsphalt: false },
         shoes: { avoidZeroDrop: false },
+        hrZones: {
+          z1: [0, 0],
+          z2: [0, 0],
+          z3: [0, 0],
+          z4: [0, 0],
+          z5: [0, 0],
+        },
       },
       ...overrides,
     }
@@ -103,6 +110,13 @@ describe('WeeklyPlanService', () => {
         runningDays: ['mon', 'wed', 'fri', 'sun'],
         surfaces: { preferTrail: false, avoidAsphalt: false },
         shoes: { avoidZeroDrop: false },
+        hrZones: {
+          z1: [0, 0],
+          z2: [0, 0],
+          z3: [0, 0],
+          z4: [0, 0],
+          z5: [0, 0],
+        },
       },
     })
     const planSun = service.generatePlan(ctxSun)
@@ -116,6 +130,13 @@ describe('WeeklyPlanService', () => {
         runningDays: ['mon', 'wed', 'sat'],
         surfaces: { preferTrail: false, avoidAsphalt: false },
         shoes: { avoidZeroDrop: false },
+        hrZones: {
+          z1: [0, 0],
+          z2: [0, 0],
+          z3: [0, 0],
+          z4: [0, 0],
+          z5: [0, 0],
+        },
       },
     })
     const planSat = service.generatePlan(ctxSat)
@@ -140,6 +161,13 @@ describe('WeeklyPlanService', () => {
         runningDays: ['mon', 'tue', 'wed', 'thu', 'fri'],
         surfaces: { preferTrail: false, avoidAsphalt: false },
         shoes: { avoidZeroDrop: false },
+        hrZones: {
+          z1: [0, 0],
+          z2: [0, 0],
+          z3: [0, 0],
+          z4: [0, 0],
+          z5: [0, 0],
+        },
       },
     })
     const planWithQuality = service.generatePlan(ctxWithQuality)
@@ -212,6 +240,13 @@ describe('WeeklyPlanService', () => {
         runningDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
         surfaces: { preferTrail: true, avoidAsphalt: false },
         shoes: { avoidZeroDrop: false },
+        hrZones: {
+          z1: [0, 0],
+          z2: [0, 0],
+          z3: [0, 0],
+          z4: [0, 0],
+          z5: [0, 0],
+        },
       },
     })
     const planTrail = service.generatePlan(ctxTrail)
@@ -225,6 +260,13 @@ describe('WeeklyPlanService', () => {
         runningDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
         surfaces: { preferTrail: false, avoidAsphalt: true },
         shoes: { avoidZeroDrop: false },
+        hrZones: {
+          z1: [0, 0],
+          z2: [0, 0],
+          z3: [0, 0],
+          z4: [0, 0],
+          z5: [0, 0],
+        },
       },
     })
     const planAvoidAsphalt = service.generatePlan(ctxAvoidAsphalt)
@@ -259,6 +301,13 @@ describe('WeeklyPlanService', () => {
         runningDays: ['mon', 'tue', 'wed', 'thu'],
         surfaces: { preferTrail: false, avoidAsphalt: false },
         shoes: { avoidZeroDrop: false },
+        hrZones: {
+          z1: [0, 0],
+          z2: [0, 0],
+          z3: [0, 0],
+          z4: [0, 0],
+          z5: [0, 0],
+        },
       },
     })
     const planWithStrides = service.generatePlan(ctxWithStrides)
@@ -271,11 +320,47 @@ describe('WeeklyPlanService', () => {
         runningDays: ['mon', 'tue'], // Only 2 days
         surfaces: { preferTrail: false, avoidAsphalt: false },
         shoes: { avoidZeroDrop: false },
+        hrZones: {
+          z1: [0, 0],
+          z2: [0, 0],
+          z3: [0, 0],
+          z4: [0, 0],
+          z5: [0, 0],
+        },
       },
     })
     const planNoStrides = service.generatePlan(ctxNoStrides)
     const sessionsWithStridesNo = planNoStrides.sessions.filter((s) => s.notes?.some((note) => note.includes('strides')))
     expect(sessionsWithStridesNo.length).toBe(0)
+  })
+
+  it('applies reduce_load adjustment by scaling session duration and distance', () => {
+    const ctx = createMockContext()
+
+    const planBase = service.generatePlan(ctx)
+    const baseTotalDuration = planBase.sessions.reduce((sum, s) => sum + s.durationMin, 0)
+    const baseTotalDistance = planBase.sessions.reduce((sum, s) => sum + (s.distanceKm ?? 0), 0)
+
+    const adjustments = {
+      generatedAtIso: ctx.generatedAtIso,
+      windowDays: ctx.windowDays,
+      adjustments: [{ code: 'reduce_load', severity: 'high', rationale: '', evidence: [] }],
+    }
+
+    const planReduced = service.generatePlan(ctx, adjustments as any)
+    const reducedTotalDuration = planReduced.sessions.reduce((sum, s) => sum + s.durationMin, 0)
+    const reducedTotalDistance = planReduced.sessions.reduce((sum, s) => sum + (s.distanceKm ?? 0), 0)
+
+    expect(planReduced.sessions.length).toBe(planBase.sessions.length)
+
+    // ~20% reduction, but allow slack for roundTo5Min
+    expect(reducedTotalDuration).toBeLessThanOrEqual(0.85 * baseTotalDuration)
+    expect(reducedTotalDuration).toBeGreaterThanOrEqual(0.7 * baseTotalDuration)
+
+    // if distances exist, they should also be reduced
+    if (baseTotalDistance > 0) {
+      expect(reducedTotalDistance).toBeLessThan(baseTotalDistance)
+    }
   })
 
   it('windowDays is passthrough from context', () => {

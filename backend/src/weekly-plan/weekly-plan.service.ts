@@ -2,6 +2,7 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common'
 import { createHash } from 'crypto'
 const stringify = require('fast-json-stable-stringify')
 import type { TrainingContext } from '../training-context/training-context.types'
+import type { TrainingAdjustments } from '../training-adjustments/training-adjustments.types'
 import type { TrainingDay, PlannedSession, WeeklyPlan } from './weekly-plan.types'
 import { weeklyPlanSchema } from './weekly-plan.schema'
 
@@ -78,7 +79,7 @@ export class WeeklyPlanService {
   /**
    * Generate deterministic weekly plan from TrainingContext
    */
-  generatePlan(ctx: TrainingContext): WeeklyPlan {
+  generatePlan(ctx: TrainingContext, adjustments?: TrainingAdjustments): WeeklyPlan {
     const { weekStartIso, weekEndIso } = this.calculateWeekBoundaries(ctx.generatedAtIso)
     const inputsHash = this.calculateInputsHash(ctx)
 
@@ -162,6 +163,19 @@ export class WeeklyPlanService {
         }
       } else if (session.type === 'rest') {
         session.durationMin = 0
+      }
+    }
+
+    // Apply adjustments (deterministic)
+    const shouldReduceLoad = adjustments?.adjustments?.some((a) => a.code === 'reduce_load') === true
+    if (shouldReduceLoad) {
+      for (const s of sessions) {
+        if (typeof s.durationMin === 'number' && s.durationMin > 0) {
+          s.durationMin = this.roundTo5Min(s.durationMin * 0.8)
+        }
+        if (typeof s.distanceKm === 'number' && Number.isFinite(s.distanceKm) && s.distanceKm > 0) {
+          s.distanceKm = Number((s.distanceKm * 0.8).toFixed(1))
+        }
       }
     }
 

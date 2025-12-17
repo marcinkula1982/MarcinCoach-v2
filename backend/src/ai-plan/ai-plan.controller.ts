@@ -3,23 +3,25 @@ import type { Request } from 'express'
 import { SessionAuthGuard } from '../auth/session-auth.guard'
 import { TrainingAdjustmentsService } from '../training-adjustments/training-adjustments.service'
 import { TrainingContextService } from '../training-context/training-context.service'
-import { WeeklyPlanService } from './weekly-plan.service'
+import { WeeklyPlanService } from '../weekly-plan/weekly-plan.service'
+import { AiPlanService } from './ai-plan.service'
 
-type AuthedRequest = Request & { authUser?: { userId?: number; id?: number } }
+type AuthedRequest = Request & { authUser?: { userId?: number } }
 
-@Controller()
 @UseGuards(SessionAuthGuard)
-export class WeeklyPlanController {
+@Controller('ai')
+export class AiPlanController {
   constructor(
     private readonly trainingContextService: TrainingContextService,
     private readonly trainingAdjustmentsService: TrainingAdjustmentsService,
     private readonly weeklyPlanService: WeeklyPlanService,
+    private readonly aiPlanService: AiPlanService,
   ) {}
 
-  @Get('weekly-plan')
+  @Get('plan')
   @Header('Cache-Control', 'private, no-cache, must-revalidate')
-  async getWeeklyPlan(@Req() req: AuthedRequest, @Query('days') days?: string) {
-    const userId = req.authUser?.userId ?? (req.authUser as any)?.id
+  async getAiPlan(@Req() req: AuthedRequest, @Query('days') days?: string) {
+    const userId = req.authUser?.userId
     if (!userId) {
       throw new BadRequestException('Missing userId in session')
     }
@@ -30,14 +32,17 @@ export class WeeklyPlanController {
     }
 
     const opts = parsedDays !== undefined ? { days: parsedDays } : undefined
-    const ctx = await this.trainingContextService.getContextForUser(userId, opts)
-    const trainingAdjustments = this.trainingAdjustmentsService.generate(ctx)
-    const plan = this.weeklyPlanService.generatePlan(ctx, trainingAdjustments)
+    const context = await this.trainingContextService.getContextForUser(userId, opts)
 
-    return {
-      ...plan,
-      appliedAdjustmentsCodes: trainingAdjustments.adjustments.map((a) => a.code),
+    const adjustments = this.trainingAdjustmentsService.generate(context)
+    const planBase = this.weeklyPlanService.generatePlan(context, adjustments)
+    const plan = {
+      ...planBase,
+      appliedAdjustmentsCodes: adjustments.adjustments.map((a) => a.code),
     }
+
+    return await this.aiPlanService.buildResponse(context, adjustments, plan)
   }
 }
+
 

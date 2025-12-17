@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   Param,
   ParseIntPipe,
@@ -56,6 +57,7 @@ export class WorkoutsController {
   }
 
   @Get('analytics')
+  @Header('Cache-Control', 'private, no-cache, must-revalidate')
   getAnalytics(@Req() req: AuthedRequest) {
     // TODO[M2-BLOCKER]: endpoint legacy – wymaga refaktoru na getAnalyticsRowsForUser()
     return this.workoutsService.getAnalyticsForUser(this.getUserId(req))
@@ -77,6 +79,7 @@ export class WorkoutsController {
   }
 
   @Get('analytics/summary-v2')
+  @Header('Cache-Control', 'private, no-cache, must-revalidate')
   getAnalyticsSummaryV2(
     @Req() req: AuthedRequest,
     @Query('from') from?: string,

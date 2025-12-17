@@ -156,7 +156,7 @@ export class TrainingSignalsService {
     // Weekly load calculated relative to window 'to', not current time
     const weeklyFrom = new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000)
     const weeklyLoad = filtered
-      .filter((r) => r.workoutDt >= weeklyFrom)
+      .filter((r) => r.workoutDt > weeklyFrom)
       .reduce((s, r) => s + (r.loadValue ?? 0), 0)
 
     const rolling4wLoad = filtered.reduce((s, r) => s + (r.loadValue ?? 0), 0)

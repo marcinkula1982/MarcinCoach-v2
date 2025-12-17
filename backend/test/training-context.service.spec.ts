@@ -30,6 +30,13 @@ describe('TrainingContextService', () => {
       runningDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
       surfaces: { preferTrail: true, avoidAsphalt: true },
       shoes: { avoidZeroDrop: true },
+      hrZones: {
+        z1: [0, 0],
+        z2: [0, 0],
+        z3: [0, 0],
+        z4: [0, 0],
+        z5: [0, 0],
+      },
     }
 
     jest.spyOn(mockSignalsService, 'getSignalsForUser').mockResolvedValueOnce(mockSignals as any)
@@ -70,6 +77,13 @@ describe('TrainingContextService', () => {
       runningDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
       surfaces: { preferTrail: true, avoidAsphalt: true },
       shoes: { avoidZeroDrop: true },
+      hrZones: {
+        z1: [0, 0],
+        z2: [0, 0],
+        z3: [0, 0],
+        z4: [0, 0],
+        z5: [0, 0],
+      },
     }
 
     jest.spyOn(mockSignalsService, 'getSignalsForUser').mockResolvedValueOnce(mockSignals as any)
