@@ -1,12 +1,13 @@
 import { BadRequestException, Controller, Get, Query, Req, UseGuards } from '@nestjs/common'
 import type { Request } from 'express'
 import { SessionAuthGuard } from '../auth/session-auth.guard'
+import { AiDailyRateLimitGuard } from '../ai-rate-limit/ai-daily-rate-limit.guard'
 import { AiInsightsService } from './ai-insights.service'
 
 type AuthedRequest = Request & { authUser?: { userId?: number; id?: number; username?: string } }
 
 @Controller()
-@UseGuards(SessionAuthGuard)
+@UseGuards(SessionAuthGuard, AiDailyRateLimitGuard)
 export class AiInsightsController {
   constructor(private readonly aiInsightsService: AiInsightsService) {}
 

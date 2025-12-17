@@ -1,6 +1,7 @@
 import { BadRequestException, Controller, Get, Header, Query, Req, UseGuards } from '@nestjs/common'
 import type { Request } from 'express'
 import { SessionAuthGuard } from '../auth/session-auth.guard'
+import { AiDailyRateLimitGuard } from '../ai-rate-limit/ai-daily-rate-limit.guard'
 import { TrainingAdjustmentsService } from '../training-adjustments/training-adjustments.service'
 import { TrainingContextService } from '../training-context/training-context.service'
 import { WeeklyPlanService } from '../weekly-plan/weekly-plan.service'
@@ -8,7 +9,7 @@ import { AiPlanService } from './ai-plan.service'
 
 type AuthedRequest = Request & { authUser?: { userId?: number } }
 
-@UseGuards(SessionAuthGuard)
+@UseGuards(SessionAuthGuard, AiDailyRateLimitGuard)
 @Controller('ai')
 export class AiPlanController {
   constructor(

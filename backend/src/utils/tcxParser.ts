@@ -33,15 +33,13 @@ export const parseTcx = (xml: string): ParsedTcx => {
           const hrValue =
             tp?.HeartRateBpm?.Value ?? tp?.HeartRateBpm ?? undefined
 
-          trackpoints.push({
-            time,
-            distanceMeters:
-              typeof distance === 'number' ? Number(distance) : undefined,
-            altitudeMeters:
-              typeof altitude === 'number' ? Number(altitude) : undefined,
-            heartRateBpm:
-              typeof hrValue === 'number' ? Math.round(hrValue) : undefined,
-          })
+          const point: Trackpoint = { time }
+
+          if (typeof distance === 'number') point.distanceMeters = Number(distance)
+          if (typeof altitude === 'number') point.altitudeMeters = Number(altitude)
+          if (typeof hrValue === 'number') point.heartRateBpm = Math.round(hrValue)
+
+          trackpoints.push(point)
         })
       })
     })

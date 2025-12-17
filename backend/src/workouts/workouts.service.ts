@@ -7,7 +7,7 @@ import {
 import { PrismaService } from '../prisma.service'
 import { SaveWorkoutDto } from './dto/save-workout.dto'
 import { UpdateWorkoutMetaDto } from './dto/update-workout-meta.dto'
-import { ImportWorkoutDto } from './dto/import-workout.dto'
+import { ImportWorkoutDto, WorkoutSourceDto } from './dto/import-workout.dto'
 import { parseTcx } from '../utils/tcxParser'
 import { computeMetrics } from '../utils/metrics'
 import type { Express } from 'express'
@@ -252,15 +252,19 @@ export class WorkoutsService {
       selectedPoints: parsed.trackpoints.length,
     }
 
+    if (!summary.startTimeIso) {
+      throw new BadRequestException('Nie udało się odczytać startTimeIso z pliku')
+    }
+
     const dto: ImportWorkoutDto = {
-      source: 'MANUAL_UPLOAD',
+      source: WorkoutSourceDto.MANUAL_UPLOAD,
       sourceActivityId: null,
       sourceUserId: null,
       tcxRaw: rawTcx,
       fitRaw: null,
       summary,
       workoutMeta: null,
-      startTimeIso: summary.startTimeIso ?? null,
+      startTimeIso: summary.startTimeIso,
     }
 
     // JEDEN punkt prawdy: importWorkout (dedupe + zapis)

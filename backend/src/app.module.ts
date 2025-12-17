@@ -10,9 +10,22 @@ import { TrainingFeedbackModule } from './training-feedback/training-feedback.mo
 import { AiInsightsModule } from './ai-insights/ai-insights.module'
 import { TrainingAdjustmentsModule } from './training-adjustments/training-adjustments.module'
 import { AiPlanModule } from './ai-plan/ai-plan.module'
+import { AiRateLimitModule } from './ai-rate-limit/ai-rate-limit.module'
 
 @Module({
-  imports: [WorkoutsModule, AuthModule, TrainingSignalsModule, UserProfileModule, TrainingContextModule, WeeklyPlanModule, TrainingFeedbackModule, AiInsightsModule, TrainingAdjustmentsModule, AiPlanModule],
+  imports: [
+    WorkoutsModule,
+    AuthModule,
+    TrainingSignalsModule,
+    UserProfileModule,
+    TrainingContextModule,
+    WeeklyPlanModule,
+    TrainingFeedbackModule,
+    AiInsightsModule,
+    TrainingAdjustmentsModule,
+    AiPlanModule,
+    AiRateLimitModule,
+  ],
   controllers: [AppController],
 })
 export class AppModule {}
