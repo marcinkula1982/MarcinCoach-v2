@@ -166,15 +166,81 @@ export class WeeklyPlanService {
       }
     }
 
-    // Apply adjustments (deterministic)
-    const shouldReduceLoad = adjustments?.adjustments?.some((a) => a.code === 'reduce_load') === true
-    if (shouldReduceLoad) {
-      for (const s of sessions) {
-        if (typeof s.durationMin === 'number' && s.durationMin > 0) {
-          s.durationMin = this.roundTo5Min(s.durationMin * 0.8)
+    // Apply adjustments (deterministic) - działa tylko na code + params
+    if (adjustments?.adjustments) {
+      for (const adjustment of adjustments.adjustments) {
+        // reduce_load: usuń quality sesje, zmniejsz pozostałe
+        if (adjustment.code === 'reduce_load') {
+          const reductionPct = adjustment.params?.reductionPct ?? 20
+          const reductionFactor = 1 - reductionPct / 100
+
+          // Usuń wszystkie sesje typu 'quality' - zamień na 'easy' z stałym czasem
+          for (const s of sessions) {
+            if (s.type === 'quality') {
+              s.type = 'easy'
+              s.durationMin = 40 // stałe, deterministyczne
+              s.intensityHint = 'Z2'
+              delete (s as any).surfaceHint // usuń jeśli istnieje
+            }
+          }
+
+          // Zmniejsz duration pozostałych sesji zgodnie z reductionPct
+          for (const s of sessions) {
+            if (typeof s.durationMin === 'number' && s.durationMin > 0) {
+              s.durationMin = this.roundTo5Min(s.durationMin * reductionFactor)
+            }
+            if (typeof s.distanceKm === 'number' && Number.isFinite(s.distanceKm) && s.distanceKm > 0) {
+              s.distanceKm = Number((s.distanceKm * reductionFactor).toFixed(1))
+            }
+          }
         }
-        if (typeof s.distanceKm === 'number' && Number.isFinite(s.distanceKm) && s.distanceKm > 0) {
-          s.distanceKm = Number((s.distanceKm * 0.8).toFixed(1))
+
+        // recovery_focus: zamień quality na easy, skróć long
+        if (adjustment.code === 'recovery_focus') {
+          if (adjustment.params?.replaceHardSessionWithEasy === true) {
+            // Znajdź sesję typu 'quality' → zamień na 'easy'
+            for (const s of sessions) {
+              if (s.type === 'quality') {
+                s.type = 'easy'
+                s.durationMin = 40
+                s.intensityHint = 'Z2'
+                delete (s as any).surfaceHint
+              }
+            }
+          }
+
+          if (adjustment.params?.longRunReductionPct) {
+            const reductionPct = adjustment.params.longRunReductionPct
+            const reductionFactor = 1 - reductionPct / 100
+            // Znajdź sesję typu 'long' → zmniejsz durationMin
+            for (const s of sessions) {
+              if (s.type === 'long') {
+                s.durationMin = this.roundTo5Min(s.durationMin * reductionFactor)
+              }
+            }
+          }
+        }
+
+        // technique_focus: dodaj strides do easy sessions
+        if (adjustment.code === 'technique_focus' && adjustment.params?.addStrides === true) {
+          const stridesCount = adjustment.params.stridesCount || 6
+          const stridesDurationSec = adjustment.params.stridesDurationSec || 20
+          let stridesAddedCount = 0
+          const maxStridesSessions = 2
+
+          // Znajdź 1-2 sesje typu 'easy' (które jeszcze nie mają notes ze strides)
+          for (const s of sessions) {
+            if (s.type === 'easy' && stridesAddedCount < maxStridesSessions) {
+              const hasStridesNote = s.notes?.some((note) => note.toLowerCase().includes('strides'))
+              if (!hasStridesNote) {
+                if (!s.notes) {
+                  s.notes = []
+                }
+                s.notes.push(`Include ${stridesCount}x${stridesDurationSec}s strides`)
+                stridesAddedCount++
+              }
+            }
+          }
         }
       }
     }

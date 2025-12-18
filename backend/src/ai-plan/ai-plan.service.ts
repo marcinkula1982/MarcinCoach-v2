@@ -3,11 +3,28 @@ import type { TrainingContext } from '../training-context/training-context.types
 import type { TrainingAdjustments } from '../training-adjustments/training-adjustments.types'
 import type { WeeklyPlan } from '../weekly-plan/weekly-plan.types'
 import type { AiPlanExplanation, AiPlanResponse } from './ai-plan.types'
+import { AiCacheService } from '../ai-cache/ai-cache.service'
+import type { FeedbackSignals } from '../training-feedback-v2/feedback-signals.types'
+import { TrainingFeedbackV2Service } from '../training-feedback-v2/training-feedback-v2.service'
 
 const OpenAI = require('openai')
 
 @Injectable()
 export class AiPlanService {
+  constructor(
+    private readonly aiCacheService: AiCacheService,
+    private readonly trainingFeedbackV2Service: TrainingFeedbackV2Service,
+  ) {}
+
+  getCachedResponse(userId: number, days: number): AiPlanResponse | null {
+    const cached = this.aiCacheService.get<AiPlanResponse>('plan', userId, days)
+    return cached ? cached.payload : null
+  }
+
+  setCachedResponse(userId: number, days: number, response: AiPlanResponse): void {
+    this.aiCacheService.set('plan', userId, days, response)
+  }
+
   private stripMarkdownFences(raw: string): string {
     const trimmed = raw.trim()
     if (!trimmed.startsWith('```')) return trimmed
@@ -72,19 +89,30 @@ export class AiPlanService {
     context: TrainingContext,
     adjustments: TrainingAdjustments,
     plan: WeeklyPlan & { appliedAdjustmentsCodes?: string[] },
+    feedbackSignals?: FeedbackSignals,
   ): Promise<AiPlanExplanation> {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
     const model = process.env.AI_PLAN_MODEL ?? 'gpt-5'
     const maxOut = Number(process.env.AI_PLAN_MAX_OUTPUT_TOKENS ?? '2000')
 
-    const instructions =
+    let instructions =
       'Napisz po polsku krótkie objaśnienie planu tygodniowego. ' +
       'Nie zmieniaj planu. Nie dodawaj ani nie usuwaj treningów. Opieraj się wyłącznie na podanym JSON. ' +
-      'Nie używaj oznaczeń Z1/Z2. Jeśli mówisz o intensywności, używaj sformułowania „strefa tętna”. ' +
+      'Nie używaj oznaczeń Z1/Z2. Jeśli mówisz o intensywności, używaj sformułowania „strefa tętna". '
+    
+    if (feedbackSignals) {
+      instructions +=
+        'Jeśli podano feedbackSignals, to deterministyczne sygnały z ostatniego treningu — traktuj je jako fakty, nie do negocjacji. '
+    }
+    
+    instructions +=
+      'appliedAdjustmentsCodes są decyzjami backendu i nie wolno ich podważać ani proponować planu sprzecznego z nimi. '
+    
+    instructions +=
       'Zwróć WYŁĄCZNIE poprawny JSON (bez markdown, bez tekstu dookoła) dokładnie w tym kształcie: ' +
       '{"titlePl":string,"summaryPl":string[],"sessionNotesPl":{"day":string,"text":string}[],"warningsPl":string[],"confidence":number}.'
 
-    const input = JSON.stringify({ context, adjustments, plan })
+    const input = JSON.stringify({ context, adjustments, plan, ...(feedbackSignals ? { feedbackSignals } : {}) })
 
     const response: any = await client.responses.create({
       model,
@@ -180,11 +208,17 @@ export class AiPlanService {
     }
   }
 
+
   async buildResponse(
+    userId: number,
     context: TrainingContext,
     adjustments: TrainingAdjustments,
     plan: WeeklyPlan & { appliedAdjustmentsCodes?: string[] },
   ): Promise<AiPlanResponse> {
+    // Pobierz najnowszy feedbackSignals (opcjonalnie) - deterministycznie po workout.startTimeIso
+    const feedbackSignals = await this.trainingFeedbackV2Service.getLatestFeedbackSignalsForUser(userId)
+
+    // Generate response
     const shouldUseOpenAi = process.env.AI_PLAN_PROVIDER === 'openai'
     const apiKeyOk = Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim().length > 0)
 
@@ -196,7 +230,7 @@ export class AiPlanService {
     let usedProvider: 'stub' | 'openai' = 'stub'
     if (shouldUseOpenAi) {
       try {
-        explanation = await this.buildOpenAiExplanation(context, adjustments, plan)
+        explanation = await this.buildOpenAiExplanation(context, adjustments, plan, feedbackSignals)
         usedProvider = 'openai'
       } catch (err) {
         explanation = this.buildStubExplanation(context, adjustments, plan)
@@ -216,6 +250,7 @@ export class AiPlanService {
       explanation,
     }
   }
+
 }
 
 

@@ -28,7 +28,12 @@ export class AiInsightsController {
     }
 
     const opts = parsedDays !== undefined ? { days: parsedDays } : undefined
-    return this.aiInsightsService.getInsightsForUser(userId, username, opts)
+    const result = await this.aiInsightsService.getInsightsForUser(userId, username, opts)
+    
+    // Set cache header
+    req.res?.setHeader('x-ai-cache', result.cache)
+    
+    return result.payload
   }
 }
 

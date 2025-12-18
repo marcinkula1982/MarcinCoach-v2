@@ -8,10 +8,13 @@ export type TrainingAdjustment = {
     | 'add_rest_day'
     | 'swap_quality_day'
     | 'surface_constraint'
-    | 'shoe_constraint';
+    | 'shoe_constraint'
+    | 'recovery_focus'
+    | 'technique_focus';
   severity: 'low' | 'medium' | 'high';
   rationale: string;
   evidence: Array<{ key: string; value: string | number | boolean }>;
+  params?: Record<string, any>;
 };
 
 export type TrainingAdjustments = {

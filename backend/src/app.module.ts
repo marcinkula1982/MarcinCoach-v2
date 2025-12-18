@@ -11,6 +11,8 @@ import { AiInsightsModule } from './ai-insights/ai-insights.module'
 import { TrainingAdjustmentsModule } from './training-adjustments/training-adjustments.module'
 import { AiPlanModule } from './ai-plan/ai-plan.module'
 import { AiRateLimitModule } from './ai-rate-limit/ai-rate-limit.module'
+import { AiCacheModule } from './ai-cache/ai-cache.module'
+import { TrainingFeedbackV2Module } from './training-feedback-v2/training-feedback-v2.module'
 
 @Module({
   imports: [
@@ -25,6 +27,8 @@ import { AiRateLimitModule } from './ai-rate-limit/ai-rate-limit.module'
     TrainingAdjustmentsModule,
     AiPlanModule,
     AiRateLimitModule,
+    AiCacheModule,
+    TrainingFeedbackV2Module,
   ],
   controllers: [AppController],
 })

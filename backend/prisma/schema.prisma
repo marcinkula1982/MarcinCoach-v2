@@ -8,10 +8,11 @@ datasource db {
 }
 
 model User {
-  id         Int       @id @default(autoincrement())
-  externalId String    @unique
+  id         Int                  @id @default(autoincrement())
+  externalId String               @unique
   workouts   Workout[]
-  createdAt  DateTime  @default(now())
+  feedbacks  TrainingFeedbackV2[]
+  createdAt  DateTime             @default(now())
 
   /// Nawigacyjna relacja do konta logowania (AuthUser) – nie używana do logiki domenowej.
   authUser AuthUser? @relation("AuthUserToUser")
@@ -23,9 +24,9 @@ model User {
 }
 
 model Workout {
-  id               Int            @id @default(autoincrement())
+  id               Int                 @id @default(autoincrement())
   userId           Int
-  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   action           String
   kind             String
   summary          String
@@ -35,13 +36,14 @@ model Workout {
   tcxRaw           String?
   fitRaw           String? // base64 albo tekst (na start)
   raw              WorkoutRawTcx?
-  source           String         @default("MANUAL_UPLOAD")
+  source           String              @default("MANUAL_UPLOAD")
   sourceActivityId String?
   sourceUserId     String?
   /// Stabilny klucz deduplikacji per użytkownik (source + aktywność lub znormalizowany start/długość/dystans)
   dedupeKey        String
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  feedback         TrainingFeedbackV2?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
 
   @@unique([userId, dedupeKey], name: "userId_dedupeKey")
   @@index([userId])
@@ -91,4 +93,19 @@ model UserProfile {
   constraints      String? // textified JSON
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+}
+
+model TrainingFeedbackV2 {
+  id        Int      @id @default(autoincrement())
+  workoutId Int      @unique
+  workout   Workout  @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// JSON string - snapshot deterministyczny feedbacku
+  feedback  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([workoutId])
 }

@@ -9,6 +9,7 @@ import { UserProfileService } from '../user-profile/user-profile.service'
 import type { PlanFeedbackSignals } from '../training-feedback/training-feedback.types'
 import type { AiInsights, AiRisk } from './ai-insights.types'
 import { aiInsightsSchema } from './ai-insights.schema'
+import { AiCacheService } from '../ai-cache/ai-cache.service'
 
 const stableStringify = require('fast-json-stable-stringify')
 
@@ -25,6 +26,7 @@ export class AiInsightsService {
   constructor(
     private readonly trainingFeedbackService: TrainingFeedbackService,
     private readonly userProfileService: UserProfileService,
+    private readonly aiCacheService: AiCacheService,
   ) {}
 
   private getProvider(): 'stub' | 'openai' {
@@ -163,8 +165,14 @@ export class AiInsightsService {
     userId: number,
     username: string,
     opts?: { days?: number },
-  ): Promise<AiInsights> {
+  ): Promise<{ payload: AiInsights; cache: 'hit' | 'miss' }> {
     const days = opts?.days ?? 28
+
+    // Check cache
+    const cached = this.aiCacheService.get<AiInsights>('insights', userId, days)
+    if (cached) {
+      return cached
+    }
 
     const feedback = await this.trainingFeedbackService.getFeedbackForUser(userId, { days })
     const constraints = await this.userProfileService.getConstraintsForUser(userId)
@@ -195,7 +203,12 @@ export class AiInsightsService {
       )
     }
 
-    return validated.data
+    const payload_result = validated.data
+
+    // Store in cache
+    this.aiCacheService.set('insights', userId, days, payload_result)
+
+    return { payload: payload_result, cache: 'miss' }
   }
 }
 

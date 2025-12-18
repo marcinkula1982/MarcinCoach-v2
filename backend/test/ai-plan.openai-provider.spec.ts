@@ -6,6 +6,8 @@ describe('AiPlanService (openai provider; mocked)', () => {
   let service: any
   let mockResponsesCreate: jest.Mock
   let mockOpenAIConstructor: jest.Mock
+  let mockAiCacheService: any
+  let mockTrainingFeedbackV2Service: any
 
   beforeEach(() => {
     jest.resetModules()
@@ -18,8 +20,17 @@ describe('AiPlanService (openai provider; mocked)', () => {
 
     jest.doMock('openai', () => mockOpenAIConstructor)
 
+    mockAiCacheService = {
+      get: jest.fn().mockReturnValue(null),
+      set: jest.fn(),
+    }
+
+    mockTrainingFeedbackV2Service = {
+      getLatestFeedbackSignalsForUser: jest.fn().mockResolvedValue(undefined),
+    }
+
     const { AiPlanService } = require('../src/ai-plan/ai-plan.service')
-    service = new AiPlanService()
+    service = new AiPlanService(mockAiCacheService, mockTrainingFeedbackV2Service)
 
     process.env.AI_PLAN_PROVIDER = 'openai'
     process.env.OPENAI_API_KEY = 'dummy'
@@ -93,7 +104,7 @@ describe('AiPlanService (openai provider; mocked)', () => {
       output_text: JSON.stringify(mockExplanation),
     })
 
-    const out = await service.buildResponse(ctx, adjustments, plan)
+    const out = await service.buildResponse(1, ctx, adjustments, plan)
 
     expect(out.explanation).toEqual(mockExplanation)
     expect(out.provider).toBe('openai')

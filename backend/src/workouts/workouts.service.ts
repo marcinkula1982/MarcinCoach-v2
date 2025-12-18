@@ -3,6 +3,8 @@ import {
   BadRequestException,
   NotFoundException,
   ConflictException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common'
 import { PrismaService } from '../prisma.service'
 import { SaveWorkoutDto } from './dto/save-workout.dto'
@@ -16,7 +18,14 @@ import type { IntensityBuckets } from '../types/metrics.types'
 
 @Injectable()
 export class WorkoutsService {
+  private trainingFeedbackV2Service: any = null
+
   constructor(private readonly prisma: PrismaService) {}
+
+  // Lazy injection to avoid circular dependency
+  setTrainingFeedbackV2Service(service: any) {
+    this.trainingFeedbackV2Service = service
+  }
 
   private safeJsonParse<T = any>(val: any): T | null {
     if (val == null) return null
@@ -267,7 +276,7 @@ export class WorkoutsService {
       startTimeIso: summary.startTimeIso,
     }
 
-    // JEDEN punkt prawdy: importWorkout (dedupe + zapis)
+    // JEDEN punkt prawdy: importWorkout (dedupe + zapis + feedback)
     return this.importWorkout(userId, username, dto)
   }
 

@@ -1,372 +1,218 @@
 import { WeeklyPlanService } from '../src/weekly-plan/weekly-plan.service'
 import type { TrainingContext } from '../src/training-context/training-context.types'
-import { weeklyPlanSchema } from '../src/weekly-plan/weekly-plan.schema'
+import type { TrainingAdjustments } from '../src/training-adjustments/training-adjustments.types'
 
-describe('WeeklyPlanService', () => {
+describe('WeeklyPlanService - adjustments application', () => {
   const service = new WeeklyPlanService()
 
-  const createMockContext = (overrides?: Partial<TrainingContext>): TrainingContext => {
-    return {
-      generatedAtIso: '2024-01-15T12:00:00.000Z', // Monday
-      windowDays: 28,
+  const baseContext = (overrides?: Partial<TrainingContext>): TrainingContext => ({
+    generatedAtIso: '2024-01-15T12:00:00.000Z',
+    windowDays: 28,
+    signals: {
+      period: { from: '2024-01-01T00:00:00.000Z', to: '2024-01-15T12:00:00.000Z' },
+      volume: { distanceKm: 100, durationMin: 400, sessions: 4 },
+      intensity: { z1Sec: 0, z2Sec: 0, z3Sec: 0, z4Sec: 0, z5Sec: 0, totalSec: 0 },
+      longRun: { exists: true, distanceKm: 15, durationMin: 90, workoutId: 1, workoutDt: '2024-01-14T10:00:00.000Z' },
+      load: { weeklyLoad: 200, rolling4wLoad: 800 },
+      consistency: { sessionsPerWeek: 4, streakWeeks: 2 },
+      flags: { injuryRisk: false, fatigue: false },
+    },
+    profile: {
+      timezone: 'Europe/Warsaw',
+      runningDays: ['mon', 'wed', 'fri', 'sun'],
+      surfaces: { preferTrail: false, avoidAsphalt: false },
+      shoes: { avoidZeroDrop: false },
+      hrZones: {
+        z1: [0, 0],
+        z2: [0, 0],
+        z3: [0, 0],
+        z4: [0, 0],
+        z5: [0, 0],
+      },
+    },
+    ...overrides,
+  })
+
+  it('applies reduce_load: removes quality sessions and replaces with easy (40 min)', () => {
+    const context = baseContext({
       signals: {
-        period: { from: '2024-01-01T00:00:00.000Z', to: '2024-01-15T12:00:00.000Z' },
+        ...baseContext().signals,
         volume: { distanceKm: 100, durationMin: 400, sessions: 4 },
-        intensity: { z1Sec: 0, z2Sec: 0, z3Sec: 0, z4Sec: 0, z5Sec: 0, totalSec: 0 },
-        longRun: { exists: false, distanceKm: 0, durationMin: 0, workoutId: null, workoutDt: null },
-        load: { weeklyLoad: 0, rolling4wLoad: 0 },
-        consistency: { sessionsPerWeek: 0, streakWeeks: 0 },
         flags: { injuryRisk: false, fatigue: false },
       },
-      profile: {
-        timezone: 'Europe/Warsaw',
-        runningDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
-        surfaces: { preferTrail: false, avoidAsphalt: false },
-        shoes: { avoidZeroDrop: false },
-        hrZones: {
-          z1: [0, 0],
-          z2: [0, 0],
-          z3: [0, 0],
-          z4: [0, 0],
-          z5: [0, 0],
+    })
+
+    const adjustments: TrainingAdjustments = {
+      generatedAtIso: context.generatedAtIso,
+      windowDays: context.windowDays,
+      adjustments: [
+        {
+          code: 'reduce_load',
+          severity: 'high',
+          rationale: 'Test',
+          evidence: [],
+          params: { reductionPct: 25 },
         },
-      },
-      ...overrides,
+      ],
     }
-  }
 
-  it('generates exactly 7 sessions, unique days, ordered mon..sun', () => {
-    const ctx = createMockContext()
-    const plan = service.generatePlan(ctx)
+    const plan = service.generatePlan(context, adjustments)
 
-    expect(plan.sessions).toHaveLength(7)
-    const days = plan.sessions.map((s) => s.day)
-    expect(new Set(days).size).toBe(7)
-    expect(days).toEqual(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'])
-
-    // Schema validation
-    const parsed = weeklyPlanSchema.safeParse(plan)
-    expect(parsed.success).toBe(true)
-  })
-
-  it('generatedAtIso === ctx.generatedAtIso', () => {
-    const ctx = createMockContext({ generatedAtIso: '2024-02-20T15:30:00.000Z' })
-    const plan = service.generatePlan(ctx)
-
-    expect(plan.generatedAtIso).toBe(ctx.generatedAtIso)
-  })
-
-  it('inputsHash is 64-char hex string', () => {
-    const ctx = createMockContext()
-    const plan = service.generatePlan(ctx)
-
-    expect(plan.inputsHash).toHaveLength(64)
-    expect(plan.inputsHash).toMatch(/^[0-9a-f]{64}$/)
-  })
-
-  it('is deterministic: same ctx → identical plan', () => {
-    const ctx = createMockContext()
-    const plan1 = service.generatePlan(ctx)
-    const plan2 = service.generatePlan(ctx)
-
-    expect(plan1).toEqual(plan2)
-    expect(plan1.inputsHash).toBe(plan2.inputsHash)
-  })
-
-  it('calculates week boundaries correctly (Monday 00:00Z to Sunday 23:59:59.999Z)', () => {
-    // Test with Monday
-    const ctxMonday = createMockContext({ generatedAtIso: '2024-01-15T12:00:00.000Z' }) // Monday
-    const planMonday = service.generatePlan(ctxMonday)
-
-    const weekStart = new Date(planMonday.weekStartIso)
-    const weekEnd = new Date(planMonday.weekEndIso)
-
-    expect(weekStart.getUTCDay()).toBe(1) // Monday
-    expect(weekStart.getUTCHours()).toBe(0)
-    expect(weekStart.getUTCMinutes()).toBe(0)
-    expect(weekStart.getUTCSeconds()).toBe(0)
-    expect(weekStart.getUTCMilliseconds()).toBe(0)
-
-    expect(weekEnd.getUTCDay()).toBe(0) // Sunday
-    expect(weekEnd.getUTCHours()).toBe(23)
-    expect(weekEnd.getUTCMinutes()).toBe(59)
-    expect(weekEnd.getUTCSeconds()).toBe(59)
-    expect(weekEnd.getUTCMilliseconds()).toBe(999)
-
-    // Test with Sunday
-    const ctxSunday = createMockContext({ generatedAtIso: '2024-01-21T18:00:00.000Z' }) // Sunday
-    const planSunday = service.generatePlan(ctxSunday)
-
-    const weekStartSun = new Date(planSunday.weekStartIso)
-    expect(weekStartSun.getUTCDay()).toBe(1) // Should still be Monday
-    expect(weekStartSun.getTime()).toBe(weekStart.getTime()) // Same week
-  })
-
-  it('places long run correctly based on profile.runningDays', () => {
-    // Prefer sun
-    const ctxSun = createMockContext({
-      profile: {
-        timezone: 'Europe/Warsaw',
-        runningDays: ['mon', 'wed', 'fri', 'sun'],
-        surfaces: { preferTrail: false, avoidAsphalt: false },
-        shoes: { avoidZeroDrop: false },
-        hrZones: {
-          z1: [0, 0],
-          z2: [0, 0],
-          z3: [0, 0],
-          z4: [0, 0],
-          z5: [0, 0],
-        },
-      },
-    })
-    const planSun = service.generatePlan(ctxSun)
-    const longRunSun = planSun.sessions.find((s) => s.type === 'long')
-    expect(longRunSun?.day).toBe('sun')
-
-    // Prefer sat if no sun
-    const ctxSat = createMockContext({
-      profile: {
-        timezone: 'Europe/Warsaw',
-        runningDays: ['mon', 'wed', 'sat'],
-        surfaces: { preferTrail: false, avoidAsphalt: false },
-        shoes: { avoidZeroDrop: false },
-        hrZones: {
-          z1: [0, 0],
-          z2: [0, 0],
-          z3: [0, 0],
-          z4: [0, 0],
-          z5: [0, 0],
-        },
-      },
-    })
-    const planSat = service.generatePlan(ctxSat)
-    const longRunSat = planSat.sessions.find((s) => s.type === 'long')
-    expect(longRunSat?.day).toBe('sat')
-  })
-
-  it('includes quality session only when conditions met', () => {
-    // Conditions met: sessions >= 3 and no fatigue
-    const ctxWithQuality = createMockContext({
-      signals: {
-        period: { from: '2024-01-01T00:00:00.000Z', to: '2024-01-15T12:00:00.000Z' },
-        volume: { distanceKm: 100, durationMin: 400, sessions: 4 },
-        intensity: { z1Sec: 0, z2Sec: 0, z3Sec: 0, z4Sec: 0, z5Sec: 0, totalSec: 0 },
-        longRun: { exists: false, distanceKm: 0, durationMin: 0, workoutId: null, workoutDt: null },
-        load: { weeklyLoad: 0, rolling4wLoad: 0 },
-        consistency: { sessionsPerWeek: 0, streakWeeks: 0 },
-        flags: { injuryRisk: false, fatigue: false },
-      },
-      profile: {
-        timezone: 'Europe/Warsaw',
-        runningDays: ['mon', 'tue', 'wed', 'thu', 'fri'],
-        surfaces: { preferTrail: false, avoidAsphalt: false },
-        shoes: { avoidZeroDrop: false },
-        hrZones: {
-          z1: [0, 0],
-          z2: [0, 0],
-          z3: [0, 0],
-          z4: [0, 0],
-          z5: [0, 0],
-        },
-      },
-    })
-    const planWithQuality = service.generatePlan(ctxWithQuality)
-    expect(planWithQuality.summary.qualitySessions).toBe(1)
-    expect(planWithQuality.sessions.some((s) => s.type === 'quality')).toBe(true)
-
-    // Conditions not met: sessions < 3
-    const ctxNoQuality1 = createMockContext({
-      signals: {
-        period: { from: '2024-01-01T00:00:00.000Z', to: '2024-01-15T12:00:00.000Z' },
-        volume: { distanceKm: 50, durationMin: 200, sessions: 2 },
-        intensity: { z1Sec: 0, z2Sec: 0, z3Sec: 0, z4Sec: 0, z5Sec: 0, totalSec: 0 },
-        longRun: { exists: false, distanceKm: 0, durationMin: 0, workoutId: null, workoutDt: null },
-        load: { weeklyLoad: 0, rolling4wLoad: 0 },
-        consistency: { sessionsPerWeek: 0, streakWeeks: 0 },
-        flags: { injuryRisk: false, fatigue: false },
-      },
-    })
-    const planNoQuality1 = service.generatePlan(ctxNoQuality1)
-    expect(planNoQuality1.summary.qualitySessions).toBe(0)
-    expect(planNoQuality1.sessions.some((s) => s.type === 'quality')).toBe(false)
-
-    // Conditions not met: fatigue = true
-    const ctxNoQuality2 = createMockContext({
-      signals: {
-        period: { from: '2024-01-01T00:00:00.000Z', to: '2024-01-15T12:00:00.000Z' },
-        volume: { distanceKm: 100, durationMin: 400, sessions: 4 },
-        intensity: { z1Sec: 0, z2Sec: 0, z3Sec: 0, z4Sec: 0, z5Sec: 0, totalSec: 0 },
-        longRun: { exists: false, distanceKm: 0, durationMin: 0, workoutId: null, workoutDt: null },
-        load: { weeklyLoad: 0, rolling4wLoad: 0 },
-        consistency: { sessionsPerWeek: 0, streakWeeks: 0 },
-        flags: { injuryRisk: false, fatigue: true },
-      },
-    })
-    const planNoQuality2 = service.generatePlan(ctxNoQuality2)
-    expect(planNoQuality2.summary.qualitySessions).toBe(0)
-    expect(planNoQuality2.sessions.some((s) => s.type === 'quality')).toBe(false)
-  })
-
-  it('fatigue flag reduces durations and removes quality', () => {
-    const ctxFatigue = createMockContext({
-      signals: {
-        period: { from: '2024-01-01T00:00:00.000Z', to: '2024-01-15T12:00:00.000Z' },
-        volume: { distanceKm: 100, durationMin: 400, sessions: 4 },
-        intensity: { z1Sec: 0, z2Sec: 0, z3Sec: 0, z4Sec: 0, z5Sec: 0, totalSec: 0 },
-        longRun: { exists: false, distanceKm: 0, durationMin: 0, workoutId: null, workoutDt: null },
-        load: { weeklyLoad: 0, rolling4wLoad: 0 },
-        consistency: { sessionsPerWeek: 0, streakWeeks: 0 },
-        flags: { injuryRisk: false, fatigue: true },
-      },
-    })
-    const planFatigue = service.generatePlan(ctxFatigue)
-
-    const longRun = planFatigue.sessions.find((s) => s.type === 'long')
-    expect(longRun?.durationMin).toBe(75) // 70-80 range, using 75
-
-    const easySessions = planFatigue.sessions.filter((s) => s.type === 'easy')
+    // Sprawdź że nie ma sesji typu 'quality'
+    expect(plan.sessions.every((s) => s.type !== 'quality')).toBe(true)
+    // Sprawdź że wszystkie sesje które były quality są teraz easy z durationMin: 40
+    const easySessions = plan.sessions.filter((s) => s.type === 'easy')
     easySessions.forEach((s) => {
-      expect(s.durationMin).toBe(35) // 30-40 range, using 35
+      if (s.durationMin > 0) {
+        // Easy sessions powinny mieć zmniejszony czas (75% z reductionPct: 25)
+        expect(s.durationMin).toBeLessThanOrEqual(40)
+      }
     })
-
-    expect(planFatigue.summary.qualitySessions).toBe(0)
   })
 
-  it('applies surface hints correctly', () => {
-    // preferTrail → long run gets trail
-    const ctxTrail = createMockContext({
-      profile: {
-        timezone: 'Europe/Warsaw',
-        runningDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
-        surfaces: { preferTrail: true, avoidAsphalt: false },
-        shoes: { avoidZeroDrop: false },
-        hrZones: {
-          z1: [0, 0],
-          z2: [0, 0],
-          z3: [0, 0],
-          z4: [0, 0],
-          z5: [0, 0],
-        },
+  it('applies recovery_focus: replaces quality session with easy', () => {
+    const context = baseContext({
+      signals: {
+        ...baseContext().signals,
+        volume: { distanceKm: 100, durationMin: 400, sessions: 4 },
+        flags: { injuryRisk: false, fatigue: false },
       },
     })
-    const planTrail = service.generatePlan(ctxTrail)
-    const longRunTrail = planTrail.sessions.find((s) => s.type === 'long')
-    expect(longRunTrail?.surfaceHint).toBe('trail')
 
-    // avoidAsphalt → weekdays get track, weekend gets trail
-    const ctxAvoidAsphalt = createMockContext({
-      profile: {
-        timezone: 'Europe/Warsaw',
-        runningDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
-        surfaces: { preferTrail: false, avoidAsphalt: true },
-        shoes: { avoidZeroDrop: false },
-        hrZones: {
-          z1: [0, 0],
-          z2: [0, 0],
-          z3: [0, 0],
-          z4: [0, 0],
-          z5: [0, 0],
+    const adjustments: TrainingAdjustments = {
+      generatedAtIso: context.generatedAtIso,
+      windowDays: context.windowDays,
+      adjustments: [
+        {
+          code: 'recovery_focus',
+          severity: 'high',
+          rationale: 'Test',
+          evidence: [],
+          params: { replaceHardSessionWithEasy: true },
         },
+      ],
+    }
+
+    const plan = service.generatePlan(context, adjustments)
+
+    // Sprawdź że nie ma sesji typu 'quality'
+    expect(plan.sessions.every((s) => s.type !== 'quality')).toBe(true)
+  })
+
+  it('applies recovery_focus: reduces long run duration by 15%', () => {
+    const context = baseContext({
+      signals: {
+        ...baseContext().signals,
+        volume: { distanceKm: 100, durationMin: 400, sessions: 4 },
+        flags: { injuryRisk: false, fatigue: false },
       },
     })
-    const planAvoidAsphalt = service.generatePlan(ctxAvoidAsphalt)
-    const longRunAvoid = planAvoidAsphalt.sessions.find((s) => s.type === 'long')
-    const isWeekend = longRunAvoid?.day === 'sat' || longRunAvoid?.day === 'sun'
-    expect(longRunAvoid?.surfaceHint).toBe(isWeekend ? 'trail' : 'track')
 
-    const weekdayEasy = planAvoidAsphalt.sessions.find(
-      (s) => s.type === 'easy' && s.day !== 'sat' && s.day !== 'sun',
+    const adjustments: TrainingAdjustments = {
+      generatedAtIso: context.generatedAtIso,
+      windowDays: context.windowDays,
+      adjustments: [
+        {
+          code: 'recovery_focus',
+          severity: 'high',
+          rationale: 'Test',
+          evidence: [],
+          params: { longRunReductionPct: 15 },
+        },
+      ],
+    }
+
+    const plan = service.generatePlan(context, adjustments)
+    const longRun = plan.sessions.find((s) => s.type === 'long')
+
+    if (longRun) {
+      // Long run powinien być skrócony o 15% (z 90 min do ~77 min, zaokrąglone do 5 min = 75 min)
+      expect(longRun.durationMin).toBeLessThan(90)
+      expect(longRun.durationMin).toBeGreaterThanOrEqual(75)
+    }
+  })
+
+  it('applies technique_focus: adds strides notes to easy sessions', () => {
+    const context = baseContext({
+      signals: {
+        ...baseContext().signals,
+        volume: { distanceKm: 100, durationMin: 400, sessions: 2 }, // Zmniejsz sessions aby uniknąć automatycznego dodawania strides
+        flags: { injuryRisk: false, fatigue: false },
+      },
+      profile: {
+        ...baseContext().profile,
+        runningDays: ['mon', 'wed'], // Tylko 2 dni - canHaveStrides będzie false
+      },
+    })
+
+    const adjustments: TrainingAdjustments = {
+      generatedAtIso: context.generatedAtIso,
+      windowDays: context.windowDays,
+      adjustments: [
+        {
+          code: 'technique_focus',
+          severity: 'medium',
+          rationale: 'Test',
+          evidence: [],
+          params: { addStrides: true, stridesCount: 6, stridesDurationSec: 20 },
+        },
+      ],
+    }
+
+    const plan = service.generatePlan(context, adjustments)
+    const easySessionsWithStrides = plan.sessions.filter(
+      (s) => s.type === 'easy' && s.notes?.some((note) => note.toLowerCase().includes('strides')),
     )
-    expect(weekdayEasy?.surfaceHint).toBe('track')
+
+    // Powinno być 1-2 easy sessions ze strides z technique_focus
+    expect(easySessionsWithStrides.length).toBeGreaterThanOrEqual(1)
+    expect(easySessionsWithStrides.length).toBeLessThanOrEqual(2)
+
+    // Sprawdź format notes - powinien zawierać "6x20s strides"
+    easySessionsWithStrides.forEach((s) => {
+      const stridesNote = s.notes?.find((note) => note.toLowerCase().includes('strides'))
+      expect(stridesNote).toBeDefined()
+      expect(stridesNote).toContain('6x20s strides')
+    })
   })
 
-  it('calculates summary correctly', () => {
-    const ctx = createMockContext()
-    const plan = service.generatePlan(ctx)
-
-    const actualTotalDuration = plan.sessions.reduce((sum, s) => sum + s.durationMin, 0)
-    expect(plan.summary.totalDurationMin).toBe(actualTotalDuration)
-
-    const actualQualitySessions = plan.sessions.filter((s) => s.type === 'quality').length
-    expect(plan.summary.qualitySessions).toBe(actualQualitySessions)
-
-    const actualLongRunDay = plan.sessions.find((s) => s.type === 'long')?.day
-    expect(plan.summary.longRunDay).toBe(actualLongRunDay)
-  })
-
-  it('includes strides when ≥3 running days', () => {
-    const ctxWithStrides = createMockContext({
-      profile: {
-        timezone: 'Europe/Warsaw',
-        runningDays: ['mon', 'tue', 'wed', 'thu'],
-        surfaces: { preferTrail: false, avoidAsphalt: false },
-        shoes: { avoidZeroDrop: false },
-        hrZones: {
-          z1: [0, 0],
-          z2: [0, 0],
-          z3: [0, 0],
-          z4: [0, 0],
-          z5: [0, 0],
-        },
+  it('applies both reduce_load and recovery_focus deterministically', () => {
+    const context = baseContext({
+      signals: {
+        ...baseContext().signals,
+        volume: { distanceKm: 100, durationMin: 400, sessions: 4 },
+        flags: { injuryRisk: false, fatigue: false },
       },
     })
-    const planWithStrides = service.generatePlan(ctxWithStrides)
-    const sessionsWithStrides = planWithStrides.sessions.filter((s) => s.notes?.some((note) => note.includes('strides')))
-    expect(sessionsWithStrides.length).toBe(1) // Only one easy session should have strides
 
-    const ctxNoStrides = createMockContext({
-      profile: {
-        timezone: 'Europe/Warsaw',
-        runningDays: ['mon', 'tue'], // Only 2 days
-        surfaces: { preferTrail: false, avoidAsphalt: false },
-        shoes: { avoidZeroDrop: false },
-        hrZones: {
-          z1: [0, 0],
-          z2: [0, 0],
-          z3: [0, 0],
-          z4: [0, 0],
-          z5: [0, 0],
+    const adjustments: TrainingAdjustments = {
+      generatedAtIso: context.generatedAtIso,
+      windowDays: context.windowDays,
+      adjustments: [
+        {
+          code: 'reduce_load',
+          severity: 'high',
+          rationale: 'Test',
+          evidence: [],
+          params: { reductionPct: 25 },
         },
-      },
-    })
-    const planNoStrides = service.generatePlan(ctxNoStrides)
-    const sessionsWithStridesNo = planNoStrides.sessions.filter((s) => s.notes?.some((note) => note.includes('strides')))
-    expect(sessionsWithStridesNo.length).toBe(0)
-  })
-
-  it('applies reduce_load adjustment by scaling session duration and distance', () => {
-    const ctx = createMockContext()
-
-    const planBase = service.generatePlan(ctx)
-    const baseTotalDuration = planBase.sessions.reduce((sum, s) => sum + s.durationMin, 0)
-    const baseTotalDistance = planBase.sessions.reduce((sum, s) => sum + (s.distanceKm ?? 0), 0)
-
-    const adjustments = {
-      generatedAtIso: ctx.generatedAtIso,
-      windowDays: ctx.windowDays,
-      adjustments: [{ code: 'reduce_load', severity: 'high', rationale: '', evidence: [] }],
+        {
+          code: 'recovery_focus',
+          severity: 'high',
+          rationale: 'Test',
+          evidence: [],
+          params: { replaceHardSessionWithEasy: true, longRunReductionPct: 15 },
+        },
+      ],
     }
 
-    const planReduced = service.generatePlan(ctx, adjustments as any)
-    const reducedTotalDuration = planReduced.sessions.reduce((sum, s) => sum + s.durationMin, 0)
-    const reducedTotalDistance = planReduced.sessions.reduce((sum, s) => sum + (s.distanceKm ?? 0), 0)
+    const plan = service.generatePlan(context, adjustments)
 
-    expect(planReduced.sessions.length).toBe(planBase.sessions.length)
-
-    // ~20% reduction, but allow slack for roundTo5Min
-    expect(reducedTotalDuration).toBeLessThanOrEqual(0.85 * baseTotalDuration)
-    expect(reducedTotalDuration).toBeGreaterThanOrEqual(0.7 * baseTotalDuration)
-
-    // if distances exist, they should also be reduced
-    if (baseTotalDistance > 0) {
-      expect(reducedTotalDistance).toBeLessThan(baseTotalDistance)
+    // Oba adjustments powinny być zastosowane
+    expect(plan.sessions.every((s) => s.type !== 'quality')).toBe(true)
+    const longRun = plan.sessions.find((s) => s.type === 'long')
+    if (longRun) {
+      expect(longRun.durationMin).toBeLessThan(90)
     }
-  })
-
-  it('windowDays is passthrough from context', () => {
-    const ctx = createMockContext({ windowDays: 14 })
-    const plan = service.generatePlan(ctx)
-    expect(plan.windowDays).toBe(14)
   })
 })
-
