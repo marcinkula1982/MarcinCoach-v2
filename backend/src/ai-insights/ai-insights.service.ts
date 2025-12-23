@@ -171,7 +171,7 @@ export class AiInsightsService {
     // Check cache
     const cached = this.aiCacheService.get<AiInsights>('insights', userId, days)
     if (cached) {
-      return cached
+      return { payload: cached.payload, cache: 'hit' }
     }
 
     const feedback = await this.trainingFeedbackService.getFeedbackForUser(userId, { days })
