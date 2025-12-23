@@ -22,6 +22,17 @@ export class AiDailyRateLimitGuard implements CanActivate {
     }
 
     const limit = this.getDailyLimit()
+
+    if (limit === 0) {
+      throw new HttpException(
+        {
+          statusCode: 429,
+          message: 'AI disabled by configuration',
+        },
+        429,
+      )
+    }
+
     const result = this.limiter.consume(Number(userId), limit)
 
     if (!result.allowed) {
@@ -50,7 +61,7 @@ export class AiDailyRateLimitGuard implements CanActivate {
       : process.env.AI_DAILY_CALL_LIMIT_DEV
 
     const parsed = Number(raw)
-    if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed)
+    if (Number.isFinite(parsed) && parsed >= 0) return Math.floor(parsed)
     return fallback
   }
 }
