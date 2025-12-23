@@ -24,11 +24,10 @@ export class AiCacheService {
     return `${namespace}:${userId}:${dayKeyUtc}:${stableKey}`
   }
 
-  get<T>(namespace: Namespace, userId: number, days: number): { payload: T; cache: 'hit' } | null {
+  get<T>(namespace: Namespace, userId: number, days: number): T | null {
     const key = this.buildKey(namespace, userId, days)
     const entry = this.cache.get(key) as CacheEntry<T> | undefined
-    if (!entry) return null
-    return { payload: entry.value, cache: 'hit' }
+    return entry ? entry.value : null
   }
 
   set<T>(namespace: Namespace, userId: number, days: number, value: T): void {

@@ -18,7 +18,7 @@ export class AiPlanService {
 
   getCachedResponse(userId: number, days: number): AiPlanResponse | null {
     const cached = this.aiCacheService.get<AiPlanResponse>('plan', userId, days)
-    return cached ? cached.payload : null
+    return cached
   }
 
   setCachedResponse(userId: number, days: number, response: AiPlanResponse): void {
