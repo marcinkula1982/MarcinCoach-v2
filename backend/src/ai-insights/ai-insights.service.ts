@@ -1,7 +1,6 @@
 import {
   Injectable,
   InternalServerErrorException,
-  NotImplementedException,
 } from '@nestjs/common'
 import type { UserProfileConstraints } from '../training-context/training-context.types'
 import { TrainingFeedbackService } from '../training-feedback/training-feedback.service'
@@ -12,6 +11,7 @@ import { aiInsightsSchema } from './ai-insights.schema'
 import { AiCacheService } from '../ai-cache/ai-cache.service'
 
 const stableStringify = require('fast-json-stable-stringify')
+const OpenAI = require('openai')
 
 type AiInputPayload = {
   user: {
@@ -32,6 +32,37 @@ export class AiInsightsService {
   private getProvider(): 'stub' | 'openai' {
     const raw = (process.env.AI_INSIGHTS_PROVIDER || 'stub').toLowerCase()
     return raw === 'openai' ? 'openai' : 'stub'
+  }
+
+  private stripMarkdownFences(raw: string): string {
+    const trimmed = raw.trim()
+    if (!trimmed.startsWith('```')) return trimmed
+    return trimmed.replace(/^```[a-zA-Z]*\n?/, '').replace(/```$/, '').trim()
+  }
+
+  private extractResponseOutputText(response: any): string | undefined {
+    const direct = response?.output_text
+    if (typeof direct === 'string' && direct.trim().length > 0) return direct
+
+    const out = response?.output
+    if (!Array.isArray(out)) return undefined
+
+    for (const item of out) {
+      const content = item?.content
+      if (!Array.isArray(content)) continue
+
+      for (const c of content) {
+        if (c?.type === 'output_text' || c?.type === 'text') {
+          if (typeof c?.text === 'string' && c.text.trim().length > 0) return c.text
+          if (typeof c?.text?.value === 'string' && c.text.value.trim().length > 0) return c.text.value
+        }
+
+        // Fallback: even without type, accept plain string text
+        if (typeof c?.text === 'string' && c.text.trim().length > 0) return c.text
+      }
+    }
+
+    return undefined
   }
 
   private orderedRisks(risks: Set<AiRisk>): AiRisk[] {
@@ -99,50 +130,36 @@ export class AiInsightsService {
   }
 
   private async callOpenAI(payload: AiInputPayload): Promise<AiInsights> {
-    const apiKey = process.env.OPENAI_API_KEY || ''
-    if (!apiKey) {
-      throw new NotImplementedException('OpenAI not configured: missing OPENAI_API_KEY')
+    const apiKey = process.env.OPENAI_API_KEY
+    if (!apiKey || !apiKey.trim()) {
+      throw new InternalServerErrorException('OPENAI_API_KEY missing')
     }
 
-    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini'
-    const promptPayload = stableStringify(payload)
+    const client = new OpenAI({ apiKey })
+    const model = process.env.AI_INSIGHTS_MODEL ?? 'gpt-5-mini'
+    const maxOut = Number(process.env.AI_INSIGHTS_MAX_OUTPUT_TOKENS ?? '1200')
 
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'Return ONLY valid JSON (no markdown, no prose). The JSON must match this TypeScript type exactly: ' +
-              '{"generatedAtIso":string,"windowDays":number,"summary":string[<=5],"risks":("fatigue"|"inconsistency"|"low-compliance"|"none")[],"questions":string[<=3],"confidence":number(0..1)}. ' +
-              'generatedAtIso MUST equal feedback.generatedAtIso from the input payload.',
-          },
-          { role: 'user', content: promptPayload },
-        ],
-      }),
+    const instructions =
+      'Return ONLY valid JSON (no markdown, no prose). The JSON must match this TypeScript type exactly: ' +
+      '{"generatedAtIso":string,"windowDays":number,"summary":string[<=5],"risks":("fatigue"|"inconsistency"|"low-compliance"|"none")[],"questions":string[<=3],"confidence":number(0..1)}. ' +
+      'generatedAtIso MUST equal feedback.generatedAtIso from the input payload.'
+
+    const input = stableStringify(payload)
+
+    const response: any = await client.responses.create({
+      model,
+      instructions,
+      input,
+      max_output_tokens: maxOut,
     })
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new InternalServerErrorException(`OpenAI call failed: ${res.status} ${text}`)
+    const outputText = this.extractResponseOutputText(response)
+
+    if (typeof outputText !== 'string' || outputText.trim().length === 0) {
+      throw new InternalServerErrorException('OpenAI response missing text')
     }
 
-    const data: any = await res.json()
-    const content: string | undefined = data?.choices?.[0]?.message?.content
-    if (!content || typeof content !== 'string') {
-      throw new InternalServerErrorException('OpenAI response missing message.content')
-    }
-
-    const raw = content.trim()
-    const jsonText =
-      raw.startsWith('```') ? raw.replace(/^```[a-zA-Z]*\n?/, '').replace(/```$/, '').trim() : raw
+    const jsonText = this.stripMarkdownFences(outputText)
 
     let parsedJson: any
     try {
@@ -171,7 +188,7 @@ export class AiInsightsService {
     // Check cache
     const cached = this.aiCacheService.get<AiInsights>('insights', userId, days)
     if (cached) {
-      return { payload: cached.payload, cache: 'hit' }
+      return cached
     }
 
     const feedback = await this.trainingFeedbackService.getFeedbackForUser(userId, { days })
