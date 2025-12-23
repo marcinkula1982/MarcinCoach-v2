@@ -35,22 +35,15 @@ client.interceptors.response.use(
     const status = err?.response?.status
     const msg = err?.response?.data?.message
 
-    const isSessionExpired =
-      status === 401 &&
-      (msg === 'SESSION_EXPIRED' ||
-        msg === 'INVALID_SESSION' ||
-        msg === 'UNAUTHORIZED')
-
-    if (isSessionExpired) {
+    if (status === 401 && (msg === 'SESSION_EXPIRED' || msg === 'INVALID_SESSION')) {
       localStorage.removeItem('tcx-session-token')
       localStorage.removeItem('tcx-username')
-
-      // nie robimy window.location.reload() — dajemy sygnał aplikacji
-      window.dispatchEvent(new Event('auth:expired'))
+      window.location.reload()
     }
 
     return Promise.reject(err)
   },
 )
 
+export { client }
 export default client
