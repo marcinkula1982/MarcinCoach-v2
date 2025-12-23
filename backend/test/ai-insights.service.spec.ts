@@ -11,7 +11,12 @@ describe('AiInsightsService (stub)', () => {
     getConstraintsForUser: jest.fn(),
   } as any
 
-  const service = new AiInsightsService(mockTrainingFeedbackService, mockUserProfileService)
+  const mockAiCacheService = {
+    get: jest.fn().mockReturnValue(undefined),
+    set: jest.fn(),
+  }
+
+  const service = new AiInsightsService(mockTrainingFeedbackService, mockUserProfileService, mockAiCacheService as any)
 
   beforeEach(() => {
     process.env.AI_INSIGHTS_PROVIDER = 'stub'
@@ -39,13 +44,13 @@ describe('AiInsightsService (stub)', () => {
 
     const result = await service.getInsightsForUser(1, 'marcin', { days: 28 })
 
-    const parsed = aiInsightsSchema.safeParse(result)
+    const parsed = aiInsightsSchema.safeParse(result.payload)
     expect(parsed.success).toBe(true)
 
-    expect(result.generatedAtIso).toBe(feedback.generatedAtIso)
-    expect(result.windowDays).toBe(28)
-    expect(result.risks).toEqual(['none'])
-    expect(result.confidence).toBe(0.2)
+    expect(result.payload.generatedAtIso).toBe(feedback.generatedAtIso)
+    expect(result.payload.windowDays).toBe(28)
+    expect(result.payload.risks).toEqual(['none'])
+    expect(result.payload.confidence).toBe(0.2)
   })
 
   it('unplannedPct>=50 and fatigue.trueCount>=2 -> includes risks fatigue and low-compliance', async () => {
@@ -70,12 +75,12 @@ describe('AiInsightsService (stub)', () => {
 
     const result = await service.getInsightsForUser(1, 'marcin', { days: 28 })
 
-    const parsed = aiInsightsSchema.safeParse(result)
+    const parsed = aiInsightsSchema.safeParse(result.payload)
     expect(parsed.success).toBe(true)
 
-    expect(result.generatedAtIso).toBe(feedback.generatedAtIso)
-    expect(result.windowDays).toBe(28)
-    expect(result.risks).toEqual(expect.arrayContaining(['fatigue', 'low-compliance']))
+    expect(result.payload.generatedAtIso).toBe(feedback.generatedAtIso)
+    expect(result.payload.windowDays).toBe(28)
+    expect(result.payload.risks).toEqual(expect.arrayContaining(['fatigue', 'low-compliance']))
   })
 })
 
