@@ -9,7 +9,7 @@ import { PrismaService } from '../prisma.service'
 
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
-  private readonly IDLE_MS = 24 * 60 * 60 * 1000 // 24h
+  private readonly IDLE_MS = 24 * 60 * 60 * 1000
 
   constructor(private prisma: PrismaService) {}
 
@@ -17,43 +17,41 @@ export class SessionAuthGuard implements CanActivate {
     const req = ctx.switchToHttp().getRequest<Request & { authUser?: any }>()
 
     const token = req.header('x-session-token') || ''
+    const username = req.header('x-username') || ''
 
-    if (!token) {
+    if (!token || !username) {
       throw new UnauthorizedException('MISSING_SESSION_HEADERS')
     }
 
     const session = await this.prisma.session.findUnique({
       where: { token },
-      include: { user: true }, // AuthUser (linked to canonical User via userId)
+      include: { user: true },
     })
 
     if (!session) {
       throw new UnauthorizedException('INVALID_SESSION')
     }
 
-    const now = Date.now()
-    const last = (session.lastSeenAt ?? session.createdAt).getTime()
+    if (session.user.username !== username) {
+      throw new UnauthorizedException('SESSION_USER_MISMATCH')
+    }
 
-    if (now - last > this.IDLE_MS) {
-      // porządek: kasujemy przeterminowaną sesję
+    const last = session.lastSeenAt ?? session.createdAt
+    if (Date.now() - last.getTime() > this.IDLE_MS) {
       await this.prisma.session.delete({ where: { token } }).catch(() => {})
       throw new UnauthorizedException('SESSION_EXPIRED')
     }
 
-    // sliding refresh
     await this.prisma.session.update({
       where: { token },
       data: { lastSeenAt: new Date() },
     })
 
-    const authUser: any = session.user
     req.authUser = {
-      authUserId: authUser.id,
-      userId: authUser.userId,
-      username: authUser.username,
+      username: session.user.username,
+      userId: session.user.userId,
     }
+
     return true
   }
 }
-
-
