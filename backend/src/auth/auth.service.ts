@@ -56,30 +56,16 @@ export class AuthService {
     return { sessionToken: token, username: user.username }
   }
 
+  /**
+   * @deprecated
+   * SessionAuthGuard jest jedynym źródłem prawdy dla walidacji sesji (idle timeout + sliding refresh + username match).
+   * Ta metoda jest utrzymywana tymczasowo wyłącznie dla kompatybilności i nie powinna być używana w nowych miejscach.
+   */
   async validateSession(token: string) {
-    const session = await this.prisma.session.findUnique({
-      where: { token },
-      include: { user: true },
-    })
-
-    if (!session) return null
-
-    // Sprawdzenie wygaśnięcia
-    const last = session.lastSeenAt ?? session.createdAt
-    const now = Date.now()
-    const lastTime = new Date(last).getTime()
-
-    if (now - lastTime > this.IDLE_MS) {
-      throw new UnauthorizedException('SESSION_EXPIRED')
-    }
-
-    // Sliding refresh - aktualizacja lastSeenAt
-    await this.prisma.session.update({
-      where: { id: session.id },
-      data: { lastSeenAt: new Date() },
-    })
-
-    return session.user
+    throw new Error(
+      'validateSession() is deprecated. Use SessionAuthGuard instead.',
+    )
+    return null
   }
 }
 
