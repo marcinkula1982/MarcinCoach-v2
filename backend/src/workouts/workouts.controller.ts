@@ -31,7 +31,6 @@ import { SessionAuthGuard } from '../auth/session-auth.guard'
 type AuthedRequest = Request & {
   authUser?: {
     userId?: number
-    authUserId?: number
     username?: string
   }
 }
