@@ -15,12 +15,18 @@ import { computeMetrics } from '../utils/metrics'
 import type { Express } from 'express'
 import type { WorkoutSummary } from '../types/workout.types'
 import type { IntensityBuckets } from '../types/metrics.types'
+import { PlanSnapshotService } from '../plan-snapshot/plan-snapshot.service'
+import { evaluatePlanCompliance } from '../training-plan/plan-compliance.evaluate'
+import type { PlanCompliance } from '../training-plan/plan-compliance.types'
 
 @Injectable()
 export class WorkoutsService {
   private trainingFeedbackV2Service: any = null
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly planSnapshotService: PlanSnapshotService,
+  ) {}
 
   // Lazy injection to avoid circular dependency
   setTrainingFeedbackV2Service(service: any) {
@@ -192,15 +198,41 @@ export class WorkoutsService {
       },
     })
 
+    // Oblicz PlanCompliance i zapisz do workoutMeta
+    try {
+      await this.computeAndSavePlanCompliance(userId, workout.id, dto.summary, workout.createdAt)
+    } catch (err) {
+      // Nie przerywaj jeśli obliczenie compliance się nie powiodło
+      console.error('Failed to compute plan compliance:', err)
+    }
+
+    // Refetch workout to get updated workoutMeta after compliance computation
+    const updatedWorkout = await this.prisma.workout.findUnique({
+      where: { id: workout.id },
+      select: {
+        id: true,
+        action: true,
+        kind: true,
+        summary: true,
+        raceMeta: true,
+        workoutMeta: true,
+        createdAt: true,
+      },
+    })
+
+    if (!updatedWorkout) {
+      throw new NotFoundException('Workout not found after creation')
+    }
+
     return {
-      id: workout.id,
+      id: updatedWorkout.id,
       userId,
-      action: workout.action,
-      kind: workout.kind,
-      summary: this.safeJsonParse(workout.summary) ?? {},
-      raceMeta: this.safeJsonParse(workout.raceMeta) ?? undefined,
-      workoutMeta: this.safeJsonParse(workout.workoutMeta) ?? undefined,
-      createdAt: workout.createdAt,
+      action: updatedWorkout.action,
+      kind: updatedWorkout.kind,
+      summary: this.safeJsonParse(updatedWorkout.summary) ?? {},
+      raceMeta: this.safeJsonParse(updatedWorkout.raceMeta) ?? undefined,
+      workoutMeta: this.safeJsonParse(updatedWorkout.workoutMeta) ?? undefined,
+      createdAt: updatedWorkout.createdAt,
     }
   }
 
@@ -479,6 +511,66 @@ export class WorkoutsService {
     return this.prisma.workout.delete({
       where: { id },
     })
+  }
+
+  private async computeAndSavePlanCompliance(
+    userId: number,
+    workoutId: number,
+    summary: WorkoutSummary,
+    createdAt: Date,
+  ): Promise<void> {
+    // 1. Pobierz workout date
+    const workoutDate = summary.startTimeIso ? new Date(summary.startTimeIso) : createdAt
+    const date = new Date(
+      Date.UTC(
+        workoutDate.getUTCFullYear(),
+        workoutDate.getUTCMonth(),
+        workoutDate.getUTCDate(),
+      ),
+    )
+    const dateKey = date.toISOString().split('T')[0]! // Format: 'YYYY-MM-DD'
+    const workoutDateIso = summary.startTimeIso ?? createdAt.toISOString()
+
+    // 2. Pobierz snapshot
+    const snapshot = await this.planSnapshotService.getForWorkoutDate(userId, workoutDateIso)
+
+    // 3. Znajdź matching day
+    const plannedDay = snapshot?.days.find((d) => d.dateKey === dateKey) ?? null
+
+    // 4. Oblicz actual metrics
+    const durationMin =
+      (summary.trimmed?.durationSec ?? summary.original?.durationSec ?? 0) / 60
+    const distanceM =
+      summary.trimmed?.distanceM ?? summary.original?.distanceM ?? null
+    const distanceKm = distanceM !== null ? distanceM / 1000 : undefined
+
+    const actual =
+      durationMin > 0 || (distanceKm !== undefined && distanceKm > 0)
+        ? {
+            durationMin,
+            ...(distanceKm !== undefined ? { distanceKm } : {}),
+          }
+        : null
+
+    // 5. Wywołaj evaluatePlanCompliance
+    const compliance: PlanCompliance = evaluatePlanCompliance(plannedDay, actual)
+
+    // 6. Zapisz compliance do workoutMeta (merge, nie nadpisuj)
+    const existingMeta = await this.prisma.workout.findUnique({
+      where: { id: workoutId },
+      select: { workoutMeta: true },
+    })
+
+    const existingMetaParsed = this.safeJsonParse<Record<string, any>>(
+      existingMeta?.workoutMeta,
+    ) ?? {}
+
+    const updatedMeta = {
+      ...existingMetaParsed,
+      planCompliance: compliance,
+    }
+
+    await this.updateMeta(workoutId, updatedMeta, userId)
   }
 
   /**

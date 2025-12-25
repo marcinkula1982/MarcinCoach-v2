@@ -29,10 +29,7 @@ describe('AiCacheService', () => {
     service.set('plan', 123, 28, payload)
 
     const result = service.get('plan', 123, 28)
-    expect(result).toMatchObject({
-      payload,
-      cache: 'hit',
-    })
+    expect(result).toMatchObject(payload)
   })
 
   it('stores and retrieves cache entry for insights', () => {
@@ -40,10 +37,7 @@ describe('AiCacheService', () => {
     service.set('insights', 456, 28, payload)
 
     const result = service.get('insights', 456, 28)
-    expect(result).toMatchObject({
-      payload,
-      cache: 'hit',
-    })
+    expect(result).toMatchObject(payload)
   })
 
   it('returns null for different userId', () => {
@@ -72,7 +66,7 @@ describe('AiCacheService', () => {
     service.set('plan', 123, 28, { test: 'new' })
 
     const result = service.get('plan', 123, 28)
-    expect(result?.payload).toMatchObject({ test: 'new' })
+    expect(result).toMatchObject({ test: 'new' })
   })
 
   it('cleans up entries from other UTC days on set', () => {
@@ -87,7 +81,7 @@ describe('AiCacheService', () => {
 
     // Old entry should be gone
     const oldResult = service.get('plan', 123, 28)
-    expect(oldResult?.payload).toMatchObject({ test: 'tomorrow' })
+    expect(oldResult).toMatchObject({ test: 'tomorrow' })
 
     // Verify only one entry exists (the new one)
     now = new Date('2025-12-17T10:00:00.000Z')
@@ -103,9 +97,9 @@ describe('AiCacheService', () => {
     service.set('plan', 456, 28, { test: 'plan2' })
 
     // All should still exist
-    expect(service.get('plan', 123, 28)?.payload).toMatchObject({ test: 'plan1' })
-    expect(service.get('insights', 123, 28)?.payload).toMatchObject({ test: 'insights1' })
-    expect(service.get('plan', 456, 28)?.payload).toMatchObject({ test: 'plan2' })
+    expect(service.get('plan', 123, 28)).toMatchObject({ test: 'plan1' })
+    expect(service.get('insights', 123, 28)).toMatchObject({ test: 'insights1' })
+    expect(service.get('plan', 456, 28)).toMatchObject({ test: 'plan2' })
   })
 
   it('returns correct resetAtIsoUtc for next UTC midnight', () => {

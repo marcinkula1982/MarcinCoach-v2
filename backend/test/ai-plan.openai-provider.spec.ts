@@ -101,7 +101,15 @@ describe('AiPlanService (openai provider; mocked)', () => {
     }
 
     mockResponsesCreate.mockResolvedValueOnce({
-      output_text: JSON.stringify(mockExplanation),
+      status: 'completed',
+      output: [
+        {
+          type: 'message',
+          content: [
+            { type: 'output_text', text: JSON.stringify(mockExplanation) },
+          ],
+        },
+      ],
     })
 
     const out = await service.buildResponse(1, ctx, adjustments, plan)

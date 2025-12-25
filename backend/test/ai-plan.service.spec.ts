@@ -15,7 +15,11 @@ describe('AiPlanService (stub)', () => {
     getLatestFeedbackSignalsForUser: jest.fn().mockResolvedValue(undefined),
   } as any
 
-  const service = new AiPlanService(mockAiCacheService, mockTrainingFeedbackV2Service)
+  const mockPlanSnapshotService = {
+    saveForUser: jest.fn(),
+    getForWorkoutDate: jest.fn(),
+  }
+  const service = new AiPlanService(mockAiCacheService, mockTrainingFeedbackV2Service, mockPlanSnapshotService as any)
 
   beforeEach(() => {
     process.env.AI_PLAN_PROVIDER = 'stub'

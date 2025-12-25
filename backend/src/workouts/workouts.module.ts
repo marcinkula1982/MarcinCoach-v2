@@ -5,9 +5,10 @@ import { AuthModule } from '../auth/auth.module'
 import { PrismaService } from '../prisma.service'
 import { TrainingFeedbackV2Module } from '../training-feedback-v2/training-feedback-v2.module'
 import { TrainingFeedbackV2Service } from '../training-feedback-v2/training-feedback-v2.service'
+import { PlanSnapshotModule } from '../plan-snapshot/plan-snapshot.module'
 
 @Module({
-  imports: [AuthModule, TrainingFeedbackV2Module],
+  imports: [AuthModule, TrainingFeedbackV2Module, PlanSnapshotModule],
   controllers: [WorkoutsController],
   providers: [
     WorkoutsService,

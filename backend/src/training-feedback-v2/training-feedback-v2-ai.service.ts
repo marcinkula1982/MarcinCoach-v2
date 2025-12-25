@@ -136,9 +136,9 @@ export class TrainingFeedbackV2AiService {
     let cacheStatus: 'hit' | 'miss' = 'miss'
     
     // Sprawdź czy cache pasuje do pytania i feedbackId (proste sprawdzenie hash)
-    if (cached && cached.payload.questionHash === questionHash && cached.payload.feedbackId === feedbackId) {
+    if (cached && cached.questionHash === questionHash && cached.feedbackId === feedbackId) {
       cacheStatus = 'hit'
-      return { answer: cached.payload.answer, cache: cacheStatus }
+      return { answer: cached.answer, cache: cacheStatus }
     }
 
     // Wywołaj OpenAI lub użyj stub (z cache per dzień + rate limit)

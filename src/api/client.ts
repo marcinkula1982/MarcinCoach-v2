@@ -1,49 +1,12 @@
 // src/api/client.ts
 import axios from 'axios'
 
-const baseURL =
-  import.meta.env.VITE_API_BASE_URL?.trim() || 'http://localhost:3000'
+axios.defaults.baseURL = 'http://localhost:3000'
+axios.defaults.headers.common['x-session-token'] =
+  'fccfeb9c-e00c-47eb-bd11-5bcd4798c2d8'
+axios.defaults.headers.common['x-username'] = 'marcin'
 
-const client = axios.create({
-  baseURL,
-  // używamy headera x-session-token, nie cookies
-  withCredentials: false,
-  timeout: 15_000,
-})
-
-console.log('API BASE URL:', baseURL)
-
-// Doklejaj sesję do każdego requestu
-client.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('tcx-session-token')
-
-    // axios ma różne typy headers; to najprostsza forma
-    config.headers = config.headers ?? {}
-
-    if (token) (config.headers as any)['x-session-token'] = token
-
-    return config
-  },
-  (error) => Promise.reject(error),
-)
-
-// Obsługa wygasłej sesji (401)
-client.interceptors.response.use(
-  (res) => res,
-  (err) => {
-    const status = err?.response?.status
-    const msg = err?.response?.data?.message
-
-    if (status === 401 && (msg === 'SESSION_EXPIRED' || msg === 'INVALID_SESSION')) {
-      localStorage.removeItem('tcx-session-token')
-      localStorage.removeItem('tcx-username')
-      window.location.reload()
-    }
-
-    return Promise.reject(err)
-  },
-)
+const client = axios
 
 export { client }
 export default client

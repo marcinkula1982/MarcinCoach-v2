@@ -10,7 +10,7 @@ export type AiPlanExplanation = {
 }
 
 export type AiPlanResponse = {
-  provider: 'stub' | 'openai'
+  provider: 'stub' | 'openai' | 'cache'
   generatedAtIso: string // = context.generatedAtIso
   windowDays: number
   plan: WeeklyPlan & { appliedAdjustmentsCodes?: string[] }

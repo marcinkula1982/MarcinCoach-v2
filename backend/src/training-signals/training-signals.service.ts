@@ -1,8 +1,10 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common'
+import { Inject, Injectable, InternalServerErrorException } from '@nestjs/common'
 import { PrismaService } from '../prisma.service'
 import type { TrainingSignals, TrainingSignalsIntensity } from './training-signals.types'
 import { trainingSignalsSchema } from './training-signals.schema'
 import { accumulateIntensity, emptyIntensity } from './training-signals.utils'
+import type { Clock } from '../ai-rate-limit/clock'
+import { CLOCK } from '../ai-rate-limit/clock'
 
 type WorkoutRow = {
   id: number
@@ -12,7 +14,10 @@ type WorkoutRow = {
 
 @Injectable()
 export class TrainingSignalsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(CLOCK) private readonly clock: Clock,
+  ) {}
 
   private parseSummary(raw: any) {
     if (typeof raw === 'string') {
@@ -113,15 +118,25 @@ export class TrainingSignalsService {
       .filter((r) => Number.isFinite(r.distanceKm) && Number.isFinite(r.durationMin))
       .filter((r) => r.distanceKm > 0 || r.durationMin > 0)
 
-    // Determine 'to' deterministically from data
-    // If there are workouts, use max workoutDt; otherwise use epoch (1970-01-01)
-    const to =
-      rows.length > 0
-        ? rows.reduce((max, r) => (r.workoutDt > max ? r.workoutDt : max), rows[0]!.workoutDt)
-        : new Date(0)
+    let fromIso: string
+    let toIso: string
 
-    // Calculate 'from' relative to deterministic 'to'
-    const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000)
+    if (rows.length === 0) {
+      const to = this.clock.now()
+      const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000)
+
+      toIso = to.toISOString()
+      fromIso = from.toISOString()
+    } else {
+      // obecna logika z danych treningowych
+      const to = rows.reduce((max, r) => (r.workoutDt > max ? r.workoutDt : max), rows[0]!.workoutDt)
+      const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000)
+      toIso = to.toISOString()
+      fromIso = from.toISOString()
+    }
+
+    const from = new Date(fromIso)
+    const to = new Date(toIso)
 
     // Filter by date window based on workoutDt (not createdAt)
     const filtered = rows.filter((r) => r.workoutDt >= from && r.workoutDt <= to)
@@ -201,7 +216,7 @@ export class TrainingSignalsService {
     }
 
     const result: TrainingSignals = {
-      period: { from: from.toISOString(), to: to.toISOString() },
+      period: { from: fromIso, to: toIso },
       volume: {
         distanceKm: Number(volumeDistance.toFixed(2)),
         durationMin: Number(volumeDuration.toFixed(2)),

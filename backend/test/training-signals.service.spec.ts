@@ -1,10 +1,12 @@
 import { TrainingSignalsService } from '../src/training-signals/training-signals.service'
 import { PrismaService } from '../src/prisma.service'
 import { trainingSignalsSchema } from '../src/training-signals/training-signals.schema'
+import type { Clock } from '../src/ai-rate-limit/clock'
 
 describe('TrainingSignalsService', () => {
   const prisma = new PrismaService()
-  const service = new TrainingSignalsService(prisma)
+  const mockClock: Clock = { now: () => new Date() }
+  const service = new TrainingSignalsService(prisma, mockClock)
 
   it('returns zeros for empty workouts', async () => {
     // mock prisma.findMany to return empty

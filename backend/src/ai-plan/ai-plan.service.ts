@@ -6,6 +6,9 @@ import type { AiPlanExplanation, AiPlanResponse } from './ai-plan.types'
 import { AiCacheService } from '../ai-cache/ai-cache.service'
 import type { FeedbackSignals } from '../training-feedback-v2/feedback-signals.types'
 import { TrainingFeedbackV2Service } from '../training-feedback-v2/training-feedback-v2.service'
+import { PlanSnapshotService } from '../plan-snapshot/plan-snapshot.service'
+import type { PlanSnapshot, PlanSnapshotDay } from '../plan-snapshot/plan-snapshot.types'
+import type { TrainingDay } from '../weekly-plan/weekly-plan.types'
 
 const OpenAI = require('openai')
 
@@ -14,6 +17,7 @@ export class AiPlanService {
   constructor(
     private readonly aiCacheService: AiCacheService,
     private readonly trainingFeedbackV2Service: TrainingFeedbackV2Service,
+    private readonly planSnapshotService: PlanSnapshotService,
   ) {}
 
   getCachedResponse(userId: number, days: number): AiPlanResponse | null {
@@ -215,6 +219,9 @@ export class AiPlanService {
     adjustments: TrainingAdjustments,
     plan: WeeklyPlan & { appliedAdjustmentsCodes?: string[] },
   ): Promise<AiPlanResponse> {
+    const cached = this.aiCacheService.get<AiPlanResponse>('plan', userId, context.windowDays)
+    if (cached) return { ...cached, provider: 'cache' }
+
     // Pobierz najnowszy feedbackSignals (opcjonalnie) - deterministycznie po workout.startTimeIso
     const feedbackSignals = await this.trainingFeedbackV2Service.getLatestFeedbackSignalsForUser(userId)
 
@@ -241,13 +248,84 @@ export class AiPlanService {
       usedProvider = 'stub'
     }
 
-    return {
+    const response: AiPlanResponse = {
       provider: usedProvider,
       generatedAtIso: context.generatedAtIso,
       windowDays: context.windowDays,
       plan,
       adjustments,
       explanation,
+    }
+
+    // Zapisz PlanSnapshot po wygenerowaniu response
+    try {
+      const snapshot = this.convertWeeklyPlanToSnapshot(plan)
+      await this.planSnapshotService.saveForUser(userId, snapshot)
+    } catch (err) {
+      // Nie przerywaj response jeśli zapis snapshotu się nie powiódł
+      console.error('Failed to save plan snapshot:', err)
+    }
+
+    return response
+  }
+
+  private convertWeeklyPlanToSnapshot(plan: WeeklyPlan): PlanSnapshot {
+    const weekStart = new Date(plan.weekStartIso)
+    const dayOffsets: Record<TrainingDay, number> = {
+      mon: 0,
+      tue: 1,
+      wed: 2,
+      thu: 3,
+      fri: 4,
+      sat: 5,
+      sun: 6,
+    }
+
+    const days: PlanSnapshotDay[] = plan.sessions.map((session) => {
+      const offset = dayOffsets[session.day]
+      const date = new Date(weekStart)
+      date.setUTCDate(date.getUTCDate() + offset)
+      const dateKey = date.toISOString().split('T')[0]! // Format: 'YYYY-MM-DD' - zawsze istnieje
+
+      // Mapuj SessionType → PlanSnapshotDay.type
+      let type: PlanSnapshotDay['type']
+      if (session.type === 'rest') {
+        type = 'rest'
+      } else if (session.type === 'easy') {
+        type = 'easy'
+      } else if (session.type === 'long') {
+        type = 'long'
+      } else if (session.type === 'quality') {
+        // Rozstrzygnij tempo vs interval na podstawie intensityHint lub użyj 'tempo' jako domyślny
+        type = session.intensityHint === 'Z4' ? 'interval' : 'tempo'
+      } else {
+        // 'strides' → mapuj na 'tempo'
+        type = 'tempo'
+      }
+
+      // Mapuj intensityHint → plannedIntensity
+      let plannedIntensity: 'easy' | 'moderate' | 'hard' | undefined
+      if (session.intensityHint === 'Z1' || session.intensityHint === 'Z2') {
+        plannedIntensity = 'easy'
+      } else if (session.intensityHint === 'Z3') {
+        plannedIntensity = 'moderate'
+      } else if (session.intensityHint === 'Z4') {
+        plannedIntensity = 'hard'
+      }
+
+      return {
+        dateKey,
+        type,
+        plannedDurationMin: session.durationMin,
+        ...(session.distanceKm !== undefined ? { plannedDistanceKm: session.distanceKm } : {}),
+        ...(plannedIntensity !== undefined ? { plannedIntensity } : {}),
+      }
+    })
+
+    return {
+      windowStartIso: plan.weekStartIso,
+      windowEndIso: plan.weekEndIso,
+      days,
     }
   }
 

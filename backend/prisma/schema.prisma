@@ -8,11 +8,12 @@ datasource db {
 }
 
 model User {
-  id         Int                  @id @default(autoincrement())
-  externalId String               @unique
-  workouts   Workout[]
-  feedbacks  TrainingFeedbackV2[]
-  createdAt  DateTime             @default(now())
+  id            Int             @id @default(autoincrement())
+  externalId    String          @unique
+  workouts      Workout[]
+  feedbacks     TrainingFeedbackV2[]
+  planSnapshots PlanSnapshot[]
+  createdAt     DateTime        @default(now())
 
   /// Nawigacyjna relacja do konta logowania (AuthUser) – nie używana do logiki domenowej.
   authUser AuthUser? @relation("AuthUserToUser")
@@ -108,4 +109,17 @@ model TrainingFeedbackV2 {
 
   @@index([userId])
   @@index([workoutId])
+}
+
+model PlanSnapshot {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  snapshotJson  String   // JSON stringified PlanSnapshot
+  windowStartIso String  // ISO string (dla indeksowania i query)
+  windowEndIso   String  // ISO string
+  createdAt     DateTime @default(now())
+
+  @@index([userId, windowStartIso]) // Index dla query po userId + window
+  @@index([userId]) // Index dla fallback latest query
 }

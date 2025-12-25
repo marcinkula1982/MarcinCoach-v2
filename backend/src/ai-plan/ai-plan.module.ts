@@ -5,6 +5,7 @@ import { TrainingAdjustmentsModule } from '../training-adjustments/training-adju
 import { TrainingContextModule } from '../training-context/training-context.module'
 import { WeeklyPlanModule } from '../weekly-plan/weekly-plan.module'
 import { TrainingFeedbackV2Module } from '../training-feedback-v2/training-feedback-v2.module'
+import { PlanSnapshotModule } from '../plan-snapshot/plan-snapshot.module'
 import { AiPlanController } from './ai-plan.controller'
 import { AiPlanService } from './ai-plan.service'
 
@@ -16,6 +17,7 @@ import { AiPlanService } from './ai-plan.service'
     TrainingAdjustmentsModule,
     WeeklyPlanModule,
     TrainingFeedbackV2Module,
+    PlanSnapshotModule,
   ],
   providers: [AiPlanService],
   controllers: [AiPlanController],

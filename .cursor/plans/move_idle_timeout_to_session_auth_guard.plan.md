@@ -1,38 +1,43 @@
 # Przeniesienie logiki idle timeout do SessionAuthGuard
 
 ## Cel
+
 Przeniesienie logiki sprawdzania wygaśnięcia sesji (idle timeout) i sliding refresh bezpośrednio do `SessionAuthGuard`, zamiast używać `AuthService.validateSession()`. To upraszcza architekturę i umożliwia dodatkowe walidacje (np. sprawdzanie zgodności username z tokenem).
 
 ## Zmiany w plikach
 
 ### 1. Aktualizacja `backend/src/auth/session-auth.guard.ts`
+
 - **Zastąpienie zależności**: zmiana z `AuthService` na `PrismaService`
 - **Dodanie stałej**: `IDLE_MS = 24 * 60 * 60 * 1000`
 - **Implementacja logiki bezpośrednio w `canActivate()`**:
-  - Pobranie tokenu z nagłówka `x-session-token`
-  - Pobranie username z nagłówka `x-user-id`
-  - Walidacja obecności obu nagłówków → `MISSING_SESSION_HEADERS`
-  - Pobranie sesji z bazy (z include user)
-  - Sprawdzenie istnienia sesji → `INVALID_SESSION`
-  - Sprawdzenie zgodności username z sesją → `SESSION_USER_MISMATCH`
-  - Sprawdzenie wygaśnięcia (24h od `lastSeenAt ?? createdAt`)
-  - Jeśli wygasła → usunięcie sesji + `SESSION_EXPIRED`
-  - Sliding refresh: aktualizacja `lastSeenAt`
-  - Ustawienie `req.authUser = { username, userId }`
-  - Zwrócenie `true`
+- Pobranie tokenu z nagłówka `x-session-token`
+- Pobranie username z nagłówka `x-user-id`
+- Walidacja obecności obu nagłówków → `MISSING_SESSION_HEADERS`
+- Pobranie sesji z bazy (z include user)
+- Sprawdzenie istnienia sesji → `INVALID_SESSION`
+- Sprawdzenie zgodności username z sesją → `SESSION_USER_MISMATCH`
+- Sprawdzenie wygaśnięcia (24h od `lastSeenAt ?? createdAt`)
+- Jeśli wygasła → usunięcie sesji + `SESSION_EXPIRED`
+- Sliding refresh: aktualizacja `lastSeenAt`
+- Ustawienie `req.authUser = { username, userId }`
+- Zwrócenie `true`
 
 ### 2. Aktualizacja `backend/src/auth/auth.module.ts`
+
 - **Dodanie `PrismaService` do providers** w `AuthModule` (jeśli jeszcze nie ma)
 - Upewnienie się, że `SessionAuthGuard` ma dostęp do `PrismaService`
 
 ### 3. Opcjonalnie: `backend/src/auth/auth.service.ts`
+
 - **Uwaga**: Metoda `validateSession()` w `AuthService` może pozostać (dla kompatybilności), ale `SessionAuthGuard` nie będzie już z niej korzystał
 - Można ją usunąć lub pozostawić jako deprecated (decyzja użytkownika)
 
 ## Szczegóły implementacji
 
 ### Struktura kodu w guardzie
-```typescript
+
+````typescript
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
   private readonly IDLE_MS = 24 * 60 * 60 * 1000 // 24h
@@ -95,5 +100,5 @@ export class SessionAuthGuard implements CanActivate {
 - Guard sprawdza zgodność username z sesją
 - Guard usuwa wygasłe sesje z bazy
 - Guard aktualizuje `lastSeenAt` przy każdym requeście
-- `AuthModule` eksportuje `PrismaService` (lub ma go w providers)
 
+````
