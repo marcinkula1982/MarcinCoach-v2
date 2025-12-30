@@ -98,6 +98,27 @@ class PlanComplianceService
             return;
         }
 
+        // Guard for expectedDurationSec === 0 (division by zero)
+        if ($expectedDurationSec === 0) {
+            $deltaDurationSec = $actualDurationSec - $expectedDurationSec;
+            $durationRatio = $actualDurationSec > 0 ? INF : ($actualDurationSec === 0 ? NAN : -INF);
+            $status = 'MAJOR_DEVIATION';
+            $flagOvershootDuration = $actualDurationSec > 0;
+            $flagUndershootDuration = false;
+
+            $this->saveCompliance(
+                $workoutId,
+                $actualDurationSec,
+                $expectedDurationSec,
+                $deltaDurationSec,
+                $durationRatio,
+                $status,
+                $flagOvershootDuration,
+                $flagUndershootDuration
+            );
+            return;
+        }
+
         // Calculate compliance metrics
         $deltaDurationSec = $actualDurationSec - $expectedDurationSec;
         $durationRatio = $actualDurationSec / $expectedDurationSec;

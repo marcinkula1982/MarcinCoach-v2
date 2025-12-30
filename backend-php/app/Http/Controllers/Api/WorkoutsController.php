@@ -8,6 +8,7 @@ use App\Models\WorkoutRawTcx;
 use App\Models\WorkoutImportEvent;
 use App\Services\PlanComplianceService;
 use App\Services\PlanComplianceV2Service;
+use App\Services\TrainingAlertsV1Service;
 use App\Services\TrainingSignalsService;
 use App\Services\TrainingSignalsV2Service;
 use Carbon\Carbon;
@@ -124,6 +125,10 @@ class WorkoutsController extends Controller
                         $planComplianceService = new PlanComplianceService();
                         $planComplianceService->upsertForWorkout($existing->id);
                         
+                        // Generate TrainingAlerts v1
+                        $trainingAlertsV1Service = new TrainingAlertsV1Service();
+                        $trainingAlertsV1Service->upsertForWorkout($existing->id);
+                        
                         return response()->json([
                             'id' => $existing->id,
                             'created' => false,
@@ -206,6 +211,10 @@ class WorkoutsController extends Controller
             // Generate PlanCompliance v1
             $planComplianceService = new PlanComplianceService();
             $planComplianceService->upsertForWorkout($workout->id);
+
+            // Generate TrainingAlerts v1
+            $trainingAlertsV1Service = new TrainingAlertsV1Service();
+            $trainingAlertsV1Service->upsertForWorkout($workout->id);
 
             return response()->json([
                 'id' => $workout->id,
@@ -385,6 +394,39 @@ class WorkoutsController extends Controller
             'easyBecameZ5' => (bool) ($compliance->flag_easy_became_z5 ?? false),
             'generatedAtIso' => $generatedAt,
         ]);
+    }
+
+    public function alertsV1(int $id): JsonResponse
+    {
+        // Check if workout exists
+        $workout = Workout::find($id);
+        if (!$workout) {
+            return response()->json([
+                'message' => 'workout not found',
+            ], 404);
+        }
+
+        // Query training_alerts_v1 table
+        $alerts = DB::table('training_alerts_v1')
+            ->where('workout_id', $id)
+            ->orderBy('code', 'asc')
+            ->get();
+
+        $result = [];
+        foreach ($alerts as $alert) {
+            $generatedAt = Carbon::parse($alert->generated_at)
+                ->utc()
+                ->format('Y-m-d\TH:i:s\Z');
+
+            $result[] = [
+                'code' => $alert->code,
+                'severity' => $alert->severity,
+                'payloadJson' => $alert->payload_json ? json_decode($alert->payload_json, true) : null,
+                'generatedAtIso' => $generatedAt,
+            ];
+        }
+
+        return response()->json($result);
     }
 
     private function parseTcxXml(string $xml): array
