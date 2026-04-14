@@ -18,4 +18,5 @@ Route::patch('/workouts/{id}/meta', [WorkoutsController::class, 'updateMeta']);
 Route::get('/workouts/{id}/signals', [WorkoutsController::class, 'signals']);
 Route::get('/workouts/{id}/compliance', [WorkoutsController::class, 'compliance']);
 Route::get('/workouts/{id}/compliance-v2', [WorkoutsController::class, 'complianceV2']);
+Route::get('/workouts/{id}/alerts-v1', [WorkoutsController::class, 'alertsV1']);
 
