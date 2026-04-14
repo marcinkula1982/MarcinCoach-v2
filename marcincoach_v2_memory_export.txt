@@ -1,0 +1,85 @@
+EKSPORT PAMIĘCI – MARCINCOACH-V2 Data wygenerowania:
+2026-02-22T17:13:48.182589
+
+1.  CEL PROJEKTU AI‑powered trener biegowy oparty o OpenAI.
+    Architektura: backend jako infrastruktura deterministyczna + AI jako
+    warstwa interpretacyjna. Zasada nadrzędna: wszystko prowadzi do
+    struktury TrainingSignals → Plan.
+
+2.  ARCHITEKTURA Frontend: Vite + React + Tailwind. Backend: NestJS +
+    Prisma. Baza danych: Prisma + SQLite (dev) / docelowo inna
+    produkcyjna. Struktura projektu:
+
+-   root: frontend
+-   backend/: API NestJS
+-   .env w root
+-   katalogi: dist, node_modules, public, src
+
+3.  KAMIEŃ MILOWY – INGEST
+
+-   Jeden punkt prawdy: POST /workouts/import
+-   Dedup po (source + sourceActivityId)
+-   Reguła daty: startTimeIso, fallback createdAt
+-   Bez AI na tym etapie
+
+4.  ANALITYKA MVP Endpointy:
+
+-   /workouts/analytics Widoki:
+-   objętość
+-   czas
+-   dystans
+-   rozkład intensywności
+-   RPE/fatigue/planCompliance
+
+5.  TRAININGSIGNALS (KONTRAKT) Deterministyczny JSON generowany przez
+    backend. AI nie parsuje TCX. AI operuje wyłącznie na TrainingSignals
+    i PlanCompliance.
+
+6.  PLANFEEDBACKSIGNALS (M6.1) Endpoint:
+
+-   GET /training-feedback Deterministyczny. Bez Date.now. Testy
+    jednostkowe zaimplementowane.
+
+7.  AI INSIGHTS (M6.2) Endpoint:
+
+-   GET /ai/insights?days=28 Provider: stub | openai Deterministyczny
+    timestamp: generatedAtIso = feedback.generatedAtIso
+
+8.  AI PLAN (M7.1) Endpoint:
+
+-   GET /ai/plan?days=28 Zawiera:
+-   provider
+-   generatedAtIso
+-   windowDays
+-   plan
+-   adjustments
+-   explanation
+
+Fallback do stub przy błędach OpenAI. Obsługa Responses API
+(response.output[].content[]).
+
+9.  ZASADY PRODUKTOWE
+
+-   Minimalizacja kosztów OpenAI
+-   Backend generuje maksimum analityki deterministycznej
+-   AI tylko interpretacja i adaptacja
+-   Feedback po KAŻDYM imporcie treningu
+-   Możliwość zmiany dostępności tygodnia jako sygnał wejściowy
+
+10. ŚRODOWISKO I TECHNICZNE USTALENIA
+
+-   CORS skonfigurowany
+-   DATABASE_URL poprawiony na file:./prisma/dev.db
+-   Port 3000 bywa blokowany
+-   Firewall w pracy blokuje OpenAI
+-   Konsekwentna zasada: 1 krok naraz przy debugowaniu
+
+11. ROADMAPA (SKRÓT) M0 – kierunek architektoniczny M1 – ingest M2 –
+    analityka techniczna M3 – TrainingSignals M4 – profil użytkownika
+    jako constraints M5 – plan tygodniowy M6 – feedback + AI Insights M7
+    – AI Plan M8 – Adaptive Planner
+
+------------------------------------------------------------------------
+
+Eksport obejmuje wszystkie zapisane w pamięci informacje dotyczące
+projektu MarcinCoach-v2.

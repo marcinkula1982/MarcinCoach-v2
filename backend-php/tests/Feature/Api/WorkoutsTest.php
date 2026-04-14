@@ -1701,5 +1701,407 @@ class WorkoutsTest extends TestCase
             'easyBecameZ5' => true,
         ]);
     }
+
+    public function test_update_meta_happy_path(): void
+    {
+        $workout = Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2025-12-28T10:00:00Z',
+                'durationSec' => 3600,
+                'distanceM' => 10000,
+            ],
+            'source' => 'manual',
+            'dedupe_key' => 'test-update-meta-happy',
+        ]);
+
+        $payload = [
+            'workoutMeta' => [
+                'planCompliance' => 'planned',
+                'rpe' => 7,
+                'fatigueFlag' => true,
+                'note' => 'Solid session.',
+            ],
+        ];
+
+        $response = $this->patchJson("/api/workouts/{$workout->id}/meta", $payload);
+
+        $response->assertStatus(200);
+        $response->assertJson([
+            'id' => $workout->id,
+            'updated' => true,
+            'workoutMeta' => $payload['workoutMeta'],
+        ]);
+
+        $this->assertDatabaseHas('workouts', [
+            'id' => $workout->id,
+        ]);
+        $this->assertEquals($payload['workoutMeta'], Workout::find($workout->id)?->workout_meta);
+    }
+
+    public function test_update_meta_rejects_invalid_rpe(): void
+    {
+        $workout = Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2025-12-28T10:00:00Z',
+                'durationSec' => 3600,
+                'distanceM' => 10000,
+            ],
+            'source' => 'manual',
+            'dedupe_key' => 'test-update-meta-invalid-rpe',
+        ]);
+
+        $response = $this->patchJson("/api/workouts/{$workout->id}/meta", [
+            'workoutMeta' => [
+                'rpe' => 11,
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['workoutMeta.rpe']);
+    }
+
+    public function test_update_meta_returns_404_for_missing_workout(): void
+    {
+        $response = $this->patchJson('/api/workouts/99999/meta', [
+            'workoutMeta' => [
+                'planCompliance' => 'modified',
+            ],
+        ]);
+
+        $response->assertStatus(404);
+        $response->assertJson([
+            'error' => 'Workout not found',
+        ]);
+    }
+
+    public function test_update_meta_partial_update_with_nulls(): void
+    {
+        $workout = Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2025-12-28T10:00:00Z',
+                'durationSec' => 3600,
+                'distanceM' => 10000,
+            ],
+            'source' => 'manual',
+            'dedupe_key' => 'test-update-meta-nulls',
+            'workout_meta' => [
+                'planCompliance' => 'planned',
+                'rpe' => 8,
+                'fatigueFlag' => true,
+                'note' => 'Old value',
+            ],
+        ]);
+
+        $payload = [
+            'workoutMeta' => [
+                'note' => null,
+                'fatigueFlag' => null,
+            ],
+        ];
+
+        $response = $this->patchJson("/api/workouts/{$workout->id}/meta", $payload);
+
+        $response->assertStatus(200);
+        $response->assertJson([
+            'id' => $workout->id,
+            'updated' => true,
+            'workoutMeta' => $payload['workoutMeta'],
+        ]);
+
+        $this->assertEquals($payload['workoutMeta'], Workout::find($workout->id)?->workout_meta);
+    }
+
+    public function test_training_feedback_endpoint_aggregates_math_happy_path(): void
+    {
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => ['startTimeIso' => '2025-12-01T10:00:00Z', 'durationSec' => 3600, 'distanceM' => 10000],
+            'workout_meta' => ['planCompliance' => 'planned', 'rpe' => 8, 'fatigueFlag' => true, 'note' => ' A '],
+            'source' => 'manual',
+            'dedupe_key' => 'tf-happy-1',
+        ]);
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => ['startTimeIso' => '2025-12-02T10:00:00Z', 'durationSec' => 3600, 'distanceM' => 10000],
+            'workout_meta' => ['planCompliance' => 'modified', 'rpe' => 6, 'fatigueFlag' => false, 'note' => 'B'],
+            'source' => 'manual',
+            'dedupe_key' => 'tf-happy-2',
+        ]);
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => ['startTimeIso' => '2025-12-03T10:00:00Z', 'durationSec' => 3600, 'distanceM' => 10000],
+            'workout_meta' => ['planCompliance' => 'unplanned', 'rpe' => 4, 'fatigueFlag' => true, 'note' => 'C'],
+            'source' => 'manual',
+            'dedupe_key' => 'tf-happy-3',
+        ]);
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => ['startTimeIso' => '2025-12-04T10:00:00Z', 'durationSec' => 3600, 'distanceM' => 10000],
+            'workout_meta' => ['rpe' => 10, 'fatigueFlag' => false, 'note' => 'D'],
+            'source' => 'manual',
+            'dedupe_key' => 'tf-happy-4',
+        ]);
+
+        $response = $this->getJson('/api/training-feedback?days=28');
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('windowDays', 28);
+        $response->assertJsonPath('counts.totalSessions', 4);
+        $response->assertJsonPath('counts.planned', 1);
+        $response->assertJsonPath('counts.modified', 1);
+        $response->assertJsonPath('counts.unplanned', 1);
+        $response->assertJsonPath('counts.unknown', 1);
+        $this->assertEquals(25.0, (float) $response->json('complianceRate.plannedPct'));
+        $this->assertEquals(25.0, (float) $response->json('complianceRate.modifiedPct'));
+        $this->assertEquals(25.0, (float) $response->json('complianceRate.unplannedPct'));
+        $response->assertJsonPath('rpe.samples', 4);
+        $this->assertEquals(7.0, (float) $response->json('rpe.avg'));
+        $this->assertEquals(7.0, (float) $response->json('rpe.p50'));
+        $response->assertJsonPath('fatigue.trueCount', 2);
+        $response->assertJsonPath('fatigue.falseCount', 2);
+        $response->assertJsonPath('notes.samples', 4);
+        $this->assertCount(4, $response->json('notes.last5'));
+        $this->assertEquals('D', $response->json('notes.last5.0.note'));
+        $this->assertEquals('A', $response->json('notes.last5.3.note'));
+    }
+
+    public function test_training_feedback_endpoint_handles_empty_dataset(): void
+    {
+        $response = $this->getJson('/api/training-feedback');
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('windowDays', 28);
+        $response->assertJsonPath('counts.totalSessions', 0);
+        $response->assertJsonPath('counts.planned', 0);
+        $response->assertJsonPath('counts.modified', 0);
+        $response->assertJsonPath('counts.unplanned', 0);
+        $response->assertJsonPath('counts.unknown', 0);
+        $this->assertEquals(0.0, (float) $response->json('complianceRate.plannedPct'));
+        $this->assertEquals(0.0, (float) $response->json('complianceRate.modifiedPct'));
+        $this->assertEquals(0.0, (float) $response->json('complianceRate.unplannedPct'));
+        $response->assertJsonPath('rpe.samples', 0);
+        $this->assertNull($response->json('rpe.avg'));
+        $this->assertNull($response->json('rpe.p50'));
+        $response->assertJsonPath('fatigue.trueCount', 0);
+        $response->assertJsonPath('fatigue.falseCount', 0);
+        $response->assertJsonPath('notes.samples', 0);
+        $this->assertSame([], $response->json('notes.last5'));
+    }
+
+    public function test_training_feedback_endpoint_ignores_invalid_meta_noise(): void
+    {
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => ['startTimeIso' => '2025-12-10T10:00:00Z', 'durationSec' => 3600, 'distanceM' => 10000],
+            'workout_meta' => [
+                'planCompliance' => 'unexpected',
+                'rpe' => 15,
+                'fatigueFlag' => 'yes',
+                'note' => '   ',
+            ],
+            'source' => 'manual',
+            'dedupe_key' => 'tf-noise-1',
+        ]);
+
+        $response = $this->getJson('/api/training-feedback?days=28');
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('counts.totalSessions', 1);
+        $response->assertJsonPath('counts.unknown', 1);
+        $response->assertJsonPath('rpe.samples', 0);
+        $this->assertNull($response->json('rpe.avg'));
+        $this->assertNull($response->json('rpe.p50'));
+        $response->assertJsonPath('fatigue.trueCount', 0);
+        $response->assertJsonPath('fatigue.falseCount', 0);
+        $response->assertJsonPath('notes.samples', 0);
+        $this->assertSame([], $response->json('notes.last5'));
+    }
+
+    public function test_training_feedback_endpoint_validates_days(): void
+    {
+        $this->getJson('/api/training-feedback?days=0')->assertStatus(422)->assertJsonValidationErrors(['days']);
+        $this->getJson('/api/training-feedback?days=366')->assertStatus(422)->assertJsonValidationErrors(['days']);
+        $this->getJson('/api/training-feedback?days=abc')->assertStatus(422)->assertJsonValidationErrors(['days']);
+    }
+
+    public function test_training_feedback_endpoint_days_default_and_explicit_window(): void
+    {
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => ['startTimeIso' => '2025-10-15T10:00:00Z', 'durationSec' => 3600, 'distanceM' => 10000],
+            'workout_meta' => ['planCompliance' => 'planned', 'rpe' => 6, 'fatigueFlag' => false, 'note' => 'old'],
+            'source' => 'manual',
+            'dedupe_key' => 'tf-window-old',
+        ]);
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => ['startTimeIso' => '2025-12-10T10:00:00Z', 'durationSec' => 3600, 'distanceM' => 10000],
+            'workout_meta' => ['planCompliance' => 'modified', 'rpe' => 8, 'fatigueFlag' => true, 'note' => 'new'],
+            'source' => 'manual',
+            'dedupe_key' => 'tf-window-new',
+        ]);
+
+        $defaultResponse = $this->getJson('/api/training-feedback');
+        $defaultResponse->assertStatus(200);
+        $defaultResponse->assertJsonPath('windowDays', 28);
+        $defaultResponse->assertJsonPath('counts.totalSessions', 1);
+
+        $explicitResponse = $this->getJson('/api/training-feedback?days=60');
+        $explicitResponse->assertStatus(200);
+        $explicitResponse->assertJsonPath('windowDays', 60);
+        $explicitResponse->assertJsonPath('counts.totalSessions', 2);
+    }
+
+    public function test_training_signals_endpoint_deterministic_date_window(): void
+    {
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2025-12-01T10:00:00Z',
+                'intensity' => 10,
+                'intensityBuckets' => ['z1Sec' => 60, 'z2Sec' => 0, 'z3Sec' => 0, 'z4Sec' => 0, 'z5Sec' => 0],
+            ],
+            'source' => 'manual',
+            'dedupe_key' => 'ts-window-1',
+        ]);
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2025-12-10T12:00:00Z',
+                'intensity' => 20,
+                'intensityBuckets' => ['z1Sec' => 30, 'z2Sec' => 30, 'z3Sec' => 0, 'z4Sec' => 0, 'z5Sec' => 0],
+            ],
+            'source' => 'manual',
+            'dedupe_key' => 'ts-window-2',
+        ]);
+
+        $response = $this->getJson('/api/training-signals?days=7');
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('windowDays', 7);
+        $response->assertJsonPath('windowEnd', '2025-12-10T12:00:00.000000Z');
+        $response->assertJsonPath('windowStart', '2025-12-03T12:00:00.000000Z');
+        $response->assertJsonPath('generatedAtIso', '2025-12-10T12:00:00.000000Z');
+        $response->assertJsonPath('totalWorkouts', 1);
+        $this->assertEquals(20.0, (float) $response->json('weeklyLoad'));
+        $this->assertEquals(20.0, (float) $response->json('rolling4wLoad'));
+    }
+
+    public function test_training_signals_endpoint_handles_numeric_vs_object_intensity(): void
+    {
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2025-12-08T10:00:00Z',
+                'intensity' => 40,
+                'intensityBuckets' => ['z1Sec' => 60, 'z2Sec' => 120, 'z3Sec' => 0, 'z4Sec' => 0, 'z5Sec' => 0],
+            ],
+            'source' => 'manual',
+            'dedupe_key' => 'ts-intensity-1',
+        ]);
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2025-12-09T10:00:00Z',
+                'intensity' => ['z1Sec' => 10, 'z2Sec' => 20, 'z3Sec' => 30, 'z4Sec' => 40, 'z5Sec' => 50],
+            ],
+            'source' => 'manual',
+            'dedupe_key' => 'ts-intensity-2',
+        ]);
+
+        $response = $this->getJson('/api/training-signals?days=28');
+        $response->assertStatus(200);
+
+        // Only numeric intensity contributes to load
+        $this->assertEquals(40.0, (float) $response->json('weeklyLoad'));
+        $this->assertEquals(40.0, (float) $response->json('rolling4wLoad'));
+
+        // Buckets aggregate from intensityBuckets OR object intensity
+        $this->assertEquals(70.0, (float) $response->json('buckets.z1Sec'));
+        $this->assertEquals(140.0, (float) $response->json('buckets.z2Sec'));
+        $this->assertEquals(30.0, (float) $response->json('buckets.z3Sec'));
+        $this->assertEquals(40.0, (float) $response->json('buckets.z4Sec'));
+        $this->assertEquals(50.0, (float) $response->json('buckets.z5Sec'));
+        $this->assertEquals(330.0, (float) $response->json('buckets.totalSec'));
+        $response->assertJsonPath('totalWorkouts', 2);
+    }
+
+    public function test_training_signals_endpoint_handles_empty_dataset(): void
+    {
+        $response = $this->getJson('/api/training-signals');
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('windowDays', 28);
+        $this->assertEquals(0.0, (float) $response->json('weeklyLoad'));
+        $this->assertEquals(0.0, (float) $response->json('rolling4wLoad'));
+        $this->assertEquals(0.0, (float) $response->json('buckets.z1Sec'));
+        $this->assertEquals(0.0, (float) $response->json('buckets.z2Sec'));
+        $this->assertEquals(0.0, (float) $response->json('buckets.z3Sec'));
+        $this->assertEquals(0.0, (float) $response->json('buckets.z4Sec'));
+        $this->assertEquals(0.0, (float) $response->json('buckets.z5Sec'));
+        $this->assertEquals(0.0, (float) $response->json('buckets.totalSec'));
+        $response->assertJsonPath('totalWorkouts', 0);
+        $this->assertNotNull($response->json('windowStart'));
+        $this->assertNotNull($response->json('windowEnd'));
+        $this->assertNotNull($response->json('generatedAtIso'));
+    }
+
+    public function test_training_signals_endpoint_validates_days(): void
+    {
+        $this->getJson('/api/training-signals?days=0')->assertStatus(422)->assertJsonValidationErrors(['days']);
+        $this->getJson('/api/training-signals?days=366')->assertStatus(422)->assertJsonValidationErrors(['days']);
+        $this->getJson('/api/training-signals?days=abc')->assertStatus(422)->assertJsonValidationErrors(['days']);
+    }
+
+    public function test_training_signals_endpoint_uses_default_days(): void
+    {
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2025-12-08T10:00:00Z',
+                'intensity' => 5,
+                'intensityBuckets' => ['z1Sec' => 30, 'z2Sec' => 0, 'z3Sec' => 0, 'z4Sec' => 0, 'z5Sec' => 0],
+            ],
+            'source' => 'manual',
+            'dedupe_key' => 'ts-default-days',
+        ]);
+
+        $response = $this->getJson('/api/training-signals');
+        $response->assertStatus(200);
+        $response->assertJsonPath('windowDays', 28);
+    }
 }
 

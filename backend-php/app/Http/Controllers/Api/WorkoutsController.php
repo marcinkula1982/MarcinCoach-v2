@@ -263,6 +263,35 @@ class WorkoutsController extends Controller
         ]);
     }
 
+    public function updateMeta(Request $request, int $id): JsonResponse
+    {
+        $validated = $request->validate([
+            'workoutMeta' => ['required', 'array'],
+            'workoutMeta.planCompliance' => ['nullable', Rule::in(['planned', 'modified', 'unplanned'])],
+            'workoutMeta.rpe' => ['nullable', 'numeric', 'between:1,10'],
+            'workoutMeta.fatigueFlag' => ['nullable', 'boolean'],
+            'workoutMeta.note' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        // Current auth strategy in this backend: default user = 1
+        $userId = 1;
+        $workout = Workout::where('id', $id)->where('user_id', $userId)->first();
+        if (!$workout) {
+            return response()->json([
+                'error' => 'Workout not found',
+            ], 404);
+        }
+
+        $workout->workout_meta = $validated['workoutMeta'];
+        $workout->save();
+
+        return response()->json([
+            'id' => $workout->id,
+            'updated' => true,
+            'workoutMeta' => $workout->workout_meta,
+        ]);
+    }
+
     public function signals(int $id): JsonResponse
     {
         // Check if workout exists
