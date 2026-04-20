@@ -21,12 +21,14 @@ class TrainingSignalsService
             $workoutDt = $this->getWorkoutDt($summary, $workout->created_at);
             $loadValue = $this->extractLoadValue($summary);
             $buckets = $this->extractBuckets($summary);
+            $distanceM = $this->toNumberOrZero($summary['trimmed']['distanceM'] ?? $summary['original']['distanceM'] ?? $summary['distanceM'] ?? null);
 
             return [
                 'id' => $workout->id,
                 'workoutDt' => $workoutDt,
                 'loadValue' => $loadValue,
                 'buckets' => $buckets,
+                'distanceKm' => $distanceM > 0 ? $distanceM / 1000 : 0.0,
             ];
         })->values();
 
@@ -54,6 +56,20 @@ class TrainingSignalsService
             $bucketTotals = $this->addBuckets($bucketTotals, $row['buckets']);
         }
 
+        // Long run: pick workout with max distance in window
+        $longRunRow = null;
+        foreach ($filtered as $row) {
+            if ($longRunRow === null || $row['distanceKm'] > $longRunRow['distanceKm']) {
+                $longRunRow = $row;
+            }
+        }
+        $longRun = [
+            'exists' => $longRunRow !== null && $longRunRow['distanceKm'] > 0,
+            'distanceKm' => $longRunRow !== null ? (float) round($longRunRow['distanceKm'], 2) : 0.0,
+            'workoutId' => $longRunRow !== null ? $longRunRow['id'] : null,
+            'workoutDt' => $longRunRow !== null ? $longRunRow['workoutDt']->toISOString() : null,
+        ];
+
         return [
             'generatedAtIso' => $windowEnd->toISOString(),
             'windowDays' => $days,
@@ -68,6 +84,11 @@ class TrainingSignalsService
                 'z4Sec' => (float) round($bucketTotals['z4Sec'], 0),
                 'z5Sec' => (float) round($bucketTotals['z5Sec'], 0),
                 'totalSec' => (float) round($bucketTotals['totalSec'], 0),
+            ],
+            'longRun' => $longRun,
+            'flags' => [
+                'injuryRisk' => false,
+                'fatigue' => false,
             ],
             'totalWorkouts' => $filtered->count(),
         ];

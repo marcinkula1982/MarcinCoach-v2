@@ -33,7 +33,7 @@ export class AiInsightsController {
     // Set cache header
     req.res?.setHeader('x-ai-cache', result.cache)
     
-    return result.payload
+    return result
   }
 }
 

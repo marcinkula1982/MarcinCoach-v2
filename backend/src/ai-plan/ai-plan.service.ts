@@ -20,13 +20,13 @@ export class AiPlanService {
     private readonly planSnapshotService: PlanSnapshotService,
   ) {}
 
-  getCachedResponse(userId: number, days: number): AiPlanResponse | null {
-    const cached = this.aiCacheService.get<AiPlanResponse>('plan', userId, days)
+  async getCachedResponse(userId: number, days: number): Promise<AiPlanResponse | null> {
+    const cached = await this.aiCacheService.get<AiPlanResponse>('plan', userId, days)
     return cached
   }
 
-  setCachedResponse(userId: number, days: number, response: AiPlanResponse): void {
-    this.aiCacheService.set('plan', userId, days, response)
+  async setCachedResponse(userId: number, days: number, response: AiPlanResponse): Promise<void> {
+    await this.aiCacheService.set('plan', userId, days, response)
   }
 
   private stripMarkdownFences(raw: string): string {
@@ -219,7 +219,7 @@ export class AiPlanService {
     adjustments: TrainingAdjustments,
     plan: WeeklyPlan & { appliedAdjustmentsCodes?: string[] },
   ): Promise<AiPlanResponse> {
-    const cached = this.aiCacheService.get<AiPlanResponse>('plan', userId, context.windowDays)
+    const cached = await this.aiCacheService.get<AiPlanResponse>('plan', userId, context.windowDays)
     if (cached) return { ...cached, provider: 'cache' }
 
     // Pobierz najnowszy feedbackSignals (opcjonalnie) - deterministycznie po workout.startTimeIso
@@ -265,6 +265,8 @@ export class AiPlanService {
       // Nie przerywaj response jeśli zapis snapshotu się nie powiódł
       console.error('Failed to save plan snapshot:', err)
     }
+
+    await this.aiCacheService.set('plan', userId, context.windowDays, response)
 
     return response
   }

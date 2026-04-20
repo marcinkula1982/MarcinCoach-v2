@@ -186,7 +186,7 @@ export class AiInsightsService {
     const days = opts?.days ?? 28
 
     // Check cache
-    const cached = this.aiCacheService.get<AiInsights>('insights', userId, days)
+    const cached = await this.aiCacheService.get<AiInsights>('insights', userId, days)
     if (cached) {
       return { payload: cached, cache: 'hit' }
     }
@@ -223,7 +223,7 @@ export class AiInsightsService {
     const payload_result = validated.data
 
     // Store in cache
-    this.aiCacheService.set('insights', userId, days, payload_result)
+    await this.aiCacheService.set('insights', userId, days, payload_result)
 
     return { payload: payload_result, cache: 'miss' }
   }

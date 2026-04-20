@@ -2,7 +2,7 @@ import type { WeeklyPlan } from './weekly-plan'
 import type { TrainingAdjustments } from './training-adjustments'
 
 export type AiPlanResponse = {
-  provider: 'stub' | 'openai'
+  provider: 'stub' | 'openai' | 'cache'
   generatedAtIso: string
   windowDays: number
   plan: WeeklyPlan

@@ -19,6 +19,156 @@ use Illuminate\Validation\Rule;
 
 class WorkoutsController extends Controller
 {
+    public function index(Request $request): JsonResponse
+    {
+        $userId = $this->authUserId($request);
+        $rows = Workout::query()
+            ->where('user_id', $userId)
+            ->orderByDesc('created_at')
+            ->get();
+
+        $result = $rows->map(function (Workout $w) use ($userId) {
+            return [
+                'id' => $w->id,
+                'userId' => $userId,
+                'action' => $w->action,
+                'kind' => $w->kind,
+                'summary' => is_array($w->summary) ? $w->summary : [],
+                'raceMeta' => is_array($w->race_meta) ? $w->race_meta : null,
+                'workoutMeta' => is_array($w->workout_meta) ? $w->workout_meta : null,
+                'createdAt' => $w->created_at?->toIso8601String(),
+            ];
+        })->values();
+
+        return response()->json($result);
+    }
+
+    public function create(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'tcxRaw' => ['required', 'string', 'min:1'],
+            'action' => ['required', Rule::in(['preview-only', 'save'])],
+            'kind' => ['required', Rule::in(['training', 'race'])],
+            'summary' => ['required', 'array'],
+            'raceMeta' => ['sometimes', 'nullable', 'array'],
+            'workoutMeta' => ['sometimes', 'nullable', 'array'],
+        ]);
+
+        $userId = $this->authUserId($request);
+        $summary = is_array($validated['summary']) ? $validated['summary'] : [];
+        $startTimeIso = (string) ($summary['startTimeIso'] ?? now()->toIso8601String());
+        $durationSec = (int) ($summary['trimmed']['durationSec'] ?? $summary['original']['durationSec'] ?? 0);
+        $distanceM = (int) ($summary['trimmed']['distanceM'] ?? $summary['original']['distanceM'] ?? 0);
+        $dedupeKey = $this->generateDedupeKey('manual', null, $startTimeIso, max($durationSec, 1), max($distanceM, 0));
+
+        $workout = Workout::create([
+            'user_id' => $userId,
+            'action' => (string) $validated['action'],
+            'kind' => (string) $validated['kind'],
+            'summary' => $summary,
+            'race_meta' => $validated['raceMeta'] ?? null,
+            'workout_meta' => $validated['workoutMeta'] ?? null,
+            'source' => 'manual',
+            'source_activity_id' => null,
+            'dedupe_key' => $dedupeKey,
+        ]);
+
+        WorkoutRawTcx::updateOrCreate(
+            ['workout_id' => $workout->id],
+            ['xml' => (string) $validated['tcxRaw'], 'created_at' => now()],
+        );
+
+        return response()->json([
+            'id' => $workout->id,
+            'userId' => $userId,
+            'action' => $workout->action,
+            'kind' => $workout->kind,
+            'summary' => $workout->summary ?? [],
+            'raceMeta' => $workout->race_meta,
+            'workoutMeta' => $workout->workout_meta,
+            'createdAt' => $workout->created_at?->toIso8601String(),
+        ]);
+    }
+
+    public function analytics(Request $request): JsonResponse
+    {
+        $userId = $this->authUserId($request);
+        $rows = Workout::query()
+            ->where('user_id', $userId)
+            ->orderByDesc('created_at')
+            ->get(['id', 'summary', 'workout_meta', 'created_at']);
+
+        $result = $rows->map(fn (Workout $w) => $this->buildAnalyticsRow($w))->filter()->values();
+        return response()->json($result)->header('Cache-Control', 'private, no-cache, must-revalidate');
+    }
+
+    public function analyticsRows(Request $request): JsonResponse
+    {
+        return $this->analytics($request);
+    }
+
+    public function analyticsSummary(Request $request): JsonResponse
+    {
+        $userId = $this->authUserId($request);
+        $rows = Workout::query()
+            ->where('user_id', $userId)
+            ->orderByDesc('created_at')
+            ->get(['id', 'summary', 'workout_meta', 'created_at'])
+            ->map(fn (Workout $w) => $this->buildAnalyticsRow($w))
+            ->filter()
+            ->values();
+
+        $totals = [
+            'workouts' => $rows->count(),
+            'distanceKm' => round((float) $rows->sum('distanceKm'), 2),
+            'durationMin' => round((float) $rows->sum('durationMin'), 2),
+        ];
+
+        return response()->json([
+            'totals' => $totals,
+            'byWeek' => [],
+            'byDay' => [],
+        ]);
+    }
+
+    public function analyticsSummaryV2(Request $request): JsonResponse
+    {
+        return $this->analyticsSummary($request);
+    }
+
+    public function upload(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'file' => ['required', 'file', 'max:51200'],
+        ]);
+
+        /** @var \Illuminate\Http\UploadedFile $file */
+        $file = $validated['file'];
+        $rawTcxXml = $file->getContent();
+        if (!is_string($rawTcxXml) || trim($rawTcxXml) === '') {
+            return response()->json(['message' => 'Brak pliku'], 422);
+        }
+
+        try {
+            $parsed = $this->parseTcxXml($rawTcxXml);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $importRequest = new Request([
+            'source' => 'tcx',
+            'sourceActivityId' => null,
+            'startTimeIso' => $parsed['startTimeIso'],
+            'durationSec' => $parsed['durationSec'],
+            'distanceM' => $parsed['distanceM'],
+            'rawTcxXml' => $rawTcxXml,
+        ]);
+        $importRequest->headers->set('x-username', (string) $request->header('x-username', ''));
+        $importRequest->headers->set('x-session-token', (string) $request->header('x-session-token', ''));
+
+        return $this->import($importRequest);
+    }
+
     public function import(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -51,12 +201,7 @@ class WorkoutsController extends Controller
             }
         }
         
-        // Get or create default user for now (no auth)
-        $user = \App\Models\User::firstOrCreate(
-            ['id' => 1],
-            ['name' => 'Default User', 'email' => 'default@example.com', 'password' => bcrypt('password')]
-        );
-        $userId = $user->id;
+        $userId = $this->authUserId($request);
 
         // Calculate tcx_hash if rawTcxXml is provided
         $tcxHash = null;
@@ -223,9 +368,10 @@ class WorkoutsController extends Controller
         });
     }
 
-    public function show(int $id): JsonResponse
+    public function show(int $id, Request $request): JsonResponse
     {
-        $workout = Workout::find($id);
+        $userId = $this->authUserId($request);
+        $workout = Workout::with('rawTcx')->where('id', $id)->where('user_id', $userId)->first();
 
         if (!$workout) {
             return response()->json([
@@ -260,8 +406,14 @@ class WorkoutsController extends Controller
             }
         }
 
-        return response()->json([
+        $response = [
             'id' => $workout->id,
+            'userId' => $workout->user_id,
+            'action' => $workout->action,
+            'kind' => $workout->kind,
+            'summary' => is_array($workout->summary) ? $workout->summary : [],
+            'raceMeta' => is_array($workout->race_meta) ? $workout->race_meta : null,
+            'workoutMeta' => is_array($workout->workout_meta) ? $workout->workout_meta : null,
             'source' => $workout->source,
             'sourceActivityId' => $workout->source_activity_id,
             'startTimeIso' => $startTimeIso,
@@ -269,7 +421,25 @@ class WorkoutsController extends Controller
             'distanceM' => $distanceM,
             'createdAt' => $workout->created_at->toIso8601String(),
             'updatedAt' => $workout->updated_at->toIso8601String(),
-        ]);
+        ];
+
+        if (request()->query('includeRaw') === 'true') {
+            $response['tcxRaw'] = $workout->rawTcx?->xml;
+        }
+
+        return response()->json($response);
+    }
+
+    public function destroy(int $id, Request $request): JsonResponse
+    {
+        $userId = $this->authUserId($request);
+        $workout = Workout::query()->where('id', $id)->where('user_id', $userId)->first();
+        if (!$workout) {
+            return response()->json(['error' => 'Workout not found'], 404);
+        }
+
+        $workout->delete();
+        return response()->json([], 204);
     }
 
     public function updateMeta(Request $request, int $id): JsonResponse
@@ -282,8 +452,7 @@ class WorkoutsController extends Controller
             'workoutMeta.note' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        // Current auth strategy in this backend: default user = 1
-        $userId = 1;
+        $userId = $this->authUserId($request);
         $workout = Workout::where('id', $id)->where('user_id', $userId)->first();
         if (!$workout) {
             return response()->json([
@@ -301,10 +470,10 @@ class WorkoutsController extends Controller
         ]);
     }
 
-    public function signals(int $id): JsonResponse
+    public function signals(int $id, Request $request): JsonResponse
     {
-        // Check if workout exists
-        $workout = Workout::find($id);
+        $userId = $this->authUserId($request);
+        $workout = Workout::where('id', $id)->where('user_id', $userId)->first();
         if (!$workout) {
             return response()->json([
                 'message' => 'workout not found',
@@ -341,10 +510,10 @@ class WorkoutsController extends Controller
         ]);
     }
 
-    public function compliance(int $id): JsonResponse
+    public function compliance(int $id, Request $request): JsonResponse
     {
-        // Check if workout exists
-        $workout = Workout::find($id);
+        $userId = $this->authUserId($request);
+        $workout = Workout::where('id', $id)->where('user_id', $userId)->first();
         if (!$workout) {
             return response()->json([
                 'message' => 'workout not found',
@@ -382,10 +551,10 @@ class WorkoutsController extends Controller
         ]);
     }
 
-    public function complianceV2(int $id): JsonResponse
+    public function complianceV2(int $id, Request $request): JsonResponse
     {
-        // Check if workout exists
-        $workout = Workout::find($id);
+        $userId = $this->authUserId($request);
+        $workout = Workout::where('id', $id)->where('user_id', $userId)->first();
         if (!$workout) {
             return response()->json([
                 'message' => 'workout not found',
@@ -425,10 +594,10 @@ class WorkoutsController extends Controller
         ]);
     }
 
-    public function alertsV1(int $id): JsonResponse
+    public function alertsV1(int $id, Request $request): JsonResponse
     {
-        // Check if workout exists
-        $workout = Workout::find($id);
+        $userId = $this->authUserId($request);
+        $workout = Workout::where('id', $id)->where('user_id', $userId)->first();
         if (!$workout) {
             return response()->json([
                 'message' => 'workout not found',
@@ -536,6 +705,38 @@ class WorkoutsController extends Controller
         $normalizedDistance = round($distanceM / 100) * 100; // Round to nearest 100m
 
         return "{$source}:{$normalizedDate}:{$normalizedDuration}:{$normalizedDistance}";
+    }
+
+    private function buildAnalyticsRow(Workout $workout): ?array
+    {
+        $summary = is_array($workout->summary) ? $workout->summary : [];
+        $distanceM = $summary['trimmed']['distanceM'] ?? $summary['original']['distanceM'] ?? null;
+        $durationSec = $summary['trimmed']['durationSec'] ?? $summary['original']['durationSec'] ?? null;
+
+        if (!is_numeric($distanceM) || !is_numeric($durationSec)) {
+            return null;
+        }
+
+        $intensity = is_array($summary['intensity'] ?? null) ? $summary['intensity'] : [];
+        $toMin = fn ($sec) => is_numeric($sec) ? round(((float) $sec) / 60, 2) : 0.0;
+        $workoutDt = (string) ($summary['startTimeIso'] ?? $workout->created_at?->toIso8601String());
+        $sportGuess = strtolower((string) (($summary['kind'] ?? '') . ' ' . ($summary['sport'] ?? '')));
+        $type = str_contains($sportGuess, 'run') || str_contains($sportGuess, 'bieg') ? 'run' : 'other';
+
+        return [
+            'workoutId' => $workout->id,
+            'workoutDt' => $workoutDt,
+            'distanceKm' => round(((float) $distanceM) / 1000, 2),
+            'durationMin' => round(((float) $durationSec) / 60, 2),
+            'type' => $type,
+            'intensity' => [
+                'z1Min' => $toMin($intensity['z1Sec'] ?? 0),
+                'z2Min' => $toMin($intensity['z2Sec'] ?? 0),
+                'z3Min' => $toMin($intensity['z3Sec'] ?? 0),
+                'z4Min' => $toMin($intensity['z4Sec'] ?? 0),
+                'z5Min' => $toMin($intensity['z5Sec'] ?? 0),
+            ],
+        ];
     }
 }
 

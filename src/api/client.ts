@@ -2,9 +2,15 @@
 import axios from 'axios'
 
 axios.defaults.baseURL = 'http://localhost:8000/api'
-axios.defaults.headers.common['x-session-token'] =
-  'fccfeb9c-e00c-47eb-bd11-5bcd4798c2d8'
-axios.defaults.headers.common['x-username'] = 'marcin'
+
+const sessionToken = localStorage.getItem('tcx-session-token')
+const username = localStorage.getItem('tcx-username')
+if (sessionToken) {
+  axios.defaults.headers.common['x-session-token'] = sessionToken
+}
+if (username) {
+  axios.defaults.headers.common['x-username'] = username
+}
 
 const client = axios
 

@@ -35,4 +35,16 @@ return [
         ],
     ],
 
+    'strava' => [
+        'client_id' => env('STRAVA_CLIENT_ID'),
+        'client_secret' => env('STRAVA_CLIENT_SECRET'),
+        'redirect_uri' => env('STRAVA_REDIRECT_URI'),
+        'scopes' => env('STRAVA_SCOPES', 'activity:read_all,profile:read_all'),
+    ],
+
+    'garmin_connector' => [
+        'base_url' => env('GARMIN_CONNECTOR_BASE_URL'),
+        'api_key' => env('GARMIN_CONNECTOR_API_KEY'),
+    ],
+
 ];

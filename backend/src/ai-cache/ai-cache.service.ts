@@ -1,18 +1,16 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { CLOCK, type Clock } from '../ai-rate-limit/clock'
-
-type CacheEntry<T> = {
-  value: T
-  createdAtIso: string
-}
+import type { AiCacheStore } from './ai-cache.store'
+import { AI_CACHE_STORE } from './ai-cache.store.token'
 
 type Namespace = 'plan' | 'insights' | 'feedback'
 
 @Injectable()
 export class AiCacheService {
-  private cache = new Map<string, CacheEntry<any>>()
-
-  constructor(@Inject(CLOCK) private readonly clock: Clock) {}
+  constructor(
+    @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(AI_CACHE_STORE) private readonly store: AiCacheStore,
+  ) {}
 
   private getDayKeyUtc(): string {
     return this.clock.now().toISOString().split('T')[0]! // YYYY-MM-DD (UTC)
@@ -24,29 +22,20 @@ export class AiCacheService {
     return `${namespace}:${userId}:${dayKeyUtc}:${stableKey}`
   }
 
-  get<T>(namespace: Namespace, userId: number, days: number): T | null {
+  async get<T>(namespace: Namespace, userId: number, days: number): Promise<T | null> {
     const key = this.buildKey(namespace, userId, days)
-    const entry = this.cache.get(key) as CacheEntry<T> | undefined
-    return entry ? entry.value : null
+    return this.store.get<T>(key)
   }
 
-  set<T>(namespace: Namespace, userId: number, days: number, value: T): void {
+  async set<T>(namespace: Namespace, userId: number, days: number, value: T): Promise<void> {
     const todayKeyUtc = this.getDayKeyUtc()
 
-    // cleanup old UTC days
-    for (const key of this.cache.keys()) {
-      const parts = key.split(':')
-      const dayKey = parts[2]
-      if (dayKey && dayKey !== todayKeyUtc) {
-        this.cache.delete(key)
-      }
-    }
+    // Best-effort cleanup of entries from other UTC days (in-memory store only).
+    await this.store.cleanupOtherDays(todayKeyUtc)
 
     const key = this.buildKey(namespace, userId, days)
-    this.cache.set(key, {
-      value,
-      createdAtIso: this.clock.now().toISOString(),
-    })
+    const expireAt = Math.floor(new Date(this.resetAtIsoUtc()).getTime() / 1000)
+    await this.store.set(key, value, expireAt)
   }
 
   resetAtIsoUtc(): string {

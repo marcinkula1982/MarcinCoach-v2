@@ -14,7 +14,7 @@ type AuthedRequest = Request & { authUser?: { userId?: number; id?: number } }
 export class AiDailyRateLimitGuard implements CanActivate {
   constructor(private readonly limiter: AiDailyRateLimitService) {}
 
-  canActivate(ctx: ExecutionContext): boolean {
+  async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest<AuthedRequest>()
     const userId = req.authUser?.userId ?? req.authUser?.id
     if (!userId) {
@@ -33,7 +33,7 @@ export class AiDailyRateLimitGuard implements CanActivate {
       )
     }
 
-    const result = this.limiter.consume(Number(userId), limit)
+    const result = await this.limiter.consume(Number(userId), limit)
 
     if (!result.allowed) {
       throw new HttpException(
@@ -65,5 +65,3 @@ export class AiDailyRateLimitGuard implements CanActivate {
     return fallback
   }
 }
-
-

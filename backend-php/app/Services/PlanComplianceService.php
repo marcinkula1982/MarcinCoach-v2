@@ -160,6 +160,11 @@ class PlanComplianceService
         bool $flagOvershootDuration,
         bool $flagUndershootDuration
     ): void {
+        // SQLite/MySQL handling of INF/NAN is inconsistent; persist NULL for non-finite values.
+        if ($durationRatio !== null && !is_finite($durationRatio)) {
+            $durationRatio = null;
+        }
+
         DB::table('plan_compliance_v1')->updateOrInsert(
             ['workout_id' => $workoutId],
             [

@@ -132,7 +132,7 @@ export class TrainingFeedbackV2AiService {
 
     // Cache: per userId + day, hit tylko gdy pasuje questionHash + feedbackId
     // Ograniczenie: jeden wpis dziennie na usera (nadpisywanie przy innym pytaniu/feedbacku tego samego dnia)
-    const cached = this.aiCacheService.get<{ answer: string; questionHash: string; feedbackId: number }>('feedback', userId, 1)
+    const cached = await this.aiCacheService.get<{ answer: string; questionHash: string; feedbackId: number }>('feedback', userId, 1)
     let cacheStatus: 'hit' | 'miss' = 'miss'
     
     // Sprawdź czy cache pasuje do pytania i feedbackId (proste sprawdzenie hash)
@@ -180,7 +180,7 @@ export class TrainingFeedbackV2AiService {
     }
 
     // Zapisz w cache
-    this.aiCacheService.set('feedback', userId, 1, { answer, questionHash, feedbackId })
+    await this.aiCacheService.set('feedback', userId, 1, { answer, questionHash, feedbackId })
 
     return { answer, cache: cacheStatus }
   }

@@ -21,8 +21,7 @@ class TrainingFeedbackController extends Controller
 
         $days = isset($validated['days']) ? (int) $validated['days'] : 28;
 
-        // Current auth strategy in this backend: default user = 1
-        $userId = 1;
+        $userId = $this->authUserId($request);
         $feedback = $this->trainingFeedbackService->getFeedbackForUser($userId, $days);
 
         return response()->json($feedback);
