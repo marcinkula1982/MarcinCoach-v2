@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Log;
 
 class WeeklyPlanService
 {
@@ -216,6 +217,36 @@ class WeeklyPlanService
         $sessions = $this->enforceQualityDensityGuard($sessions, $longRunDay);
         $totalDuration = array_reduce($sessions, fn ($acc, $s) => $acc + (int) ($s['durationMin'] ?? 0), 0);
         $qualityCount = count(array_filter($sessions, fn ($s) => ($s['type'] ?? '') === 'quality'));
+
+        $sessionTypes = array_column($sessions, 'type');
+        $appliedCodes = array_values(array_map(
+            fn ($a) => (string) ($a['code'] ?? ''),
+            $adjustments['adjustments'] ?? [],
+        ));
+        try {
+            Log::info('[WeeklyPlan] generated', [
+                'userId' => $context['profile']['userId'] ?? null,
+                'windowDays' => $context['windowDays'] ?? 28,
+                'weekStart' => $weekStart->toDateString(),
+                'signals' => [
+                    'weeklyLoad' => $weeklyLoad,
+                    'rolling4wLoad' => $rolling4wLoad,
+                    'sessionsCount' => $sessionsCount,
+                    'hasFatigue' => $hasFatigue,
+                    'canQuality' => $canQuality,
+                    'loadScale' => $loadScale,
+                ],
+                'output' => [
+                    'totalDurationMin' => $totalDuration,
+                    'qualitySessions' => $qualityCount,
+                    'longRunDay' => $longRunDay,
+                    'sessionTypes' => $sessionTypes,
+                    'appliedAdjustmentsCodes' => $appliedCodes,
+                ],
+            ]);
+        } catch (\Throwable) {
+            // Log facade not available in unit test context (no container).
+        }
 
         return [
             'generatedAtIso' => $generatedAt->toISOString(),

@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Log;
+
 /**
  * Port of backend/src/training-adjustments/training-adjustments.service.ts.
  * Pure logic, deterministic. No DB access.
@@ -172,10 +174,35 @@ class TrainingAdjustmentsService
             ];
         }
 
+        $normalized = $this->normalizeAdjustments($adjustments);
+
+        try {
+            Log::info('[TrainingAdjustments] generated', [
+                'windowDays' => $context['windowDays'],
+                'signals' => [
+                    'fatigue' => $signals['flags']['fatigue'] ?? null,
+                    'injuryRisk' => $signals['flags']['injuryRisk'] ?? null,
+                    'longRunExists' => $signals['longRun']['exists'] ?? null,
+                    'avoidAsphalt' => $profile['surfaces']['avoidAsphalt'] ?? null,
+                    'hasCurrentPain' => $profile['health']['hasCurrentPain'] ?? null,
+                    'missedKeyWorkout' => ($signals['adaptation']['missedKeyWorkout'] ?? false),
+                    'harderThanPlanned' => ($signals['adaptation']['harderThanPlanned'] ?? false),
+                    'easierThanPlannedStreak' => (int) ($signals['adaptation']['easierThanPlannedStreak'] ?? 0),
+                    'controlStartRecent' => ($signals['adaptation']['controlStartRecent'] ?? false),
+                ],
+                'output' => [
+                    'adjustmentCount' => count($normalized),
+                    'codes' => array_column($normalized, 'code'),
+                ],
+            ]);
+        } catch (\Throwable) {
+            // Log facade not available in unit test context (no container).
+        }
+
         return [
             'generatedAtIso' => $context['generatedAtIso'],
             'windowDays' => $context['windowDays'],
-            'adjustments' => $this->normalizeAdjustments($adjustments),
+            'adjustments' => $normalized,
         ];
     }
 

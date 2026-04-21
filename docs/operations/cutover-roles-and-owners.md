@@ -3,12 +3,12 @@
 ## Purpose
 Single decision map for PHP-only cutover and rollback.
 
-## Owner Assignment (fill before cutover)
-- Go/No-Go Decision Owner: `[TO BE ASSIGNED: Go/No-Go Decision Owner]` (Marcin Kula — Project Owner)
-- Rollback Decision Owner: `[TO BE ASSIGNED: Rollback Decision Owner]` (Marcin Kula — Project Owner)
-- Rollback Execution Owner: `[TO BE ASSIGNED: Rollback Execution Owner]` (Marcin Kula — Project Owner)
-- App Validation Owner: `[TO BE ASSIGNED: App Validation Owner]` (Marcin Kula — Project Owner)
-- Communications Owner: `[TO BE ASSIGNED: Communications Owner]` (Marcin Kula — Project Owner)
+## Owner Assignment
+- Go/No-Go Decision Owner: Marcin Kula — Project Owner
+- Rollback Decision Owner: Marcin Kula — Project Owner
+- Rollback Execution Owner: Marcin Kula — Project Owner
+- App Validation Owner: Marcin Kula — Project Owner
+- Communications Owner: Marcin Kula — Project Owner
 
 ## Required Roles
 - **Incident Commander (IC)**: coordinates timeline, keeps single source of truth.
