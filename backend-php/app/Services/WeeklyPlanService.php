@@ -10,12 +10,18 @@ class WeeklyPlanService
     private const WEEK_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
     /**
-     * @param array<string,mixed> $context
+     * @param array<string,mixed>      $context
      * @param array<string,mixed>|null $adjustments
+     * @param array<string,mixed>|null $blockContext  M3/M4 — wynik BlockPeriodizationService::resolve()
      * @return array<string,mixed>
      */
-    public function generatePlan(array $context, ?array $adjustments = null): array
+    public function generatePlan(array $context, ?array $adjustments = null, ?array $blockContext = null): array
     {
+        // Fallback: pobierz blockContext z context, jeśli nie został podany jawnie.
+        if ($blockContext === null && isset($context['blockContext']) && is_array($context['blockContext'])) {
+            $blockContext = $context['blockContext'];
+        }
+
         $generatedAt = CarbonImmutable::parse((string) ($context['generatedAtIso'] ?? now()->toISOString()))->utc();
         $weekStart = $generatedAt->startOfWeek(CarbonImmutable::MONDAY)->startOfDay();
         $weekEnd = $weekStart->addDays(6)->endOfDay();
@@ -27,7 +33,13 @@ class WeeklyPlanService
         // PHP TrainingSignals contract freeze: use totalWorkouts (not legacy volume.sessions).
         $sessionsCount = (int) ($context['signals']['totalWorkouts'] ?? 0);
         $canQuality = ($sessionsCount >= 3) && !$hasFatigue;
-        $loadScale = $this->resolveLoadScale($weeklyLoad, $rolling4wLoad);
+        $loadScale = $this->resolveLoadScale($weeklyLoad, $rolling4wLoad, $blockContext);
+
+        // loadSpike cap — niezależnie od bloku, ogranicz do 0.85
+        $loadSpike = (bool) ($context['signals']['flags']['loadSpike'] ?? false);
+        if ($loadSpike && $loadScale > 0.85) {
+            $loadScale = 0.85;
+        }
 
         $sessions = [];
         foreach (self::WEEK_DAYS as $day) {
@@ -58,9 +70,7 @@ class WeeklyPlanService
             if ($qualityDay !== null) {
                 foreach ($sessions as &$s) {
                     if ($s['day'] === $qualityDay && $s['type'] === 'easy') {
-                        $s['type'] = 'quality';
-                        $s['durationMin'] = $this->roundToFive(50 * $loadScale);
-                        $s['intensityHint'] = 'Z3';
+                        $this->applyQualityShape($s, $loadScale, $blockContext);
                         break;
                     }
                 }
@@ -74,10 +84,11 @@ class WeeklyPlanService
                 $pct = (int) ($adj['params']['reductionPct'] ?? 20);
                 $factor = max(0.0, 1.0 - ($pct / 100));
                 foreach ($sessions as &$s) {
-                    if ($s['type'] === 'quality') {
+                    if ($this->isQualityLike($s)) {
                         $s['type'] = 'easy';
                         $s['durationMin'] = 40;
                         $s['intensityHint'] = 'Z2';
+                        unset($s['structure']);
                     }
                     if (($s['durationMin'] ?? 0) > 0) {
                         $s['durationMin'] = (int) (round(((float) $s['durationMin']) * $factor / 5) * 5);
@@ -92,10 +103,11 @@ class WeeklyPlanService
                 $longRunFactor = max(0.0, 1.0 - ($longRunReductionPct / 100));
 
                 foreach ($sessions as &$s) {
-                    if ($replaceHard && ($s['type'] ?? null) === 'quality') {
+                    if ($replaceHard && $this->isQualityLike($s)) {
                         $s['type'] = 'easy';
                         $s['durationMin'] = 40;
                         $s['intensityHint'] = 'Z2';
+                        unset($s['structure']);
                     }
 
                     if (($s['type'] ?? null) === 'long' && ($s['durationMin'] ?? 0) > 0) {
@@ -137,7 +149,7 @@ class WeeklyPlanService
 
             if ($code === 'surface_constraint') {
                 foreach ($sessions as &$s) {
-                    if (in_array((string) ($s['type'] ?? ''), ['easy', 'quality', 'long'], true)) {
+                    if (in_array((string) ($s['type'] ?? ''), ['easy', 'quality', 'long', 'threshold', 'intervals', 'fartlek', 'tempo'], true)) {
                         $s['surfaceHint'] = 'avoid_asphalt';
                     }
                 }
@@ -162,10 +174,11 @@ class WeeklyPlanService
                 $factor = max(0.0, 1.0 - ($pct / 100));
                 $replaceHard = (bool) ($adj['params']['replaceHardSessionWithEasy'] ?? true);
                 foreach ($sessions as &$s) {
-                    if ($replaceHard && ($s['type'] ?? null) === 'quality') {
+                    if ($replaceHard && $this->isQualityLike($s)) {
                         $s['type'] = 'easy';
                         $s['durationMin'] = 40;
                         $s['intensityHint'] = 'Z2';
+                        unset($s['structure']);
                     }
                     if (($s['durationMin'] ?? 0) > 0) {
                         $s['durationMin'] = (int) (round(((float) $s['durationMin']) * $factor / 5) * 5);
@@ -190,13 +203,88 @@ class WeeklyPlanService
                 $longRunReductionPct = (int) ($adj['params']['longRunReductionPct'] ?? 10);
                 $longRunFactor = max(0.0, 1.0 - ($longRunReductionPct / 100));
                 foreach ($sessions as &$s) {
-                    if ($replaceHard && ($s['type'] ?? null) === 'quality') {
+                    if ($replaceHard && $this->isQualityLike($s)) {
                         $s['type'] = 'easy';
                         $s['durationMin'] = 40;
                         $s['intensityHint'] = 'Z2';
+                        unset($s['structure']);
                     }
                     if (($s['type'] ?? null) === 'long' && ($s['durationMin'] ?? 0) > 0) {
                         $s['durationMin'] = (int) (round(((float) $s['durationMin']) * $longRunFactor / 5) * 5);
+                    }
+                }
+                unset($s);
+            }
+
+            // ---- M3/M4 beyond current scope: nowe adjustmenty strukturalne ----
+
+            if ($code === 'protect_quality_shorten_easy') {
+                // Chroń jakość; przytnij easy o 15%
+                $easyCutPct = (int) ($adj['params']['easyReductionPct'] ?? 15);
+                $easyFactor = max(0.0, 1.0 - ($easyCutPct / 100));
+                foreach ($sessions as &$s) {
+                    if (($s['type'] ?? null) === 'easy' && ($s['durationMin'] ?? 0) > 0) {
+                        $s['durationMin'] = (int) (round(((float) $s['durationMin']) * $easyFactor / 5) * 5);
+                    }
+                }
+                unset($s);
+            }
+
+            if ($code === 'swap_intervals_to_fartlek') {
+                foreach ($sessions as &$s) {
+                    $type = (string) ($s['type'] ?? '');
+                    if (in_array($type, ['quality', 'intervals', 'threshold'], true)) {
+                        $s['type'] = 'fartlek';
+                        $s['intensityHint'] = 'Z3-Z4';
+                        $s['structure'] = '8×1min zmiennie Z3/Z4, trucht 1min';
+                    }
+                }
+                unset($s);
+            }
+
+            if ($code === 'reduce_intensity_density') {
+                // Usuń jeden akcent tygodnia jeśli są dwa; objętość zostaje.
+                $qualityCount = 0;
+                foreach ($sessions as &$s) {
+                    if ($this->isQualityLike($s)) {
+                        $qualityCount++;
+                        if ($qualityCount > 1) {
+                            $s['type'] = 'easy';
+                            $s['intensityHint'] = 'Z2';
+                            unset($s['structure']);
+                        }
+                    }
+                }
+                unset($s);
+            }
+
+            if ($code === 'protect_long_run') {
+                // Chroń long run — skróć/usuń quality, zachowaj długi.
+                foreach ($sessions as &$s) {
+                    if ($this->isQualityLike($s)) {
+                        $s['type'] = 'easy';
+                        $s['durationMin'] = 35;
+                        $s['intensityHint'] = 'Z2';
+                        unset($s['structure']);
+                    }
+                }
+                unset($s);
+            }
+
+            if ($code === 'force_recovery_week') {
+                // Wymuszony recovery week: wszystko easy, short long run.
+                foreach ($sessions as &$s) {
+                    if ($this->isQualityLike($s)) {
+                        $s['type'] = 'easy';
+                        $s['durationMin'] = 35;
+                        $s['intensityHint'] = 'Z2';
+                        unset($s['structure']);
+                    }
+                    if (($s['type'] ?? null) === 'long' && ($s['durationMin'] ?? 0) > 0) {
+                        $s['durationMin'] = (int) (round(((float) $s['durationMin']) * 0.70 / 5) * 5);
+                    }
+                    if (($s['type'] ?? null) === 'easy' && ($s['durationMin'] ?? 0) > 0) {
+                        $s['durationMin'] = (int) (round(((float) $s['durationMin']) * 0.85 / 5) * 5);
                     }
                 }
                 unset($s);
@@ -216,7 +304,7 @@ class WeeklyPlanService
 
         $sessions = $this->enforceQualityDensityGuard($sessions, $longRunDay);
         $totalDuration = array_reduce($sessions, fn ($acc, $s) => $acc + (int) ($s['durationMin'] ?? 0), 0);
-        $qualityCount = count(array_filter($sessions, fn ($s) => ($s['type'] ?? '') === 'quality'));
+        $qualityCount = count(array_filter($sessions, fn ($s) => $this->isQualityLike($s)));
 
         $sessionTypes = array_column($sessions, 'type');
         $appliedCodes = array_values(array_map(
@@ -243,12 +331,13 @@ class WeeklyPlanService
                     'sessionTypes' => $sessionTypes,
                     'appliedAdjustmentsCodes' => $appliedCodes,
                 ],
+                'blockContext' => $blockContext,
             ]);
         } catch (\Throwable) {
             // Log facade not available in unit test context (no container).
         }
 
-        return [
+        $output = [
             'generatedAtIso' => $generatedAt->toISOString(),
             'weekStartIso' => $weekStart->toISOString(),
             'weekEndIso' => $weekEnd->toISOString(),
@@ -265,9 +354,118 @@ class WeeklyPlanService
                 $hasFatigue ? 'Reduced intensity due to fatigue flag' : 'Standard progression with deterministic rules',
             ],
         ];
+
+        if (is_array($blockContext) && !empty($blockContext)) {
+            $output['blockContext'] = [
+                'block_type' => (string) ($blockContext['block_type'] ?? ''),
+                'week_role' => (string) ($blockContext['week_role'] ?? ''),
+                'block_goal' => (string) ($blockContext['block_goal'] ?? ''),
+                'load_direction' => (string) ($blockContext['load_direction'] ?? ''),
+                'key_capability_focus' => (string) ($blockContext['key_capability_focus'] ?? ''),
+            ];
+        }
+
+        return $output;
     }
 
-    private function resolveLoadScale(float $weeklyLoad, float $rolling4wLoad): float
+    /**
+     * Ustawia kształt jakościowej sesji w zależności od focus/block.
+     * @param array<string,mixed> $s
+     */
+    private function applyQualityShape(array &$s, float $loadScale, ?array $blockContext): void
+    {
+        $focus = (string) ($blockContext['key_capability_focus'] ?? '');
+        $blockType = (string) ($blockContext['block_type'] ?? '');
+
+        // Default (jak dotychczas)
+        $type = 'quality';
+        $hint = 'Z3';
+        $structure = null;
+        $baseMin = 50;
+
+        if ($blockType === 'build' && $focus === 'threshold') {
+            $type = 'threshold';
+            $hint = 'Z3';
+            $structure = '3×10min Z3 z 2min przerwy trucht';
+            $baseMin = 55;
+        } elseif ($blockType === 'peak' && $focus === 'vo2max') {
+            $type = 'intervals';
+            $hint = 'Z4-Z5';
+            $structure = '5×3min Z4/Z5 z 3min truchtu';
+            $baseMin = 55;
+        } elseif ($focus === 'economy') {
+            $type = 'fartlek';
+            $hint = 'Z3-Z4';
+            $structure = '8×1min zmiennie Z3/Z4';
+            $baseMin = 45;
+        } elseif ($blockType === 'taper') {
+            $type = 'tempo';
+            $hint = 'Z3';
+            $structure = '15min Z3 w środku 40min easy';
+            $baseMin = 40;
+        }
+
+        $s['type'] = $type;
+        $s['durationMin'] = $this->roundToFive($baseMin * $loadScale);
+        $s['intensityHint'] = $hint;
+        if ($structure !== null) {
+            $s['structure'] = $structure;
+        }
+    }
+
+    /**
+     * Quality-like = każdy z: quality, threshold, intervals, fartlek, tempo.
+     * @param array<string,mixed> $s
+     */
+    private function isQualityLike(array $s): bool
+    {
+        $t = (string) ($s['type'] ?? '');
+        return in_array($t, ['quality', 'threshold', 'intervals', 'fartlek', 'tempo'], true);
+    }
+
+    private function resolveLoadScale(float $weeklyLoad, float $rolling4wLoad, ?array $blockContext = null): float
+    {
+        // M3/M4: jeśli blockContext sterujemy bezpośrednio wg week_role / load_direction
+        if (is_array($blockContext) && !empty($blockContext)) {
+            $role = (string) ($blockContext['week_role'] ?? '');
+            $direction = (string) ($blockContext['load_direction'] ?? '');
+
+            if ($role === 'recovery') {
+                return 0.70;
+            }
+            if ($role === 'taper') {
+                return 0.60;
+            }
+            if ($direction === 'increase') {
+                return $this->applyRatioCapForIncrease($weeklyLoad, $rolling4wLoad);
+            }
+            if ($direction === 'decrease') {
+                return 0.85;
+            }
+            if ($direction === 'maintain') {
+                return 1.00;
+            }
+        }
+
+        // Legacy fallback
+        return $this->resolveLegacyLoadScale($weeklyLoad, $rolling4wLoad);
+    }
+
+    private function applyRatioCapForIncrease(float $weeklyLoad, float $rolling4wLoad): float
+    {
+        $reference = $rolling4wLoad > 0 ? ($rolling4wLoad / 4.0) : $weeklyLoad;
+        if ($reference <= 0.0) {
+            return 1.10;
+        }
+        $ratio = $weeklyLoad / $reference;
+        // Gdy weeklyLoad już znacząco powyżej baseline — nie podbijaj dalej
+        if ($ratio > 1.15) {
+            return 0.90;
+        }
+        return 1.10;
+    }
+
+    private function resolveLegacyLoadScale(float $weeklyLoad, float $rolling4wLoad): float
     {
         $reference = $rolling4wLoad > 0 ? ($rolling4wLoad / 4.0) : $weeklyLoad;
         if ($reference <= 0.0) {
@@ -343,7 +541,7 @@ class WeeklyPlanService
         $longIdx = array_search($longRunDay, self::WEEK_DAYS, true);
         $keptQuality = false;
         foreach ($sessions as &$session) {
-            if (($session['type'] ?? null) !== 'quality') {
+            if (!$this->isQualityLike($session)) {
                 continue;
             }
 
@@ -352,6 +550,7 @@ class WeeklyPlanService
             if ($keptQuality || $tooCloseToLongRun) {
                 $session['type'] = 'easy';
                 $session['intensityHint'] = 'Z2';
+                unset($session['structure']);
             } else {
                 $keptQuality = true;
             }

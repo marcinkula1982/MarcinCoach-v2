@@ -176,10 +176,16 @@ class AiPlanService
             ];
         }
 
-        return [
+        $snapshot = [
             'windowStartIso' => (string) ($plan['weekStartIso'] ?? ''),
             'windowEndIso' => (string) ($plan['weekEndIso'] ?? ''),
             'days' => $days,
         ];
+
+        if (isset($plan['blockContext']) && is_array($plan['blockContext'])) {
+            $snapshot['blockContext'] = $plan['blockContext'];
+        }
+
+        return $snapshot;
     }
 }

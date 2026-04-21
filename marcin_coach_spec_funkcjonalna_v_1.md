@@ -1,5 +1,34 @@
 # MarcinCoach — specyfikacja funkcjonalna v1
 
+---
+
+## Stan realizacji — 2026-04-21
+
+> Ten dokument opisuje wizję i wymagania produktu. Sekcja poniżej synchronizuje go z aktualnym stanem repo.
+
+**Projekt jest greenfield — zero użytkowników produkcyjnych. Nie ma co "migrować", jest co deployować.**
+
+| Pakiet | Status | Uwagi |
+|--------|--------|-------|
+| M1 beyond minimum | ✅ DONE | profil, jakość profilu, maxSessionMin, hasCurrentPain |
+| M2 beyond minimum | ✅ DONE | TCX parsing, intensityBuckets, HR stats, avgPaceSecPerKm |
+| M3 | ✅ DONE | WeeklyPlanService, quality density guard, adjustments, technique/surface |
+| M4 | ✅ DONE | adaptation signals: missed/harder/easier/controlStart, alerty |
+| C0 + C1 | ✅ DONE | contract freeze tests (18), cold start tests (5), audit M1–M4 PASS |
+| php artisan test | ✅ 220 passed / 1023 assertions | 2026-04-21 |
+| Frontend | ✅ podłączony pod PHP | `src/api/client.ts` → `http://localhost:8000/api` |
+| Node.js backend | 🔵 AKTYWNY dla AI + integracji | zakres per ADR 0002 |
+
+**Publiczne kontrakty zamrożone:** `/api/weekly-plan`, `/api/training-signals`, `/api/training-adjustments`, `/api/training-context`
+
+**Następny pakiet: M3/M4 beyond** — periodyzacja blokowa, pamięć planu, granularna adaptacja, bogatsze alerty.
+
+**Następne kamienie wdrożeniowe:**
+- D0 — pierwsze wdrożenie produkcyjne (serwer, nginx, SSL, migracje)
+- D1 — pierwsze uruchomienie live z prawdziwym użytkownikiem
+
+---
+
 ## 1. Cel produktu
 MarcinCoach to wirtualny trener biegowy oparty przede wszystkim na danych konkretnego użytkownika, a nie na uśrednionych tabelach i gotowych szablonach. System ma analizować realne obciążenia, tolerancję wysiłku, historię treningów, ograniczenia czasowe, teren, sprzęt, zdrowie i cele startowe, a następnie prowadzić użytkownika w sposób indywidualny.
 
@@ -258,43 +287,54 @@ Eskalacja tylko gdy:
 - użytkownik zmienia cel startowy
 - użytkownik traci kilka dni przez chorobę / podróż / pracę
 
-## 8A. Migracja Node → PHP — definicja gotowości, cutover i rollback
-### 8A.1 Zasada
-Migracja nie jest zakończona w momencie, gdy repo ma gotowy kod i przechodzi testy. To oznacza jedynie gotowość do przełączenia. Faktyczne zakończenie migracji następuje dopiero po operacyjnym przełączeniu ruchu produkcyjnego na środowisko PHP i wyłączeniu starego deploymentu Node.
+## 8A. Architektura dwubackendowa i droga do produkcji
 
-### 8A.2 Trzy statusy migracji
+### 8A.0 Kontekst — projekt greenfield
+MarcinCoach nie migruje istniejącej aplikacji z użytkownikami. To nowy projekt bez ruchu produkcyjnego. Dlatego właściwe etapy to:
+
+- **D0 — first production-like deploy**: pierwsze wdrożenie na serwer (nginx, SSL, `.env` produkcyjny, migracje DB). Brak realnych użytkowników. Cel: potwierdzić, że system działa poza localhostem.
+- **D1 — first live launch**: system dostępny dla pierwszego prawdziwego użytkownika.
+
+Sekcja 8A.1–8A.7 opisuje zasady, które obowiązują na etapie D0 i D1 oraz przy każdej późniejszej zmianie architektury.
+
+### 8A.1 Zasada podziału backendów (ADR 0002)
+PHP przejmuje: auth, profil, workouty, signals, context, adjustments, weekly plan, compliance, alerts.
+Node.js pozostaje dla: `/ai/plan`, `/ai/insights`, `/integrations/strava/*`, `/integrations/garmin/*`.
+
+To nie jest stan tymczasowy bez decyzji — jest udokumentowany w `docs/adr/0002-cutover-scope-php-core-node-ai.md`.
+
+### 8A.2 Trzy statusy dla każdego obszaru
 - Code complete — kod, migracje, testy i integracje są gotowe w repo.
-- Cutover ready — aplikacja jest technicznie przygotowana do przejęcia ruchu produkcyjnego.
-- Production switched — ruch produkcyjny został przełączony, środowisko PHP obsługuje realny traffic, a Node nie jest już aktywną ścieżką produkcyjną.
+- Deploy ready — aplikacja jest technicznie przygotowana do wdrożenia na serwer.
+- Production live — obszar obsługuje realny ruch użytkownika.
 
 ### 8A.3 Czego nie da się zamknąć samym commitem
-Tego etapu nie zamyka sam commit ani merge do repo. Operacyjnie trzeba wykonać:
-- przełączenie ruchu,
-- zmianę routingu / proxy / load balancera / DNS — zależnie od architektury,
+D0 nie zamyka się commitem do repo. Operacyjnie trzeba wykonać:
+- wdrożenie na serwer z konfiguracją nginx/proxy,
+- ustawienie `.env` produkcyjnego (klucze, DB, mail),
+- uruchomienie migracji na docelowej bazie,
 - weryfikację healthchecków,
-- obserwację błędów po przełączeniu,
-- wyłączenie albo odpięcie starego deploymentu Node.
+- obserwację logów po wdrożeniu.
 
-### 8A.4 Kryteria gotowości do cutoveru
-Przed przełączeniem musi być spełnione minimum:
-- komplet kluczowych endpointów działa w PHP,
-- model danych jest zgodny z docelową logiką domenową,
-- integracje zewnętrzne działają albo są świadomie wyłączone i opisane,
-- migracje danych zostały przetestowane,
-- istnieje plan rollbacku,
-- istnieje checklista smoke testów po przełączeniu,
-- istnieje monitoring logów, błędów i synchronizacji.
+### 8A.4 Kryteria gotowości do D0
+Przed pierwszym wdrożeniem produkcyjnym musi być spełnione minimum:
+- komplet kluczowych endpointów PHP działa i przechodzi testy,
+- model danych jest zgodny z logiką domenową,
+- zakres Node.js (AI + integracje) jest świadomie opisany i wyłączony ze smoke testów PHP,
+- istnieje checklista smoke testów po wdrożeniu,
+- istnieje monitoring logów (laravel.log + failed_jobs),
+- istnieje plan rollbacku.
 
-### 8A.5 Production cutover checklist
-- freeze zmian bezpośrednio przed przełączeniem,
-- backup / snapshot,
-- finalna walidacja danych,
-- przełączenie ruchu na PHP,
-- smoke test po przełączeniu,
-- monitoring błędów i logów,
+**Stan na 2026-04-21: wszystkie powyższe kryteria spełnione. Brakuje tylko infrastruktury serwera.**
+
+### 8A.5 D0 deploy checklist
+- freeze zmian przed wdrożeniem,
+- backup / snapshot (jeśli DB ma dane),
+- uruchomienie migracji na serwerze,
+- smoke test T+5m → T+30m → T+2h → T+24h,
+- monitoring logów i błędów,
 - potwierdzenie działania kluczowych ścieżek użytkownika,
-- wyłączenie lub odpięcie Node z produkcji,
-- decyzja: utrzymanie lub zamknięcie rollback window.
+- decyzja: kontynuacja lub rollback.
 
 ### 8A.6 Rollback
 Rollback musi być zdefiniowany przed cutoverem. Specyfikacja powinna wskazywać:
@@ -304,13 +344,13 @@ Rollback musi być zdefiniowany przed cutoverem. Specyfikacja powinna wskazywać
 - jakie dane mogą zostać utracone lub wymagać resynchronizacji,
 - jak wygląda ponowna próba przełączenia.
 
-### 8A.7 Ryzyka operacyjne migracji
-- fałszywe poczucie, że „repo gotowe” oznacza „migracja zakończona”,
-- pozostawienie aktywnej ścieżki Node równolegle bez kontroli,
-- brak spójności danych po przełączeniu,
-- brak testów smoke po cutoverze,
-- brak jednoznacznych warunków rollbacku,
-- brak monitoringu błędów integracji po przełączeniu.
+### 8A.7 Ryzyka operacyjne
+- fałszywe poczucie, że „testy przechodzą” oznacza „gotowe do uruchomienia”,
+- brak `.env` produkcyjnego przed D0,
+- Node.js aktywny obok PHP bez zdefiniowanych ścieżek routingu,
+- brak smoke testów po pierwszym wdrożeniu,
+- brak monitoringu logów integracji,
+- próba wdrożenia AI eskalacji zanim silnik deterministyczny jest ustabilizowany w produkcji.
 
 ## 9. Ryzyka projektowe
 ### 9.1 Ryzyka produktowe
@@ -361,62 +401,75 @@ Rollback musi być zdefiniowany przed cutoverem. Specyfikacja powinna wskazywać
 - zaawansowany panel trenerski z rolami.
 
 ## 11. Kamienie milowe
-### M1 — fundament danych
+
+### ✅ M1 — fundament danych (DONE)
 - model danych
-- profil użytkownika
-- ankieta wejściowa
+- profil użytkownika z jakością (ProfileQualityScoreService)
 - cele, starty, dostępność, zdrowie, sprzęt
+- maxSessionMin cap, hasCurrentPain guard
 
-### M2 — import i analiza treningów
-- import TCX/FIT/GPX
-- parser
-- czyszczenie danych
-- analiza sesji
-- klasyfikacja typu treningu
+### ✅ M2 — import i analiza treningów (DONE)
+- import TCX / parser (TcxParsingService)
+- intensityBuckets, HR stats, avgPaceSecPerKm
+- ExternalWorkoutImportService → signals → compliance → alerts
+- sport detection, artefakty GPS
 
-### M3 — silnik planu backendowego
-- generator mikrocyklu
-- logika doboru jednostek
-- ograniczenia bezpieczeństwa
-- plan tygodniowy
+### ✅ M3 — silnik planu backendowego (DONE)
+- WeeklyPlanService: generator mikrocyklu, loadScale, quality density guard
+- TrainingAdjustmentsService: normalizacja, deduplicacja
+- adjustment codes: reduce_load, add_long_run, technique_focus, surface_constraint
+- contract freeze: /api/weekly-plan, /api/training-adjustments
 
-### M4 — adaptacja i alerty
-- wykrywanie odchyleń
-- korekty regułowe
-- alerty zmęczenia / przeciążenia / braków
+### ✅ M4 — adaptacja i alerty (DONE)
+- adaptation signals: missedKeyWorkout, harderThanPlanned, easierThanPlannedStreak, controlStartRecent
+- adjustment codes: missed_workout_rebalance, harder_than_planned_guard, easier_than_planned_progression, control_start_followup
+- alerty: MISSED_KEY_WORKOUT, EASIER_THAN_PLANNED_STREAK
+- contract freeze: /api/training-signals, /api/training-context
 
-### M5 — integracje
-- Strava
-- Garmin / wtyczka
-- logi synchronizacji
+### 🔜 M3/M4 beyond — periodyzacja i głębsza adaptacja (następny)
+- periodyzacja blokowa (base → build → peak → taper)
+- pamięć planu między tygodniami
+- granularna adaptacja: tempo stref, długość serii
+- bogatsze alerty: HR drift, pace regression, brak snu
+- głębsza analiza TCX: GAP, przewyższenia, cadence
 
-### M6 — AI escalation layer
-- progi eskalacji
-- prompt orchestration
-- logowanie odpowiedzi AI
-- mechanizm zatwierdzania lub odrzucania rekomendacji
+### ⬜ M5 — integracje
+- Strava (OAuth, pobieranie aktywności, mapowanie pól)
+- Garmin (nieoficjalne API / narzędzia z GitHub — bez oficjalnego wsparcia)
+- logi synchronizacji i obsługa błędów
 
-### M7 — panel użytkownika
+### ⬜ M6 — AI escalation layer
+- progi eskalacji (scoring pewności)
+- prompt orchestration dla przypadków niejednoznacznych
+- logowanie wejście / wyjście / koszt / powód wywołania
+- mechanizm zatwierdzania lub odrzucania rekomendacji AI
+- zabezpieczenie przed zbyt częstym odpalaniem
+
+### ⬜ M7 — panel użytkownika
 - dashboard tygodnia
 - historia treningów
 - alerty
-- komentarze po treningu
+- formularz samopoczucia / bólu / snu / stresu
+- historia zmian planu
 
-### M8 — panel administracyjny
-- podgląd użytkownika
+### ⬜ M8 — panel administracyjny
+- podgląd użytkownika 360
 - ręczne korekty
-- historia zmian
-- audyt decyzji
+- historia planów i alertów
+- audyt decyzji (log backendu + AI)
 
-### M9 — production cutover / DevOps
-- freeze zmian
-- backup / snapshot
-- finalna walidacja danych
-- przełączenie ruchu na PHP
-- smoke test po przełączeniu
-- monitoring błędów
-- wyłączenie lub odpięcie Node z produkcji
-- rollback window i decyzja o zamknięciu
+### ⬜ D0 — pierwsze wdrożenie produkcyjne
+- konfiguracja serwera: nginx, SSL, .env produkcyjny
+- uruchomienie migracji na docelowej bazie
+- smoke tests (T+5m, T+30m, T+2h, T+24h)
+- monitoring: laravel.log, failed_jobs
+- Node.js: routing AI + integracje oddzielony od PHP core
+
+### ⬜ D1 — pierwsze uruchomienie live
+- pierwszy prawdziwy użytkownik
+- onboarding flow end-to-end
+- weryfikacja importu treningów w warunkach produkcyjnych
+- decyzja o zakresie M5/M6 na podstawie feedbacku
 
 ## 12. Checklist wdrożeniowy
 ### M1 — fundament danych
@@ -546,12 +599,23 @@ Właściwy kierunek:
 - każda decyzja powinna mieć ślad: z czego wynikła.
 
 ## 14. Co warto dopisać w kolejnej wersji specyfikacji
-- dokładne user stories,
-- konkretne reguły planowania,
-- konkretne reguły adaptacji,
-- tabela alertów i progów,
-- schemat bazy danych,
-- kontrakty API,
-- logika promptów OpenAI,
-- definicja dashboardów i ekranów.
+
+### Pilne (przed D0 / D1)
+- konkretne reguły periodyzacji blokowej (M3/M4 beyond),
+- tabela alertów i progów (progi numeryczne, nie tylko opisy),
+- schemat bazy danych aktualny po M1-M4 (migracje już istnieją, brakuje diagramu),
+- kontrakty API v1 — zamrożone endpointy + pola,
+- definicja smoke test T+5m/T+30m dla D0.
+
+### Ważne (przed M5/M6)
+- dokładne user stories dla onboardingu i dashboardu,
+- logika promptów OpenAI i progi eskalacji (scoring pewności),
+- architektura integracji Garmin — wybór narzędzi z GitHub,
+- definicja dashboardów i ekranów (wireframes lub opis funkcjonalny).
+
+### Długoterminowe
+- predykcje gotowości startowej,
+- algorytm stref z danych TCX/FIT (nie z tabel wiekowych),
+- model przewyższeń i terenu w planowaniu,
+- wielosport (etap po ustabilizowaniu biegania).
 

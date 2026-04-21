@@ -200,11 +200,15 @@ class TrainingAdjustmentsServiceTest extends TestCase
 
         $result = $this->service->generate($ctx);
 
-        $this->assertCount(1, $result['adjustments']);
-        $this->assertSame('reduce_load', $result['adjustments'][0]['code']);
-        $this->assertSame('high', $result['adjustments'][0]['severity']);
-        $this->assertSame(30, $result['adjustments'][0]['params']['reductionPct']);
-        $this->assertSame('hasCurrentPain', $result['adjustments'][0]['evidence'][0]['key']);
+        $codes = array_column($result['adjustments'], 'code');
+        $this->assertContains('reduce_load', $codes);
+        // Etap E: pain + non-taper → dodatkowo protect_long_run
+        $this->assertContains('protect_long_run', $codes);
+
+        $reduceLoad = array_values(array_filter($result['adjustments'], fn ($a) => $a['code'] === 'reduce_load'))[0];
+        $this->assertSame('high', $reduceLoad['severity']);
+        $this->assertSame(30, $reduceLoad['params']['reductionPct']);
+        $this->assertSame('hasCurrentPain', $reduceLoad['evidence'][0]['key']);
     }
 
     public function test_current_pain_false_produces_no_adjustment(): void
@@ -270,5 +274,149 @@ class TrainingAdjustmentsServiceTest extends TestCase
         $this->assertContains('harder_than_planned_guard', $codes);
         $this->assertContains('easier_than_planned_progression', $codes);
         $this->assertContains('control_start_followup', $codes);
+    }
+
+    // --- M3/M4 beyond current scope: Etap E ---
+
+    public function test_every_adjustment_carries_adaptation_type_and_confidence(): void
+    {
+        $ctx = $this->baseContext(['signals' => ['flags' => ['fatigue' => true]]]);
+        $result = $this->service->generate($ctx);
+
+        $this->assertNotEmpty($result['adjustments']);
+        foreach ($result['adjustments'] as $adj) {
+            $this->assertArrayHasKey('adaptationType', $adj);
+            $this->assertContains($adj['adaptationType'], ['volume', 'intensity', 'density', 'structure']);
+            $this->assertArrayHasKey('confidence', $adj);
+            $this->assertContains($adj['confidence'], ['low', 'medium', 'high']);
+            $this->assertArrayHasKey('decisionBasis', $adj);
+        }
+    }
+
+    public function test_peak_week_without_bad_signals_produces_protect_quality_shorten_easy(): void
+    {
+        $ctx = $this->baseContext();
+        $blockContext = [
+            'block_type' => 'peak',
+            'block_goal' => 'Peak',
+            'week_role' => 'peak',
+            'load_direction' => 'increase',
+            'key_capability_focus' => 'vo2max',
+        ];
+
+        $result = $this->service->generate($ctx, null, $blockContext);
+        $codes = array_map(fn ($a) => $a['code'], $result['adjustments']);
+
+        $this->assertContains('protect_quality_shorten_easy', $codes);
+        $adj = array_values(array_filter($result['adjustments'], fn ($a) => $a['code'] === 'protect_quality_shorten_easy'))[0];
+        $this->assertSame('volume', $adj['adaptationType']);
+    }
+
+    public function test_fatigue_with_vo2max_focus_produces_swap_intervals_to_fartlek(): void
+    {
+        $ctx = $this->baseContext(['signals' => ['flags' => ['fatigue' => true]]]);
+        $blockContext = [
+            'block_type' => 'peak',
+            'block_goal' => 'Peak',
+            'week_role' => 'peak',
+            'load_direction' => 'increase',
+            'key_capability_focus' => 'vo2max',
+        ];
+
+        $result = $this->service->generate($ctx, null, $blockContext);
+        $codes = array_map(fn ($a) => $a['code'], $result['adjustments']);
+
+        $this->assertContains('swap_intervals_to_fartlek', $codes);
+        $adj = array_values(array_filter($result['adjustments'], fn ($a) => $a['code'] === 'swap_intervals_to_fartlek'))[0];
+        $this->assertSame('structure', $adj['adaptationType']);
+    }
+
+    public function test_memory_rule_persistent_underexecution_when_3_of_4_weeks_under_80pct(): void
+    {
+        $memory = $this->makeMemoryStub([
+            ['planned_total_min' => 300, 'actual_total_min' => 200, 'load_direction' => 'increase', 'actual_quality_count' => 1],
+            ['planned_total_min' => 300, 'actual_total_min' => 210, 'load_direction' => 'increase', 'actual_quality_count' => 1],
+            ['planned_total_min' => 300, 'actual_total_min' => 280, 'load_direction' => 'increase', 'actual_quality_count' => 2],
+            ['planned_total_min' => 300, 'actual_total_min' => 150, 'load_direction' => 'increase', 'actual_quality_count' => 0],
+        ]);
+        $service = new \App\Services\TrainingAdjustmentsService($memory);
+        $ctx = $this->baseContext(['profile' => ['userId' => 42]]);
+
+        $result = $service->generate($ctx);
+        $codes = array_map(fn ($a) => $a['code'], $result['adjustments']);
+
+        $this->assertContains('persistent_underexecution_check', $codes);
+    }
+
+    public function test_memory_rule_force_recovery_week_when_4_weeks_increase_streak(): void
+    {
+        $memory = $this->makeMemoryStub([
+            ['planned_total_min' => 320, 'actual_total_min' => 320, 'load_direction' => 'increase', 'actual_quality_count' => 1],
+            ['planned_total_min' => 310, 'actual_total_min' => 310, 'load_direction' => 'increase', 'actual_quality_count' => 1],
+            ['planned_total_min' => 300, 'actual_total_min' => 300, 'load_direction' => 'increase', 'actual_quality_count' => 1],
+            ['planned_total_min' => 290, 'actual_total_min' => 290, 'load_direction' => 'increase', 'actual_quality_count' => 1],
+        ]);
+        $service = new \App\Services\TrainingAdjustmentsService($memory);
+        $ctx = $this->baseContext(['profile' => ['userId' => 42]]);
+
+        $result = $service->generate($ctx);
+        $codes = array_map(fn ($a) => $a['code'], $result['adjustments']);
+
+        $this->assertContains('force_recovery_week', $codes);
+        $adj = array_values(array_filter($result['adjustments'], fn ($a) => $a['code'] === 'force_recovery_week'))[0];
+        $this->assertSame('high', $adj['confidence']);
+    }
+
+    public function test_memory_rule_quality_session_missing_trend_when_2_weeks_zero_quality(): void
+    {
+        $memory = $this->makeMemoryStub([
+            ['planned_total_min' => 300, 'actual_total_min' => 300, 'load_direction' => 'maintain', 'actual_quality_count' => 0],
+            ['planned_total_min' => 300, 'actual_total_min' => 300, 'load_direction' => 'maintain', 'actual_quality_count' => 0],
+        ]);
+        $service = new \App\Services\TrainingAdjustmentsService($memory);
+        $ctx = $this->baseContext(['profile' => ['userId' => 42]]);
+
+        $result = $service->generate($ctx);
+        $codes = array_map(fn ($a) => $a['code'], $result['adjustments']);
+
+        $this->assertContains('quality_session_missing_trend', $codes);
+    }
+
+    public function test_memory_rule_reduce_intensity_density_when_high_density_streak(): void
+    {
+        $memory = $this->makeMemoryStub([
+            ['planned_total_min' => 300, 'actual_total_min' => 300, 'load_direction' => 'maintain', 'actual_quality_count' => 3],
+            ['planned_total_min' => 300, 'actual_total_min' => 300, 'load_direction' => 'maintain', 'actual_quality_count' => 4],
+        ]);
+        $service = new \App\Services\TrainingAdjustmentsService($memory);
+        $ctx = $this->baseContext(['profile' => ['userId' => 42]]);
+
+        $result = $service->generate($ctx);
+        $codes = array_map(fn ($a) => $a['code'], $result['adjustments']);
+
+        $this->assertContains('reduce_intensity_density', $codes);
+        $adj = array_values(array_filter($result['adjustments'], fn ($a) => $a['code'] === 'reduce_intensity_density'))[0];
+        $this->assertSame('density', $adj['adaptationType']);
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $weeks
+     */
+    private function makeMemoryStub(array $weeks): \App\Services\PlanMemoryService
+    {
+        return new class($weeks) extends \App\Services\PlanMemoryService {
+            /** @var array<int,array<string,mixed>> */
+            private array $weeks;
+
+            public function __construct(array $weeks)
+            {
+                $this->weeks = $weeks;
+            }
+
+            public function getRecentWeeks(int $userId, int $count = 6): array
+            {
+                return array_slice($this->weeks, 0, $count);
+            }
+        };
     }
 }

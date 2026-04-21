@@ -6,8 +6,30 @@ use App\Models\Workout;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
+/**
+ * M3/M4 beyond current scope — Etap F.
+ *
+ * Dodano:
+ *  - family           : safety | compliance | trend | data_quality
+ *  - confidence       : low | medium | high
+ *  - explanation_code : klucz wyjaśnienia (słownikowy)
+ *  - week_id          : per-week trend alerts (workout_id wtedy null)
+ *
+ * Nowe alerty trendowe (upsertWeeklyAlerts):
+ *  - UNDER_RECOVERY_TREND
+ *  - EXECUTION_DRIFT
+ *  - STALE_MISSED_CAPABILITY
+ *  - EXCESSIVE_DENSITY_TREND
+ *  - BLOCK_GOAL_NOT_MET
+ *  - PAIN_WITH_LOAD_CONFLICT
+ */
 class TrainingAlertsV1Service
 {
+    public function __construct(
+        private readonly ?PlanMemoryService $planMemoryService = null,
+    ) {
+    }
+
     public function upsertForWorkout(int $workoutId): void
     {
         $workout = Workout::find($workoutId);
@@ -15,7 +37,6 @@ class TrainingAlertsV1Service
             return;
         }
 
-        // Pobierz rekordy z tabel źródłowych
         $complianceV1 = DB::table('plan_compliance_v1')
             ->where('workout_id', $workoutId)
             ->first();
@@ -28,15 +49,17 @@ class TrainingAlertsV1Service
             ->where('workout_id', $workoutId)
             ->first();
 
-        // Zbuduj listę aktywnych alertów
         $activeAlerts = [];
 
-        // LOAD_SPIKE (WARNING)
+        // LOAD_SPIKE (WARNING, safety)
         $loadSpike = $this->calculateLoadSpikeForWorkout($workout);
         if ($loadSpike['isSpike']) {
             $activeAlerts[] = [
                 'code' => 'LOAD_SPIKE',
                 'severity' => 'WARNING',
+                'family' => 'safety',
+                'confidence' => 'high',
+                'explanation_code' => 'load_spike_7d',
                 'payload_json' => json_encode([
                     'current7dLoad' => $loadSpike['current7dLoad'],
                     'previous7dLoad' => $loadSpike['previous7dLoad'],
@@ -50,6 +73,9 @@ class TrainingAlertsV1Service
             $activeAlerts[] = [
                 'code' => 'MISSED_KEY_WORKOUT',
                 'severity' => 'WARNING',
+                'family' => 'compliance',
+                'confidence' => 'medium',
+                'explanation_code' => 'missed_key_workout',
                 'payload_json' => json_encode(['reason' => 'planned_key_session_not_completed']),
             ];
         }
@@ -59,27 +85,34 @@ class TrainingAlertsV1Service
             $activeAlerts[] = [
                 'code' => 'EASIER_THAN_PLANNED_STREAK',
                 'severity' => 'INFO',
+                'family' => 'compliance',
+                'confidence' => 'medium',
+                'explanation_code' => 'easier_than_planned_streak',
                 'payload_json' => json_encode(['streak' => $easierStreak]),
             ];
         }
 
-        // PLAN_MISSING (INFO)
         if (!$complianceV1 || $complianceV1->status === 'UNKNOWN') {
             $activeAlerts[] = [
                 'code' => 'PLAN_MISSING',
                 'severity' => 'INFO',
+                'family' => 'data_quality',
+                'confidence' => 'high',
+                'explanation_code' => 'plan_missing',
                 'payload_json' => json_encode(['reason' => 'no_plan_or_no_match']),
             ];
         }
 
-        // DURATION_MAJOR_OVERSHOOT (CRITICAL)
-        if ($complianceV1 && 
-            $complianceV1->status === 'MAJOR_DEVIATION' && 
-            $complianceV1->duration_ratio !== null && 
+        if ($complianceV1 &&
+            $complianceV1->status === 'MAJOR_DEVIATION' &&
+            $complianceV1->duration_ratio !== null &&
             $complianceV1->duration_ratio > 1.0) {
             $activeAlerts[] = [
                 'code' => 'DURATION_MAJOR_OVERSHOOT',
                 'severity' => 'CRITICAL',
+                'family' => 'compliance',
+                'confidence' => 'high',
+                'explanation_code' => 'duration_major_overshoot',
                 'payload_json' => json_encode([
                     'expectedDurationSec' => $complianceV1->expected_duration_sec,
                     'actualDurationSec' => $complianceV1->actual_duration_sec,
@@ -90,14 +123,16 @@ class TrainingAlertsV1Service
             ];
         }
 
-        // DURATION_MAJOR_UNDERSHOOT (WARNING)
-        if ($complianceV1 && 
-            $complianceV1->status === 'MAJOR_DEVIATION' && 
-            $complianceV1->duration_ratio !== null && 
+        if ($complianceV1 &&
+            $complianceV1->status === 'MAJOR_DEVIATION' &&
+            $complianceV1->duration_ratio !== null &&
             $complianceV1->duration_ratio < 1.0) {
             $activeAlerts[] = [
                 'code' => 'DURATION_MAJOR_UNDERSHOOT',
                 'severity' => 'WARNING',
+                'family' => 'compliance',
+                'confidence' => 'high',
+                'explanation_code' => 'duration_major_undershoot',
                 'payload_json' => json_encode([
                     'expectedDurationSec' => $complianceV1->expected_duration_sec,
                     'actualDurationSec' => $complianceV1->actual_duration_sec,
@@ -108,11 +143,13 @@ class TrainingAlertsV1Service
             ];
         }
 
-        // EASY_BECAME_Z5 (CRITICAL)
         if ($complianceV2 && (bool) ($complianceV2->flag_easy_became_z5 ?? false)) {
             $activeAlerts[] = [
                 'code' => 'EASY_BECAME_Z5',
                 'severity' => 'CRITICAL',
+                'family' => 'safety',
+                'confidence' => 'high',
+                'explanation_code' => 'easy_became_z5',
                 'payload_json' => json_encode([
                     'expectedHrZoneMin' => $complianceV2->expected_hr_zone_min,
                     'expectedHrZoneMax' => $complianceV2->expected_hr_zone_max,
@@ -122,25 +159,24 @@ class TrainingAlertsV1Service
             ];
         }
 
-        // HR_DATA_MISSING (INFO)
         if (!$signalsV2 || ($signalsV2->hr_available ?? 0) == 0) {
             $activeAlerts[] = [
                 'code' => 'HR_DATA_MISSING',
                 'severity' => 'INFO',
+                'family' => 'data_quality',
+                'confidence' => 'high',
+                'explanation_code' => 'hr_data_missing',
                 'payload_json' => json_encode(['reason' => 'missing_hr']),
             ];
         }
 
-        // Pobierz listę kodów aktywnych alertów
         $activeCodes = array_column($activeAlerts, 'code');
 
-        // Pobierz istniejące alerty dla tego workoutu
         $existingAlerts = DB::table('training_alerts_v1')
             ->where('workout_id', $workoutId)
             ->pluck('code')
             ->toArray();
 
-        // Cleanup: usuń alerty, które przestały być aktywne
         $codesToDelete = array_diff($existingAlerts, $activeCodes);
         if (!empty($codesToDelete)) {
             DB::table('training_alerts_v1')
@@ -149,7 +185,6 @@ class TrainingAlertsV1Service
                 ->delete();
         }
 
-        // UPSERT aktywnych alertów
         foreach ($activeAlerts as $alert) {
             DB::table('training_alerts_v1')->updateOrInsert(
                 [
@@ -158,11 +193,232 @@ class TrainingAlertsV1Service
                 ],
                 [
                     'severity' => $alert['severity'],
+                    'family' => $alert['family'] ?? null,
+                    'confidence' => $alert['confidence'] ?? 'medium',
+                    'explanation_code' => $alert['explanation_code'] ?? null,
+                    'week_id' => null,
                     'payload_json' => $alert['payload_json'],
                     'generated_at' => now(),
                 ]
             );
         }
+    }
+
+    /**
+     * Alerty trendowe per-week. Wymaga obecnego rekordu training_weeks dla tego tygodnia.
+     */
+    public function upsertWeeklyAlerts(int $userId, string $weekStartDate): void
+    {
+        $week = DB::table('training_weeks')
+            ->where('user_id', $userId)
+            ->where('week_start_date', $weekStartDate)
+            ->first();
+        if (!$week) {
+            return;
+        }
+        $weekId = (int) $week->id;
+
+        $memory = $this->planMemoryService;
+        $recentWeeks = $memory !== null
+            ? $memory->getRecentWeeks($userId, 6)
+            : $this->getRecentWeeksRaw($userId, 6);
+
+        $activeAlerts = [];
+
+        // UNDER_RECOVERY_TREND
+        $underRecoveryWeeks = 0;
+        foreach (array_slice($recentWeeks, 0, 3) as $w) {
+            $isDecrease = ($w['load_direction'] ?? null) === 'decrease';
+            $plannedQ = $w['planned_quality_count'] ?? 0;
+            $actualQ = $w['actual_quality_count'] ?? 0;
+            if ($isDecrease && $actualQ !== null && $plannedQ !== null && (int) $actualQ < (int) $plannedQ) {
+                $underRecoveryWeeks++;
+            }
+        }
+        if ($underRecoveryWeeks >= 2) {
+            $activeAlerts[] = [
+                'code' => 'UNDER_RECOVERY_TREND',
+                'severity' => 'WARNING',
+                'family' => 'trend',
+                'confidence' => 'medium',
+                'explanation_code' => 'under_recovery_trend',
+                'payload_json' => json_encode(['underRecoveryWeeks' => $underRecoveryWeeks]),
+            ];
+        }
+
+        // EXECUTION_DRIFT: 3 ostatnie tygodnie ratio < 0.75
+        $driftCount = 0;
+        foreach (array_slice($recentWeeks, 0, 3) as $w) {
+            $planned = (int) ($w['planned_total_min'] ?? 0);
+            $actual = (int) ($w['actual_total_min'] ?? 0);
+            if ($planned > 0 && ($actual / $planned) < 0.75) {
+                $driftCount++;
+            }
+        }
+        if ($driftCount >= 3) {
+            $activeAlerts[] = [
+                'code' => 'EXECUTION_DRIFT',
+                'severity' => 'WARNING',
+                'family' => 'compliance',
+                'confidence' => 'high',
+                'explanation_code' => 'execution_drift',
+                'payload_json' => json_encode(['driftWeeks' => $driftCount]),
+            ];
+        }
+
+        // STALE_MISSED_CAPABILITY: focus nie realizowany przez 3+ tyg
+        $missedCapability = 0;
+        $targetFocus = (string) ($week->key_capability_focus ?? '');
+        if ($targetFocus !== '') {
+            foreach (array_slice($recentWeeks, 0, 3) as $w) {
+                $wFocus = (string) ($w['key_capability_focus'] ?? '');
+                $actualQ = (int) ($w['actual_quality_count'] ?? 0);
+                if ($wFocus === $targetFocus && $actualQ === 0) {
+                    $missedCapability++;
+                }
+            }
+        }
+        if ($missedCapability >= 3) {
+            $activeAlerts[] = [
+                'code' => 'STALE_MISSED_CAPABILITY',
+                'severity' => 'INFO',
+                'family' => 'trend',
+                'confidence' => 'medium',
+                'explanation_code' => 'stale_missed_capability',
+                'payload_json' => json_encode([
+                    'focus' => $targetFocus,
+                    'weeksMissed' => $missedCapability,
+                ]),
+            ];
+        }
+
+        // EXCESSIVE_DENSITY_TREND: 2+ tygodni actual_quality_count >= 3
+        $densityStreak = 0;
+        foreach (array_slice($recentWeeks, 0, 3) as $w) {
+            $qc = (int) ($w['actual_quality_count'] ?? 0);
+            if ($qc >= 3) {
+                $densityStreak++;
+                continue;
+            }
+            break;
+        }
+        if ($densityStreak >= 2) {
+            $activeAlerts[] = [
+                'code' => 'EXCESSIVE_DENSITY_TREND',
+                'severity' => 'WARNING',
+                'family' => 'safety',
+                'confidence' => 'medium',
+                'explanation_code' => 'excessive_density_trend',
+                'payload_json' => json_encode(['densityStreak' => $densityStreak]),
+            ];
+        }
+
+        // BLOCK_GOAL_NOT_MET: blok kończy się + >60% tygodni bloku bez goal_met
+        $currentRole = (string) ($week->week_role ?? '');
+        $currentBlock = (string) ($week->block_type ?? '');
+        if (($currentRole === 'recovery' || $currentRole === 'taper') && $currentBlock !== '') {
+            $blockWeeks = [];
+            foreach ($recentWeeks as $w) {
+                if (($w['block_type'] ?? null) === $currentBlock) {
+                    $blockWeeks[] = $w;
+                    continue;
+                }
+                if (!empty($blockWeeks)) {
+                    break;
+                }
+            }
+            $countBlock = count($blockWeeks);
+            $notMet = 0;
+            foreach ($blockWeeks as $w) {
+                if (($w['goal_met'] ?? null) === false || ($w['goal_met'] ?? null) === 0) {
+                    $notMet++;
+                }
+            }
+            if ($countBlock >= 2 && ($notMet / $countBlock) > 0.60) {
+                $activeAlerts[] = [
+                    'code' => 'BLOCK_GOAL_NOT_MET',
+                    'severity' => 'INFO',
+                    'family' => 'compliance',
+                    'confidence' => 'low',
+                    'explanation_code' => 'block_goal_not_met',
+                    'payload_json' => json_encode([
+                        'blockType' => $currentBlock,
+                        'weeksNotMet' => $notMet,
+                        'weeksInBlock' => $countBlock,
+                    ]),
+                ];
+            }
+        }
+
+        // PAIN_WITH_LOAD_CONFLICT: profile.hasCurrentPain + planned_quality_count > 0
+        $profile = DB::table('user_profiles')->where('user_id', $userId)->first(['has_current_pain']);
+        $hasCurrentPain = (bool) ($profile->has_current_pain ?? false);
+        $plannedQ = (int) ($week->planned_quality_count ?? 0);
+        if ($hasCurrentPain && $plannedQ > 0) {
+            $activeAlerts[] = [
+                'code' => 'PAIN_WITH_LOAD_CONFLICT',
+                'severity' => 'CRITICAL',
+                'family' => 'safety',
+                'confidence' => 'high',
+                'explanation_code' => 'pain_with_load_conflict',
+                'payload_json' => json_encode(['plannedQualityCount' => $plannedQ]),
+            ];
+        }
+
+        $activeCodes = array_column($activeAlerts, 'code');
+
+        $existingWeeklyAlerts = DB::table('training_alerts_v1')
+            ->where('week_id', $weekId)
+            ->whereNull('workout_id')
+            ->pluck('code')
+            ->toArray();
+
+        $codesToDelete = array_diff($existingWeeklyAlerts, $activeCodes);
+        if (!empty($codesToDelete)) {
+            DB::table('training_alerts_v1')
+                ->where('week_id', $weekId)
+                ->whereNull('workout_id')
+                ->whereIn('code', $codesToDelete)
+                ->delete();
+        }
+
+        foreach ($activeAlerts as $alert) {
+            $existing = DB::table('training_alerts_v1')
+                ->where('week_id', $weekId)
+                ->whereNull('workout_id')
+                ->where('code', $alert['code'])
+                ->first(['id']);
+            $payload = [
+                'workout_id' => null,
+                'week_id' => $weekId,
+                'code' => $alert['code'],
+                'severity' => $alert['severity'],
+                'family' => $alert['family'] ?? null,
+                'confidence' => $alert['confidence'] ?? 'medium',
+                'explanation_code' => $alert['explanation_code'] ?? null,
+                'payload_json' => $alert['payload_json'],
+                'generated_at' => now(),
+            ];
+            if ($existing) {
+                DB::table('training_alerts_v1')->where('id', $existing->id)->update($payload);
+            } else {
+                DB::table('training_alerts_v1')->insert($payload);
+            }
+        }
+    }
+
+    /**
+     * @return array<int,array<string,mixed>>
+     */
+    private function getRecentWeeksRaw(int $userId, int $count): array
+    {
+        return DB::table('training_weeks')
+            ->where('user_id', $userId)
+            ->orderByDesc('week_start_date')
+            ->limit(max(1, $count))
+            ->get()
+            ->map(fn ($r) => (array) $r)
+            ->toArray();
     }
 
     /**
@@ -190,7 +446,6 @@ class TrainingAlertsV1Service
             $rowDt = $this->resolveWorkoutDt($rowSummary, $row->created_at);
             $load = $this->extractLoadValue($rowSummary);
 
-            // Only workouts up to the analyzed workout timestamp.
             if ($rowDt->greaterThan($workoutDt)) {
                 continue;
             }
@@ -239,7 +494,6 @@ class TrainingAlertsV1Service
             return (float) $intensity;
         }
 
-        // Fallback when intensity score is unavailable: duration minutes as low-fidelity load proxy.
         $durationSec = $summary['trimmed']['durationSec'] ?? $summary['original']['durationSec'] ?? $summary['durationSec'] ?? null;
         if (is_numeric($durationSec) && (float) $durationSec > 0) {
             return (float) $durationSec / 60.0;
@@ -321,4 +575,3 @@ class TrainingAlertsV1Service
         return $streak;
     }
 }
-

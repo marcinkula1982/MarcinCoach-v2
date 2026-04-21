@@ -198,4 +198,102 @@ class WeeklyPlanServiceTest extends TestCase
 
         $this->assertGreaterThanOrEqual(75, (int) $long['durationMin']);
     }
+
+    // --- M3/M4 beyond current scope: blockContext driven loadScale + quality shape ---
+
+    public function test_block_context_recovery_week_scales_load_to_0_70(): void
+    {
+        $context = $this->baseContext(['signals' => ['totalWorkouts' => 5]]);
+        $blockContext = [
+            'block_type' => 'build',
+            'block_goal' => 'Rozbudowa bazy',
+            'week_role' => 'recovery',
+            'load_direction' => 'decrease',
+            'key_capability_focus' => 'aerobic_base',
+        ];
+
+        $plan = $this->service->generatePlan($context, ['adjustments' => []], $blockContext);
+        $long = array_values(array_filter($plan['sessions'], fn ($s) => ($s['type'] ?? null) === 'long'))[0];
+
+        // 90 * 0.70 = 63 → round to 65
+        $this->assertSame(65, (int) $long['durationMin']);
+        $this->assertSame('build', $plan['blockContext']['block_type']);
+        $this->assertSame('recovery', $plan['blockContext']['week_role']);
+    }
+
+    public function test_block_context_taper_week_scales_load_to_0_60(): void
+    {
+        $context = $this->baseContext();
+        $blockContext = [
+            'block_type' => 'taper',
+            'block_goal' => 'Taper',
+            'week_role' => 'taper',
+            'load_direction' => 'decrease',
+            'key_capability_focus' => 'economy',
+        ];
+
+        $plan = $this->service->generatePlan($context, ['adjustments' => []], $blockContext);
+        $long = array_values(array_filter($plan['sessions'], fn ($s) => ($s['type'] ?? null) === 'long'))[0];
+
+        // 90 * 0.60 = 54 → round to 55
+        $this->assertSame(55, (int) $long['durationMin']);
+    }
+
+    public function test_block_context_build_threshold_shapes_quality_as_threshold(): void
+    {
+        $context = $this->baseContext(['signals' => ['totalWorkouts' => 5]]);
+        $blockContext = [
+            'block_type' => 'build',
+            'block_goal' => 'Build tempa',
+            'week_role' => 'build',
+            'load_direction' => 'increase',
+            'key_capability_focus' => 'threshold',
+        ];
+
+        $plan = $this->service->generatePlan($context, ['adjustments' => []], $blockContext);
+        $threshold = array_values(array_filter($plan['sessions'], fn ($s) => ($s['type'] ?? null) === 'threshold'));
+
+        $this->assertNotEmpty($threshold, 'Expected at least one threshold quality session');
+        $this->assertSame('Z3', $threshold[0]['intensityHint']);
+        $this->assertStringContainsString('3×10min Z3', $threshold[0]['structure'] ?? '');
+    }
+
+    public function test_block_context_peak_vo2max_shapes_quality_as_intervals(): void
+    {
+        $context = $this->baseContext(['signals' => ['totalWorkouts' => 5]]);
+        $blockContext = [
+            'block_type' => 'peak',
+            'block_goal' => 'Peak VO2max',
+            'week_role' => 'peak',
+            'load_direction' => 'increase',
+            'key_capability_focus' => 'vo2max',
+        ];
+
+        $plan = $this->service->generatePlan($context, ['adjustments' => []], $blockContext);
+        $intervals = array_values(array_filter($plan['sessions'], fn ($s) => ($s['type'] ?? null) === 'intervals'));
+
+        $this->assertNotEmpty($intervals);
+        $this->assertSame('Z4-Z5', $intervals[0]['intensityHint']);
+        $this->assertStringContainsString('5×3min', $intervals[0]['structure'] ?? '');
+    }
+
+    public function test_block_context_falls_back_to_context_when_arg_null(): void
+    {
+        $context = $this->baseContext();
+        $context['blockContext'] = [
+            'block_type' => 'recovery',
+            'block_goal' => 'Recovery',
+            'week_role' => 'recovery',
+            'load_direction' => 'decrease',
+            'key_capability_focus' => 'aerobic_base',
+        ];
+
+        $plan = $this->service->generatePlan($context, ['adjustments' => []]);
+
+        $this->assertArrayHasKey('blockContext', $plan);
+        $this->assertSame('recovery', $plan['blockContext']['block_type']);
+        // recovery role → loadScale 0.70
+        $long = array_values(array_filter($plan['sessions'], fn ($s) => ($s['type'] ?? null) === 'long'))[0];
+        $this->assertSame(65, (int) $long['durationMin']);
+    }
 }

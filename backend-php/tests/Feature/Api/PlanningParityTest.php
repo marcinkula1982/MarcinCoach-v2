@@ -211,6 +211,34 @@ class PlanningParityTest extends TestCase
         }
     }
 
+    public function test_weekly_plan_persists_training_weeks_row_with_block_context(): void
+    {
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2026-04-20T10:00:00Z',
+                'durationSec' => 2000,
+                'distanceM' => 5500,
+                'intensity' => 25,
+            ],
+            'source' => 'manual',
+            'dedupe_key' => 'planning-parity-training-weeks',
+        ]);
+
+        $plan = $this->getJson('/api/weekly-plan?days=28');
+        $plan->assertOk();
+
+        $rows = DB::table('training_weeks')->where('user_id', 1)->get();
+        $this->assertCount(1, $rows, 'Expected exactly one training_weeks row after GET /api/weekly-plan');
+
+        $row = $rows->first();
+        $this->assertNotEmpty($row->block_type, 'block_type should be populated from BlockPeriodizationService');
+        $this->assertNotEmpty($row->week_role);
+        $this->assertGreaterThan(0, (int) $row->planned_total_min);
+    }
+
     public function test_m4_easier_streak_applies_progression_adjustment_code(): void
     {
         $w1 = Workout::create([
