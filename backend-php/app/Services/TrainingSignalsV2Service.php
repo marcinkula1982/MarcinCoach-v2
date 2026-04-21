@@ -83,57 +83,14 @@ class TrainingSignalsV2Service
 
     /**
      * Parse TCX XML to extract trackpoints with heart rate data.
+     * Delegates to TcxParsingService so both the summary builder and compliance
+     * v2 share one parser implementation.
      *
-     * @return array Array of trackpoints with 'time' (Carbon) and 'hr' (int)
+     * @return array<int,array{time:Carbon,hr:int}>
      */
     private function parseTcxForHeartRate(string $xml): array
     {
-        $dom = new \DOMDocument();
-        $dom->preserveWhiteSpace = false;
-        
-        $oldErrorReporting = libxml_use_internal_errors(true);
-        $loaded = $dom->loadXML($xml);
-        $errors = libxml_get_errors();
-        libxml_clear_errors();
-        libxml_use_internal_errors($oldErrorReporting);
-
-        if (!$loaded || !empty($errors)) {
-            return [];
-        }
-
-        $xpath = new \DOMXPath($dom);
-        $xpath->registerNamespace('tcx', 'http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2');
-
-        $trackpoints = [];
-        $trackpointNodes = $xpath->query('//tcx:Trackpoint[tcx:Time and tcx:HeartRateBpm/tcx:Value]');
-
-        foreach ($trackpointNodes as $trackpointNode) {
-            // Extract Time
-            $timeNodes = $xpath->query('./tcx:Time', $trackpointNode);
-            if ($timeNodes->length === 0) {
-                continue;
-            }
-            $timeStr = trim($timeNodes->item(0)->textContent);
-
-            // Extract HeartRateBpm->Value
-            $hrNodes = $xpath->query('./tcx:HeartRateBpm/tcx:Value', $trackpointNode);
-            if ($hrNodes->length === 0) {
-                continue;
-            }
-            $hrValue = (int) trim($hrNodes->item(0)->textContent);
-
-            try {
-                $time = Carbon::parse($timeStr)->utc();
-                $trackpoints[] = [
-                    'time' => $time,
-                    'hr' => $hrValue,
-                ];
-            } catch (\Exception $e) {
-                continue;
-            }
-        }
-
-        return $trackpoints;
+        return app(TcxParsingService::class)->parseHeartRateTrackpoints($xml);
     }
 
     /**

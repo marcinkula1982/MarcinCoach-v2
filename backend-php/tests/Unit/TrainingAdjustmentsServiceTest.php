@@ -61,6 +61,31 @@ class TrainingAdjustmentsServiceTest extends TestCase
         $this->assertSame('medium', $result['adjustments'][0]['severity']);
     }
 
+    public function test_injury_risk_flag_produces_recovery_focus_high(): void
+    {
+        $ctx = $this->baseContext(['signals' => ['flags' => ['injuryRisk' => true]]]);
+        $result = $this->service->generate($ctx);
+
+        $this->assertCount(1, $result['adjustments']);
+        $this->assertSame('recovery_focus', $result['adjustments'][0]['code']);
+        $this->assertSame('high', $result['adjustments'][0]['severity']);
+        $this->assertTrue($result['adjustments'][0]['params']['replaceHardSessionWithEasy']);
+    }
+
+    public function test_return_after_break_signal_maps_to_recovery_focus_guard(): void
+    {
+        // In minimal P6.2, return-after-break is represented by injuryRisk=true.
+        $ctx = $this->baseContext([
+            'signals' => [
+                'flags' => ['injuryRisk' => true, 'fatigue' => false],
+            ],
+        ]);
+
+        $result = $this->service->generate($ctx);
+        $codes = array_map(fn ($a) => $a['code'], $result['adjustments']);
+        $this->assertContains('recovery_focus', $codes);
+    }
+
     public function test_avoid_asphalt_produces_surface_constraint_low(): void
     {
         $ctx = $this->baseContext(['profile' => ['surfaces' => ['avoidAsphalt' => true]]]);
@@ -146,5 +171,104 @@ class TrainingAdjustmentsServiceTest extends TestCase
     {
         $result = $this->service->generate($this->baseContext(), null);
         $this->assertSame([], $result['adjustments']);
+    }
+
+    public function test_recovery_focus_is_deduplicated_with_deterministic_priority(): void
+    {
+        $ctx = $this->baseContext(['signals' => ['flags' => ['injuryRisk' => true]]]);
+        $feedback = ['warnings' => ['hrInstability' => true]];
+
+        $result = $this->service->generate($ctx, $feedback);
+        $recoveryFocus = array_values(array_filter(
+            $result['adjustments'],
+            fn ($a) => ($a['code'] ?? null) === 'recovery_focus'
+        ));
+
+        $this->assertCount(1, $recoveryFocus);
+        $this->assertSame('high', $recoveryFocus[0]['severity']);
+        $this->assertTrue($recoveryFocus[0]['params']['replaceHardSessionWithEasy']);
+        $this->assertSame(20, $recoveryFocus[0]['params']['longRunReductionPct']);
+    }
+
+    // --- M1 beyond minimum: hasCurrentPain ---
+
+    public function test_current_pain_produces_reduce_load_high(): void
+    {
+        $ctx = $this->baseContext([
+            'profile' => ['health' => ['hasCurrentPain' => true]],
+        ]);
+
+        $result = $this->service->generate($ctx);
+
+        $this->assertCount(1, $result['adjustments']);
+        $this->assertSame('reduce_load', $result['adjustments'][0]['code']);
+        $this->assertSame('high', $result['adjustments'][0]['severity']);
+        $this->assertSame(30, $result['adjustments'][0]['params']['reductionPct']);
+        $this->assertSame('hasCurrentPain', $result['adjustments'][0]['evidence'][0]['key']);
+    }
+
+    public function test_current_pain_false_produces_no_adjustment(): void
+    {
+        $ctx = $this->baseContext([
+            'profile' => ['health' => ['hasCurrentPain' => false]],
+        ]);
+
+        $result = $this->service->generate($ctx);
+        $this->assertSame([], $result['adjustments']);
+    }
+
+    public function test_current_pain_merges_with_fatigue_keeping_max_reduction(): void
+    {
+        $ctx = $this->baseContext([
+            'signals' => ['flags' => ['fatigue' => true]],
+            'profile' => ['health' => ['hasCurrentPain' => true]],
+        ]);
+
+        $result = $this->service->generate($ctx);
+
+        $reduceLoadItems = array_values(array_filter(
+            $result['adjustments'],
+            fn ($a) => $a['code'] === 'reduce_load'
+        ));
+        // Deduped into one reduce_load with max(25, 30) = 30
+        $this->assertCount(1, $reduceLoadItems);
+        $this->assertSame(30, $reduceLoadItems[0]['params']['reductionPct']);
+        $this->assertSame('high', $reduceLoadItems[0]['severity']);
+    }
+
+    public function test_current_pain_with_injury_risk_both_present(): void
+    {
+        $ctx = $this->baseContext([
+            'signals' => ['flags' => ['injuryRisk' => true]],
+            'profile' => ['health' => ['hasCurrentPain' => true]],
+        ]);
+
+        $result = $this->service->generate($ctx);
+
+        $codes = array_map(fn ($a) => $a['code'], $result['adjustments']);
+        $this->assertContains('recovery_focus', $codes);
+        $this->assertContains('reduce_load', $codes);
+    }
+
+    public function test_m4_adaptation_signals_produce_expected_adjustment_codes(): void
+    {
+        $ctx = $this->baseContext([
+            'signals' => [
+                'adaptation' => [
+                    'missedKeyWorkout' => true,
+                    'harderThanPlanned' => true,
+                    'easierThanPlannedStreak' => 2,
+                    'controlStartRecent' => true,
+                ],
+            ],
+        ]);
+
+        $result = $this->service->generate($ctx);
+        $codes = array_map(fn ($a) => $a['code'], $result['adjustments']);
+
+        $this->assertContains('missed_workout_rebalance', $codes);
+        $this->assertContains('harder_than_planned_guard', $codes);
+        $this->assertContains('easier_than_planned_progression', $codes);
+        $this->assertContains('control_start_followup', $codes);
     }
 }

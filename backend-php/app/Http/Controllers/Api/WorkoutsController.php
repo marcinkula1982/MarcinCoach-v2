@@ -7,8 +7,10 @@ use App\Models\Workout;
 use App\Models\WorkoutRawTcx;
 use App\Models\WorkoutImportEvent;
 use App\Services\PlanComplianceService;
+use App\Support\WorkoutSourceContract;
 use App\Support\WorkoutSummaryBuilder;
 use App\Services\PlanComplianceV2Service;
+use App\Services\TcxParsingService;
 use App\Services\TrainingAlertsV1Service;
 use App\Services\TrainingSignalsService;
 use App\Services\TrainingSignalsV2Service;
@@ -60,7 +62,29 @@ class WorkoutsController extends Controller
         $startTimeIso = (string) ($summary['startTimeIso'] ?? now()->toIso8601String());
         $durationSec = (int) ($summary['trimmed']['durationSec'] ?? $summary['original']['durationSec'] ?? 0);
         $distanceM = (int) ($summary['trimmed']['distanceM'] ?? $summary['original']['distanceM'] ?? 0);
-        $dedupeKey = $this->generateDedupeKey('manual', null, $startTimeIso, max($durationSec, 1), max($distanceM, 0));
+
+        // Enrich the caller-provided summary with parser-derived fields (sport, HR, pace,
+        // intensity buckets) when the raw TCX is valid. Caller-supplied keys always win.
+        $parsedBlob = $this->tryParseRichBlob((string) $validated['tcxRaw'], $userId);
+        if ($parsedBlob !== null) {
+            $startTimeIso = (string) ($summary['startTimeIso'] ?? $parsedBlob['startTimeIso']);
+            if ($durationSec <= 0) {
+                $durationSec = (int) $parsedBlob['durationSec'];
+            }
+            if ($distanceM <= 0) {
+                $distanceM = (int) $parsedBlob['distanceM'];
+            }
+            $enriched = WorkoutSummaryBuilder::build(
+                $startTimeIso,
+                max($durationSec, 0),
+                max($distanceM, 0),
+                parsed: $parsedBlob,
+            );
+            // Strip structural keys rebuilt below so caller summary can layer on top.
+            unset($enriched['startTimeIso'], $enriched['durationSec'], $enriched['distanceM'], $enriched['original'], $enriched['trimmed']);
+            $summary = array_merge($enriched, $summary);
+        }
+        $dedupeKey = $this->generateDedupeKey(WorkoutSourceContract::MANUAL_UPLOAD, null, $startTimeIso, max($durationSec, 1), max($distanceM, 0));
 
         $workout = Workout::create([
             'user_id' => $userId,
@@ -69,7 +93,7 @@ class WorkoutsController extends Controller
             'summary' => $summary,
             'race_meta' => $validated['raceMeta'] ?? null,
             'workout_meta' => $validated['workoutMeta'] ?? null,
-            'source' => 'manual',
+            'source' => WorkoutSourceContract::MANUAL_UPLOAD,
             'source_activity_id' => null,
             'dedupe_key' => $dedupeKey,
         ]);
@@ -125,10 +149,84 @@ class WorkoutsController extends Controller
             'durationMin' => round((float) $rows->sum('durationMin'), 2),
         ];
 
+        $aggregateGroup = function ($groupRows): array {
+            $zones = ['z1Min' => 0.0, 'z2Min' => 0.0, 'z3Min' => 0.0, 'z4Min' => 0.0, 'z5Min' => 0.0];
+            $longRunKm = 0.0;
+            $pacedDistanceKm = 0.0;
+            $pacedSeconds = 0.0;
+            foreach ($groupRows as $row) {
+                $zones['z1Min'] += (float) ($row['intensity']['z1Min'] ?? 0);
+                $zones['z2Min'] += (float) ($row['intensity']['z2Min'] ?? 0);
+                $zones['z3Min'] += (float) ($row['intensity']['z3Min'] ?? 0);
+                $zones['z4Min'] += (float) ($row['intensity']['z4Min'] ?? 0);
+                $zones['z5Min'] += (float) ($row['intensity']['z5Min'] ?? 0);
+                if (($row['type'] ?? null) === 'run') {
+                    $km = (float) ($row['distanceKm'] ?? 0);
+                    if ($km > $longRunKm) {
+                        $longRunKm = $km;
+                    }
+                    $pace = $row['avgPaceSecPerKm'] ?? null;
+                    if (is_numeric($pace) && $pace > 0 && $km > 0) {
+                        $pacedDistanceKm += $km;
+                        $pacedSeconds += $km * (float) $pace;
+                    }
+                }
+            }
+            $avgPaceSecPerKm = $pacedDistanceKm > 0
+                ? (int) round($pacedSeconds / $pacedDistanceKm)
+                : null;
+            return [
+                'zones' => [
+                    'z1Min' => round($zones['z1Min'], 2),
+                    'z2Min' => round($zones['z2Min'], 2),
+                    'z3Min' => round($zones['z3Min'], 2),
+                    'z4Min' => round($zones['z4Min'], 2),
+                    'z5Min' => round($zones['z5Min'], 2),
+                ],
+                'longRunKm' => round($longRunKm, 2),
+                'avgPaceSecPerKm' => $avgPaceSecPerKm,
+            ];
+        };
+
+        $byDay = $rows
+            ->groupBy(function (array $row) {
+                return Carbon::parse((string) $row['workoutDt'])->utc()->format('Y-m-d');
+            })
+            ->map(function ($dayRows, string $day) use ($aggregateGroup) {
+                return [
+                    'day' => $day,
+                    'workouts' => $dayRows->count(),
+                    'distanceKm' => round((float) $dayRows->sum('distanceKm'), 2),
+                    'durationMin' => round((float) $dayRows->sum('durationMin'), 2),
+                ] + $aggregateGroup($dayRows);
+            })
+            ->values()
+            ->sortBy('day')
+            ->values()
+            ->all();
+
+        $byWeek = $rows
+            ->groupBy(function (array $row) {
+                $dt = Carbon::parse((string) $row['workoutDt'])->utc();
+                return $dt->copy()->startOfWeek(Carbon::MONDAY)->format('Y-m-d');
+            })
+            ->map(function ($weekRows, string $weekStart) use ($aggregateGroup) {
+                return [
+                    'weekStart' => $weekStart,
+                    'workouts' => $weekRows->count(),
+                    'distanceKm' => round((float) $weekRows->sum('distanceKm'), 2),
+                    'durationMin' => round((float) $weekRows->sum('durationMin'), 2),
+                ] + $aggregateGroup($weekRows);
+            })
+            ->values()
+            ->sortBy('weekStart')
+            ->values()
+            ->all();
+
         return response()->json([
             'totals' => $totals,
-            'byWeek' => [],
-            'byDay' => [],
+            'byWeek' => $byWeek,
+            'byDay' => $byDay,
         ]);
     }
 
@@ -178,31 +276,35 @@ class WorkoutsController extends Controller
             'startTimeIso' => ['required', 'date'],
             'durationSec' => ['required', 'integer', 'min:1'],
             'distanceM' => ['required', 'integer', 'min:0'],
-            'rawTcxXml' => ['nullable', 'string'],
+            'rawTcxXml' => ['nullable', 'required_if:source,tcx', 'string', 'min:1'],
         ]);
 
-        $source = $validated['source'];
-        $sourceActivityId = $validated['sourceActivityId'] ?? null;
+        // Normalize to canonical uppercase values before any lookup or storage.
+        // 'tcx' and 'manual' both map to MANUAL_UPLOAD; 'garmin' -> GARMIN; 'strava' -> STRAVA.
+        $rawSource = $validated['source'];
+        $source = WorkoutSourceContract::normalize($rawSource);
+        $sourceActivityId = WorkoutSourceContract::normalizeActivityId($validated['sourceActivityId'] ?? null);
         
-        // Parse TCX XML if source is 'tcx' and rawTcxXml is provided
+        // Parse TCX XML if the incoming source was 'tcx' and rawTcxXml is provided.
         $startTimeIso = $validated['startTimeIso'];
         $durationSec = $validated['durationSec'];
         $distanceM = $validated['distanceM'];
-        
-        if ($source === 'tcx' && !empty($validated['rawTcxXml'])) {
+
+        $userId = $this->authUserId($request);
+        $parsedBlob = null;
+
+        if ($rawSource === 'tcx' && !empty($validated['rawTcxXml'])) {
             try {
-                $parsed = $this->parseTcxXml($validated['rawTcxXml']);
-                $startTimeIso = $parsed['startTimeIso'];
-                $durationSec = $parsed['durationSec'];
-                $distanceM = $parsed['distanceM'];
+                $parsedBlob = $this->parseTcxXml($validated['rawTcxXml'], $userId);
+                $startTimeIso = $parsedBlob['startTimeIso'];
+                $durationSec = $parsedBlob['durationSec'];
+                $distanceM = $parsedBlob['distanceM'];
             } catch (\InvalidArgumentException $e) {
                 return response()->json([
                     'message' => $e->getMessage(),
                 ], 422);
             }
         }
-        
-        $userId = $this->authUserId($request);
 
         // Calculate tcx_hash if rawTcxXml is provided
         $tcxHash = null;
@@ -211,7 +313,7 @@ class WorkoutsController extends Controller
         }
 
         // Wrap everything in a transaction
-        return DB::transaction(function () use ($source, $sourceActivityId, $userId, $startTimeIso, $durationSec, $distanceM, $validated, $tcxHash) {
+        return DB::transaction(function () use ($rawSource, $source, $sourceActivityId, $userId, $startTimeIso, $durationSec, $distanceM, $validated, $tcxHash, $parsedBlob) {
             // Check for existing workout if sourceActivityId is provided
             $existing = null;
             if ($sourceActivityId !== null) {
@@ -221,13 +323,19 @@ class WorkoutsController extends Controller
                     ->first();
 
                 if ($existing) {
-                    // UPSERT: Update existing workout if source is 'tcx' and rawTcxXml is provided
-                    if ($source === 'tcx' && !empty($validated['rawTcxXml'])) {
+                    // UPSERT: Update existing workout if incoming source was 'tcx' and rawTcxXml is provided.
+                    // Use $rawSource (the original boundary value) because $source is already normalized.
+                    if ($rawSource === 'tcx' && !empty($validated['rawTcxXml'])) {
                         // Generate dedupe_key with new values
                         $dedupeKey = $this->generateDedupeKey($source, $sourceActivityId, $startTimeIso, $durationSec, $distanceM);
-                        
-                        // Update summary
-                        $summary = WorkoutSummaryBuilder::build($startTimeIso, $durationSec, $distanceM);
+
+                        // Update summary (enriched with parsed TCX blob when available)
+                        $summary = WorkoutSummaryBuilder::build(
+                            $startTimeIso,
+                            $durationSec,
+                            $distanceM,
+                            parsed: is_array($parsedBlob) ? $parsedBlob : [],
+                        );
                         
                         // Update workout
                         $existing->summary = $summary;
@@ -299,8 +407,13 @@ class WorkoutsController extends Controller
             // Generate dedupe_key
             $dedupeKey = $this->generateDedupeKey($source, $sourceActivityId, $startTimeIso, $durationSec, $distanceM);
 
-            // Create summary JSON
-            $summary = WorkoutSummaryBuilder::build($startTimeIso, $durationSec, $distanceM);
+            // Create summary JSON (enriched with parsed TCX blob when available)
+            $summary = WorkoutSummaryBuilder::build(
+                $startTimeIso,
+                $durationSec,
+                $distanceM,
+                parsed: is_array($parsedBlob) ? $parsedBlob : [],
+            );
 
             // Create workout
             $workout = Workout::create([
@@ -620,84 +733,68 @@ class WorkoutsController extends Controller
         return response()->json($result);
     }
 
-    private function parseTcxXml(string $xml): array
+    /**
+     * Parse raw TCX into the rich canonical blob used to build the summary.
+     * Throws \InvalidArgumentException on fatal errors (invalid XML, missing
+     * activity id, missing laps, missing TotalTimeSeconds).
+     */
+    private function parseTcxXml(string $xml, ?int $userId = null): array
     {
-        $dom = new \DOMDocument();
-        $dom->preserveWhiteSpace = false;
-        
-        // Suppress errors for invalid XML, we'll handle it ourselves
-        $oldErrorReporting = libxml_use_internal_errors(true);
-        $loaded = $dom->loadXML($xml);
-        $errors = libxml_get_errors();
-        libxml_clear_errors();
-        libxml_use_internal_errors($oldErrorReporting);
+        $hrZones = $userId !== null ? $this->loadHrZones($userId) : null;
+        return app(TcxParsingService::class)->parse($xml, $hrZones);
+    }
 
-        if (!$loaded || !empty($errors)) {
-            throw new \InvalidArgumentException('Invalid TCX XML format');
+    /**
+     * Best-effort parse for the manual POST path — returns null on malformed
+     * input so we never break the legacy create() flow when the client-provided
+     * summary was correct but the XML was slightly off.
+     */
+    private function tryParseRichBlob(string $xml, ?int $userId): ?array
+    {
+        if (trim($xml) === '') {
+            return null;
         }
-
-        $xpath = new \DOMXPath($dom);
-        $xpath->registerNamespace('tcx', 'http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2');
-
-        // Extract startTimeIso from first Activity/Id
-        $idNodes = $xpath->query('//tcx:Activity/tcx:Id');
-        if ($idNodes->length === 0) {
-            throw new \InvalidArgumentException('Missing Activity/Id in TCX');
-        }
-        $startTimeIsoRaw = trim($idNodes->item(0)->textContent);
-        
-        // Ensure ISO8601 Z format
         try {
-            $dateTime = new \DateTime($startTimeIsoRaw, new \DateTimeZone('UTC'));
-            $startTimeIso = $dateTime->format('Y-m-d\TH:i:s\Z');
-        } catch (\Exception $e) {
-            throw new \InvalidArgumentException('Invalid date format in Activity/Id: ' . $startTimeIsoRaw);
+            return $this->parseTcxXml($xml, $userId);
+        } catch (\InvalidArgumentException) {
+            return null;
         }
+    }
 
-        // Extract durationSec and distanceM from all Lap elements
-        $lapNodes = $xpath->query('//tcx:Lap');
-        if ($lapNodes->length === 0) {
-            throw new \InvalidArgumentException('No Lap elements found in TCX');
+    /**
+     * Loads the user's configured HR zones from the user_profiles table, if the
+     * row exists and all z1..z5 thresholds are set. Returns null otherwise so
+     * TcxParsingService falls back to pace-based/lumped buckets.
+     *
+     * @return array<string,array{min:int,max:int}>|null
+     */
+    private function loadHrZones(int $userId): ?array
+    {
+        $profile = DB::table('user_profiles')->where('user_id', $userId)->first([
+            'hr_z1_min', 'hr_z1_max',
+            'hr_z2_min', 'hr_z2_max',
+            'hr_z3_min', 'hr_z3_max',
+            'hr_z4_min', 'hr_z4_max',
+            'hr_z5_min', 'hr_z5_max',
+        ]);
+        if (!$profile) {
+            return null;
         }
-
-        $totalDurationSec = 0;
-        $totalDistanceM = 0;
-
-        foreach ($lapNodes as $lapNode) {
-            // Get TotalTimeSeconds
-            $timeNodes = $xpath->query('./tcx:TotalTimeSeconds', $lapNode);
-            if ($timeNodes->length === 0) {
-                throw new \InvalidArgumentException('Missing TotalTimeSeconds in TCX Lap');
+        $zones = [];
+        for ($i = 1; $i <= 5; $i++) {
+            $min = $profile->{"hr_z{$i}_min"} ?? null;
+            $max = $profile->{"hr_z{$i}_max"} ?? null;
+            if (!is_numeric($min) || !is_numeric($max)) {
+                return null;
             }
-            $totalDurationSec += (float) trim($timeNodes->item(0)->textContent);
-
-            // Get DistanceMeters
-            $distanceNodes = $xpath->query('./tcx:DistanceMeters', $lapNode);
-            if ($distanceNodes->length === 0) {
-                throw new \InvalidArgumentException('Missing DistanceMeters in TCX Lap');
-            }
-            $totalDistanceM += (float) trim($distanceNodes->item(0)->textContent);
+            $zones["z{$i}"] = ['min' => (int) $min, 'max' => (int) $max];
         }
-
-        return [
-            'startTimeIso' => $startTimeIso,
-            'durationSec' => (int) round($totalDurationSec),
-            'distanceM' => (int) round($totalDistanceM),
-        ];
+        return $zones;
     }
 
     private function generateDedupeKey(string $source, ?string $sourceActivityId, string $startTimeIso, int $durationSec, int $distanceM): string
     {
-        if ($sourceActivityId !== null) {
-            return "{$source}:{$sourceActivityId}";
-        }
-
-        // Generate key from normalized data
-        $normalizedDate = date('Y-m-d', strtotime($startTimeIso));
-        $normalizedDuration = round($durationSec / 60) * 60; // Round to nearest minute
-        $normalizedDistance = round($distanceM / 100) * 100; // Round to nearest 100m
-
-        return "{$source}:{$normalizedDate}:{$normalizedDuration}:{$normalizedDistance}";
+        return WorkoutSourceContract::buildDedupeKey($source, $sourceActivityId, $startTimeIso, $durationSec, $distanceM);
     }
 
     private function buildAnalyticsRow(Workout $workout): ?array
@@ -710,11 +807,21 @@ class WorkoutsController extends Controller
             return null;
         }
 
-        $intensity = is_array($summary['intensity'] ?? null) ? $summary['intensity'] : [];
+        $intensityBuckets = is_array($summary['intensityBuckets'] ?? null) ? $summary['intensityBuckets'] : [];
+        $intensity = is_array($summary['intensity'] ?? null) ? $summary['intensity'] : $intensityBuckets;
         $toMin = fn ($sec) => is_numeric($sec) ? round(((float) $sec) / 60, 2) : 0.0;
         $workoutDt = (string) ($summary['startTimeIso'] ?? $workout->created_at?->toIso8601String());
-        $sportGuess = strtolower((string) (($summary['kind'] ?? '') . ' ' . ($summary['sport'] ?? '')));
-        $type = str_contains($sportGuess, 'run') || str_contains($sportGuess, 'bieg') ? 'run' : 'other';
+        $explicitSport = strtolower((string) ($summary['sport'] ?? ''));
+        if ($explicitSport !== '') {
+            $type = in_array($explicitSport, ['run', 'bike', 'swim', 'other'], true) ? $explicitSport : 'other';
+        } else {
+            // Legacy fallback: best-effort string match (used for pre-M2-beyond summaries).
+            $sportGuess = strtolower((string) (($summary['kind'] ?? '') . ' ' . ($summary['sport'] ?? '')));
+            $type = str_contains($sportGuess, 'run') || str_contains($sportGuess, 'bieg') ? 'run' : 'other';
+        }
+        $avgPaceSecPerKm = isset($summary['avgPaceSecPerKm']) && is_numeric($summary['avgPaceSecPerKm'])
+            ? (int) $summary['avgPaceSecPerKm']
+            : null;
 
         return [
             'workoutId' => $workout->id,
@@ -722,6 +829,7 @@ class WorkoutsController extends Controller
             'distanceKm' => round(((float) $distanceM) / 1000, 2),
             'durationMin' => round(((float) $durationSec) / 60, 2),
             'type' => $type,
+            'avgPaceSecPerKm' => $avgPaceSecPerKm,
             'intensity' => [
                 'z1Min' => $toMin($intensity['z1Sec'] ?? 0),
                 'z2Min' => $toMin($intensity['z2Sec'] ?? 0),

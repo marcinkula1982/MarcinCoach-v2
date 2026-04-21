@@ -14,14 +14,15 @@ class TrainingSignalsService
             ->where('user_id', $userId)
             ->orderByDesc('created_at')
             ->limit(500)
-            ->get(['id', 'created_at', 'summary']);
+            ->get(['id', 'created_at', 'summary', 'kind', 'race_meta']);
 
         $rows = $workouts->map(function (Workout $workout) {
             $summary = is_array($workout->summary) ? $workout->summary : [];
             $workoutDt = $this->getWorkoutDt($summary, $workout->created_at);
-            $loadValue = $this->extractLoadValue($summary);
             $buckets = $this->extractBuckets($summary);
+            $loadValue = $this->extractLoadValue($summary, $buckets);
             $distanceM = $this->toNumberOrZero($summary['trimmed']['distanceM'] ?? $summary['original']['distanceM'] ?? $summary['distanceM'] ?? null);
+            $sport = is_string($summary['sport'] ?? null) ? strtolower((string) $summary['sport']) : null;
 
             return [
                 'id' => $workout->id,
@@ -29,17 +30,17 @@ class TrainingSignalsService
                 'loadValue' => $loadValue,
                 'buckets' => $buckets,
                 'distanceKm' => $distanceM > 0 ? $distanceM / 1000 : 0.0,
+                'kind' => (string) ($workout->kind ?? 'training'),
+                'raceMeta' => is_array($workout->race_meta) ? $workout->race_meta : null,
+                'sport' => $sport,
             ];
         })->values();
 
-        if ($rows->isEmpty()) {
-            $windowEnd = now()->utc();
-            $windowStart = $windowEnd->copy()->subSeconds($days * 24 * 60 * 60);
-        } else {
-            $windowEndTs = $rows->max(fn (array $row) => $row['workoutDt']->getTimestamp());
-            $windowEnd = Carbon::createFromTimestampUTC((int) $windowEndTs);
-            $windowStart = $windowEnd->copy()->subSeconds($days * 24 * 60 * 60);
-        }
+        // windowEnd is anchored to "now" (UTC) regardless of whether there are
+        // workouts yet. This keeps the 7d/28d windows stable across imports and
+        // makes "last 7d" / "last 28d" mean what the coaching spec says.
+        $windowEnd = now()->utc();
+        $windowStart = $windowEnd->copy()->subSeconds($days * 24 * 60 * 60);
 
         $filtered = $rows
             ->filter(fn (array $row) => $row['workoutDt']->greaterThanOrEqualTo($windowStart) && $row['workoutDt']->lessThanOrEqualTo($windowEnd))
@@ -51,14 +52,62 @@ class TrainingSignalsService
             ->sum('loadValue');
         $rolling4wLoad = $filtered->sum('loadValue');
 
+        // Safety minimums (internal calculations, mapped onto existing public flags):
+        // - volume growth guard (weekly vs previous week)
+        // - return-after-break guard
+        // - post-race easy-week guard
+        $prevWeeklyFrom = $weeklyFrom->copy()->subDays(7);
+        $prevWeeklyTo = $weeklyFrom;
+        $prevWeeklyLoad = $filtered
+            ->filter(fn (array $row) => $row['workoutDt']->greaterThan($prevWeeklyFrom) && $row['workoutDt']->lessThanOrEqualTo($prevWeeklyTo))
+            ->sum('loadValue');
+        $loadSpike = $prevWeeklyLoad > 0 && $weeklyLoad > ($prevWeeklyLoad * 1.30);
+
+        $sortedByDt = $rows->sortBy(fn (array $row) => $row['workoutDt']->getTimestamp())->values();
+        $lastWorkout = $sortedByDt->isNotEmpty() ? $sortedByDt->last() : null;
+        $prevWorkout = null;
+        if (is_array($lastWorkout)) {
+            $prevWorkout = $sortedByDt
+                ->filter(fn (array $row) => $row['workoutDt']->lessThan($lastWorkout['workoutDt']))
+                ->last();
+        }
+
+        $returnAfterBreak = false;
+        if (is_array($lastWorkout) && is_array($prevWorkout)) {
+            $gapDays = $lastWorkout['workoutDt']->diffInDays($prevWorkout['workoutDt']);
+            $returnAfterBreak = $gapDays >= 10;
+        }
+
+        $postRaceWeek = false;
+        if (is_array($lastWorkout)) {
+            $isRaceKind = strtolower((string) ($lastWorkout['kind'] ?? '')) === 'race';
+            $hasRaceMeta = is_array($lastWorkout['raceMeta'] ?? null) && !empty($lastWorkout['raceMeta']);
+            $postRaceWeek = $isRaceKind || $hasRaceMeta;
+        }
+
         $bucketTotals = $this->emptyBuckets();
         foreach ($filtered as $row) {
             $bucketTotals = $this->addBuckets($bucketTotals, $row['buckets']);
         }
 
-        // Long run: pick workout with max distance in window
+        // Long run: pick workout with max distance in window among running sessions.
+        // Legacy fallback: if no row declares sport='run' at all, treat any workout as
+        // eligible so old data (pre M2-beyond summaries) still surfaces a long run.
+        $hasSportTagged = false;
+        foreach ($filtered as $row) {
+            if (is_string($row['sport'] ?? null) && $row['sport'] !== '') {
+                $hasSportTagged = true;
+                break;
+            }
+        }
         $longRunRow = null;
         foreach ($filtered as $row) {
+            $sport = $row['sport'] ?? null;
+            $isRun = $sport === 'run';
+            $legacyEligible = !$hasSportTagged && $sport === null;
+            if (!$isRun && !$legacyEligible) {
+                continue;
+            }
             if ($longRunRow === null || $row['distanceKm'] > $longRunRow['distanceKm']) {
                 $longRunRow = $row;
             }
@@ -69,6 +118,8 @@ class TrainingSignalsService
             'workoutId' => $longRunRow !== null ? $longRunRow['id'] : null,
             'workoutDt' => $longRunRow !== null ? $longRunRow['workoutDt']->toISOString() : null,
         ];
+
+        $adaptation = $this->buildAdaptationSignals($userId, $filtered->all(), $windowEnd, $lastWorkout);
 
         return [
             'generatedAtIso' => $windowEnd->toISOString(),
@@ -87,9 +138,11 @@ class TrainingSignalsService
             ],
             'longRun' => $longRun,
             'flags' => [
-                'injuryRisk' => false,
-                'fatigue' => false,
+                // Keep public contract shape unchanged; only values become data-driven.
+                'injuryRisk' => (bool) ($returnAfterBreak || $postRaceWeek),
+                'fatigue' => (bool) $loadSpike,
             ],
+            'adaptation' => $adaptation,
             'totalWorkouts' => $filtered->count(),
         ];
     }
@@ -156,11 +209,35 @@ class TrainingSignalsService
         return $createdAt->copy()->utc();
     }
 
-    private function extractLoadValue(array $summary): float
+    /**
+     * Load priority (M2 beyond minimum):
+     *   1) Weighted time-in-zone from intensity buckets (preferred, TRIMP-like minutes).
+     *   2) Numeric intensity score (legacy / seeded test data).
+     *   3) Duration/60 proxy (last-resort fallback).
+     *
+     * @param array{z1Sec:float,z2Sec:float,z3Sec:float,z4Sec:float,z5Sec:float,totalSec:float}|null $buckets
+     */
+    private function extractLoadValue(array $summary, ?array $buckets = null): float
     {
+        $buckets ??= $this->extractBuckets($summary);
+        $zoneSec = $buckets['z1Sec'] + $buckets['z2Sec'] + $buckets['z3Sec'] + $buckets['z4Sec'] + $buckets['z5Sec'];
+        if ($zoneSec > 0) {
+            $weighted = $buckets['z1Sec'] * 1
+                + $buckets['z2Sec'] * 2
+                + $buckets['z3Sec'] * 3
+                + $buckets['z4Sec'] * 4
+                + $buckets['z5Sec'] * 5;
+            return round($weighted / 60.0, 2);
+        }
+
         $intensity = $summary['intensity'] ?? null;
         if (is_numeric($intensity)) {
             return (float) $intensity;
+        }
+
+        $durationSec = $this->toNumberOrZero($summary['trimmed']['durationSec'] ?? $summary['original']['durationSec'] ?? $summary['durationSec'] ?? null);
+        if ($durationSec > 0) {
+            return round($durationSec / 60.0, 2);
         }
 
         return 0.0;
@@ -235,6 +312,122 @@ class TrainingSignalsService
     private function toNumberOrZero(mixed $value): float
     {
         return is_numeric($value) ? (float) $value : 0.0;
+    }
+
+    /**
+     * @param array<string,mixed>|null $lastWorkout
+     * @return array{missedKeyWorkout:bool,harderThanPlanned:bool,easierThanPlannedStreak:int,controlStartRecent:bool}
+     */
+    private function buildAdaptationSignals(int $userId, array $filteredRows, Carbon $windowEnd, ?array $lastWorkout): array
+    {
+        $missedKeyWorkout = $this->hasMissedKeyWorkout($userId, $windowEnd);
+        $workoutIds = array_values(array_map(
+            fn (array $row) => (int) ($row['id'] ?? 0),
+            array_filter($filteredRows, fn (array $row) => isset($row['id']))
+        ));
+        $complianceV1ByWorkout = DB::table('plan_compliance_v1')
+            ->whereIn('workout_id', $workoutIds ?: [0])
+            ->get(['workout_id', 'status', 'duration_ratio'])
+            ->keyBy('workout_id');
+        $complianceV2ByWorkout = DB::table('plan_compliance_v2')
+            ->whereIn('workout_id', $workoutIds ?: [0])
+            ->get(['workout_id', 'flag_easy_became_z5'])
+            ->keyBy('workout_id');
+
+        usort($filteredRows, fn (array $a, array $b) => $b['workoutDt']->getTimestamp() <=> $a['workoutDt']->getTimestamp());
+
+        $harderThanPlanned = false;
+        $easierStreak = 0;
+        foreach ($filteredRows as $row) {
+            $id = (int) ($row['id'] ?? 0);
+            $v1 = $complianceV1ByWorkout[$id] ?? null;
+            $v2 = $complianceV2ByWorkout[$id] ?? null;
+            $v1Status = $v1->status ?? null;
+            $v1Ratio = $v1->duration_ratio ?? null;
+            $v2EasyBecameZ5 = $v2->flag_easy_became_z5 ?? null;
+
+            $isHard = ($v1Status === 'MAJOR_DEVIATION' && is_numeric($v1Ratio) && (float) $v1Ratio > 1.15)
+                || ((bool) $v2EasyBecameZ5);
+            if ($isHard) {
+                $harderThanPlanned = true;
+            }
+
+            $isEasy = is_numeric($v1Ratio) && (float) $v1Ratio < 0.85;
+            if ($isEasy) {
+                $easierStreak++;
+            } else {
+                break;
+            }
+        }
+
+        $controlStartRecent = false;
+        if (is_array($lastWorkout)) {
+            $lastDt = $lastWorkout['workoutDt'] ?? null;
+            if ($lastDt instanceof Carbon) {
+                $within10d = $windowEnd->diffInDays($lastDt) <= 10;
+                $isRace = strtolower((string) ($lastWorkout['kind'] ?? '')) === 'race';
+                $raceMeta = is_array($lastWorkout['raceMeta'] ?? null) ? $lastWorkout['raceMeta'] : [];
+                $isControl = ($raceMeta['controlStart'] ?? false) === true
+                    || strtolower((string) ($raceMeta['eventType'] ?? '')) === 'control';
+                $controlStartRecent = $within10d && ($isRace || $isControl);
+            }
+        }
+
+        return [
+            'missedKeyWorkout' => $missedKeyWorkout,
+            'harderThanPlanned' => $harderThanPlanned,
+            'easierThanPlannedStreak' => $easierStreak,
+            'controlStartRecent' => $controlStartRecent,
+        ];
+    }
+
+    private function hasMissedKeyWorkout(int $userId, Carbon $windowEnd): bool
+    {
+        $snapshot = DB::table('plan_snapshots')
+            ->where('user_id', $userId)
+            ->orderByDesc('created_at')
+            ->first(['snapshot_json']);
+        if (!$snapshot) {
+            return false;
+        }
+
+        $decoded = json_decode((string) $snapshot->snapshot_json, true);
+        if (!is_array($decoded)) {
+            return false;
+        }
+        $items = $decoded['items'] ?? $decoded;
+        if (!is_array($items) || !array_is_list($items)) {
+            return false;
+        }
+
+        foreach ($items as $item) {
+            if (!is_array($item) || !isset($item['startTimeIso'])) {
+                continue;
+            }
+            try {
+                $plannedDt = Carbon::parse((string) $item['startTimeIso'])->utc();
+            } catch (\Throwable) {
+                continue;
+            }
+            if ($plannedDt->greaterThan($windowEnd) || $plannedDt->lessThan($windowEnd->copy()->subDays(3))) {
+                continue;
+            }
+
+            $matched = Workout::query()
+                ->where('user_id', $userId)
+                ->get(['summary', 'created_at'])
+                ->contains(function (Workout $workout) use ($plannedDt): bool {
+                    $summary = is_array($workout->summary) ? $workout->summary : [];
+                    $dt = $this->getWorkoutDt($summary, $workout->created_at);
+                    return abs($dt->diffInSeconds($plannedDt)) <= (12 * 60 * 60);
+                });
+
+            if (!$matched) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 

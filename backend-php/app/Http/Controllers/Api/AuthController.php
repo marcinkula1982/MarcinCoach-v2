@@ -63,4 +63,15 @@ class AuthController extends Controller
             'username' => $user->name,
         ]);
     }
+
+    public function logout(Request $request): JsonResponse
+    {
+        $token = trim((string) $request->header('x-session-token', ''));
+
+        if ($token !== '') {
+            $this->sessionTokenService->revokeToken($token);
+        }
+
+        return response()->json(['ok' => true]);
+    }
 }

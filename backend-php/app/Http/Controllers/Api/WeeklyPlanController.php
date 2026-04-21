@@ -33,6 +33,10 @@ class WeeklyPlanController extends Controller
         $feedbackSignals = $this->feedbackV2Service->getLatestFeedbackSignalsForUser($userId);
         $adjustments = $this->adjustmentsService->generate($context, $feedbackSignals);
         $plan = $this->weeklyPlanService->generatePlan($context, $adjustments);
+        $plan['sessions'] = array_values(array_map(function (array $session): array {
+            unset($session['techniqueFocus'], $session['surfaceHint']);
+            return $session;
+        }, $plan['sessions'] ?? []));
         $plan['appliedAdjustmentsCodes'] = array_values(array_map(
             fn ($a) => (string) ($a['code'] ?? ''),
             $adjustments['adjustments'] ?? [],

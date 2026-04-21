@@ -71,21 +71,30 @@ class WorkoutsParityTest extends TestCase
 
     public function test_post_workout_and_analytics_endpoints_contracts(): void
     {
-        $create = $this->postJson('/api/workouts', [
-            'tcxRaw' => '<TrainingCenterDatabase />',
+        Workout::create([
+            'user_id' => 1,
             'action' => 'save',
             'kind' => 'training',
             'summary' => [
                 'startTimeIso' => '2026-04-20T10:00:00Z',
                 'trimmed' => ['durationSec' => 1800, 'distanceM' => 5000],
                 'original' => ['durationSec' => 1800, 'distanceM' => 5000],
-                'intensity' => ['z1Sec' => 600, 'z2Sec' => 600, 'z3Sec' => 300, 'z4Sec' => 200, 'z5Sec' => 100],
-                'totalPoints' => 100,
-                'selectedPoints' => 100,
             ],
+            'source' => 'MANUAL_UPLOAD',
+            'dedupe_key' => 'parity-analytics-seed-1',
         ]);
-        $create->assertOk();
-        $create->assertJsonStructure(['id', 'userId', 'action', 'kind', 'summary', 'createdAt']);
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2026-04-22T10:00:00Z',
+                'trimmed' => ['durationSec' => 3600, 'distanceM' => 10000],
+                'original' => ['durationSec' => 3600, 'distanceM' => 10000],
+            ],
+            'source' => 'MANUAL_UPLOAD',
+            'dedupe_key' => 'parity-analytics-seed-2',
+        ]);
 
         $analytics = $this->getJson('/api/workouts/analytics');
         $analytics->assertOk();
@@ -99,9 +108,69 @@ class WorkoutsParityTest extends TestCase
         $summary = $this->getJson('/api/workouts/analytics/summary');
         $summary->assertOk();
         $summary->assertJsonStructure(['totals' => ['workouts', 'distanceKm', 'durationMin'], 'byWeek', 'byDay']);
+        $summary->assertJsonPath('totals.workouts', 2);
+        // JSON serialization strips .0 from zero-fraction floats, so compare via cast.
+        $this->assertSame(15.0, (float) $summary->json('totals.distanceKm'));
+        $this->assertSame(90.0, (float) $summary->json('totals.durationMin'));
+        $this->assertNotEmpty($summary->json('byDay'));
+        $this->assertNotEmpty($summary->json('byWeek'));
 
         $summaryV2 = $this->getJson('/api/workouts/analytics/summary-v2');
         $summaryV2->assertOk();
         $summaryV2->assertJsonStructure(['totals' => ['workouts', 'distanceKm', 'durationMin'], 'byWeek', 'byDay']);
+        $summaryV2->assertJsonPath('totals.workouts', 2);
+        $this->assertSame(15.0, (float) $summaryV2->json('totals.distanceKm'));
+        $this->assertSame(90.0, (float) $summaryV2->json('totals.durationMin'));
+        $this->assertNotEmpty($summaryV2->json('byDay'));
+        $this->assertNotEmpty($summaryV2->json('byWeek'));
+    }
+
+    public function test_analytics_summary_exposes_zones_longrun_and_pace(): void
+    {
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2026-04-20T10:00:00Z',
+                'sport' => 'run',
+                'avgPaceSecPerKm' => 300,
+                'trimmed' => ['durationSec' => 3000, 'distanceM' => 10000],
+                'original' => ['durationSec' => 3000, 'distanceM' => 10000],
+                'intensity' => ['z1Sec' => 600, 'z2Sec' => 1800, 'z3Sec' => 300, 'z4Sec' => 180, 'z5Sec' => 120],
+            ],
+            'source' => 'MANUAL_UPLOAD',
+            'dedupe_key' => 'm2b-analytics-zones-1',
+        ]);
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2026-04-22T10:00:00Z',
+                'sport' => 'run',
+                'avgPaceSecPerKm' => 360,
+                'trimmed' => ['durationSec' => 7200, 'distanceM' => 20000],
+                'original' => ['durationSec' => 7200, 'distanceM' => 20000],
+                'intensity' => ['z1Sec' => 7200, 'z2Sec' => 0, 'z3Sec' => 0, 'z4Sec' => 0, 'z5Sec' => 0],
+            ],
+            'source' => 'MANUAL_UPLOAD',
+            'dedupe_key' => 'm2b-analytics-zones-2',
+        ]);
+
+        $summary = $this->getJson('/api/workouts/analytics/summary');
+        $summary->assertOk();
+
+        $summary->assertJsonStructure([
+            'byWeek' => [['weekStart', 'workouts', 'distanceKm', 'durationMin', 'zones', 'longRunKm', 'avgPaceSecPerKm']],
+            'byDay'  => [['day', 'workouts', 'distanceKm', 'durationMin', 'zones', 'longRunKm', 'avgPaceSecPerKm']],
+        ]);
+
+        $week = $summary->json('byWeek.0');
+        $this->assertSame(20.0, (float) $week['longRunKm']); // 20km is the longest run that week
+        // Distance-weighted pace: (10*300 + 20*360) / 30 = (3000 + 7200) / 30 = 340.
+        $this->assertSame(340, (int) $week['avgPaceSecPerKm']);
+        $this->assertGreaterThan(0.0, (float) $week['zones']['z1Min']);
+        $this->assertGreaterThan(0.0, (float) $week['zones']['z2Min']);
     }
 }

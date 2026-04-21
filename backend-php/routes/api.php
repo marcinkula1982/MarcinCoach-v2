@@ -20,6 +20,7 @@ Route::get('/health', [HealthController::class, 'index']);
 Route::get('/', fn () => response()->json(['status' => 'ok', 'service' => 'MarcinCoach API']));
 Route::post('/auth/register', [AuthController::class, 'register']);
 Route::post('/auth/login', [AuthController::class, 'login']);
+Route::post('/auth/logout', [AuthController::class, 'logout']);
 Route::post('/integrations/strava/connect', [IntegrationsController::class, 'stravaConnect']);
 Route::get('/integrations/strava/callback', [IntegrationsController::class, 'stravaCallback']);
 Route::post('/integrations/strava/sync', [IntegrationsController::class, 'stravaSync']);

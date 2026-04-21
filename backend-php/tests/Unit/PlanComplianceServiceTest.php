@@ -81,6 +81,35 @@ class PlanComplianceServiceTest extends TestCase
         );
         $this->assertSame($actualDurationSec, (int) $row->delta_duration_sec);
     }
+
+    public function test_compliance_returns_unknown_when_start_time_is_invalid(): void
+    {
+        $service = app(\App\Services\PlanComplianceService::class);
+
+        DB::table('workouts')->insert([
+            'id' => 2,
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => json_encode([
+                'startTimeIso' => 'invalid-date',
+                'durationSec' => 1200,
+                'distanceM' => 3000,
+            ]),
+            'source' => 'manual',
+            'source_activity_id' => 'test-invalid-start',
+            'dedupe_key' => 'manual:test-invalid-start',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $service->upsertForWorkout(2);
+        $row = DB::table('plan_compliance_v1')->where('workout_id', 2)->first();
+
+        $this->assertNotNull($row);
+        $this->assertSame('UNKNOWN', $row->status);
+        $this->assertNull($row->expected_duration_sec);
+    }
 }
 
 

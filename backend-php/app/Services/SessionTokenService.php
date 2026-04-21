@@ -39,6 +39,11 @@ class SessionTokenService
         return (int) $tokenUserId;
     }
 
+    public function revokeToken(string $token): void
+    {
+        Cache::forget($this->key($token));
+    }
+
     private function key(string $token): string
     {
         return 'session_token:' . $token;

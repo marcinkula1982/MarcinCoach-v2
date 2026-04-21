@@ -23,6 +23,7 @@ class TrainingSignalsController extends Controller
 
         $userId = $this->authUserId($request);
         $signals = $this->trainingSignalsService->getSignalsForUser($userId, $days);
+        unset($signals['adaptation']);
 
         return response()->json($signals);
     }

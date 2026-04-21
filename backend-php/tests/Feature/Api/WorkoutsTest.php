@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\Workout;
 use App\Models\WorkoutRawTcx;
 use App\Models\WorkoutImportEvent;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -45,7 +46,7 @@ class WorkoutsTest extends TestCase
 
         $this->assertDatabaseHas('workouts', [
             'id' => $response->json('id'),
-            'source' => 'garmin',
+            'source' => 'GARMIN',
             'source_activity_id' => 'activity123',
         ]);
 
@@ -279,6 +280,35 @@ class WorkoutsTest extends TestCase
         $this->assertStringContainsString('Invalid TCX XML', $response->json('message'));
     }
 
+    public function test_tcx_import_requires_raw_tcx_xml_payload(): void
+    {
+        $response = $this->postJson('/api/workouts/import', [
+            'source' => 'tcx',
+            'sourceActivityId' => 'test-tcx-missing-raw',
+            'startTimeIso' => '2025-12-28T10:00:00Z',
+            'durationSec' => 3600,
+            'distanceM' => 10000,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['rawTcxXml']);
+    }
+
+    public function test_tcx_import_requires_non_empty_raw_tcx_xml_payload(): void
+    {
+        $response = $this->postJson('/api/workouts/import', [
+            'source' => 'tcx',
+            'sourceActivityId' => 'test-tcx-empty-raw',
+            'startTimeIso' => '2025-12-28T10:00:00Z',
+            'durationSec' => 3600,
+            'distanceM' => 10000,
+            'rawTcxXml' => '',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['rawTcxXml']);
+    }
+
     public function test_tcx_import_returns_422_on_missing_activity_id(): void
     {
         $tcxXml = '<?xml version="1.0" encoding="UTF-8"?>
@@ -334,6 +364,35 @@ class WorkoutsTest extends TestCase
         ]);
     }
 
+    public function test_tcx_import_returns_422_on_missing_lap_total_time_seconds(): void
+    {
+        $tcxXml = '<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
+  <Activities>
+    <Activity Sport="Running">
+      <Id>2025-12-28T14:30:00Z</Id>
+      <Lap StartTime="2025-12-28T14:30:00Z">
+        <DistanceMeters>5000</DistanceMeters>
+      </Lap>
+    </Activity>
+  </Activities>
+</TrainingCenterDatabase>';
+
+        $response = $this->postJson('/api/workouts/import', [
+            'source' => 'tcx',
+            'sourceActivityId' => 'test-tcx-missing-total-time',
+            'startTimeIso' => '2025-12-28T10:00:00Z',
+            'durationSec' => 3600,
+            'distanceM' => 10000,
+            'rawTcxXml' => $tcxXml,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson([
+            'message' => 'Missing TotalTimeSeconds in TCX Lap',
+        ]);
+    }
+
     public function test_import_creates_created_event(): void
     {
         $response = $this->postJson('/api/workouts/import', [
@@ -350,7 +409,7 @@ class WorkoutsTest extends TestCase
         // Verify event was created
         $this->assertDatabaseHas('workout_import_events', [
             'workout_id' => $workoutId,
-            'source' => 'garmin',
+            'source' => 'GARMIN',
             'source_activity_id' => 'activity-test-created',
             'status' => 'CREATED',
         ]);
@@ -389,10 +448,12 @@ class WorkoutsTest extends TestCase
         $this->assertDatabaseCount('workout_import_events', 2);
         $this->assertDatabaseHas('workout_import_events', [
             'workout_id' => $firstId,
+            'source' => 'GARMIN',
             'status' => 'CREATED',
         ]);
         $this->assertDatabaseHas('workout_import_events', [
             'workout_id' => $firstId,
+            'source' => 'GARMIN',
             'status' => 'DEDUPED',
         ]);
     }
@@ -1977,84 +2038,125 @@ class WorkoutsTest extends TestCase
 
     public function test_training_signals_endpoint_deterministic_date_window(): void
     {
-        Workout::create([
-            'user_id' => 1,
-            'action' => 'save',
-            'kind' => 'training',
-            'summary' => [
-                'startTimeIso' => '2025-12-01T10:00:00Z',
-                'intensity' => 10,
-                'intensityBuckets' => ['z1Sec' => 60, 'z2Sec' => 0, 'z3Sec' => 0, 'z4Sec' => 0, 'z5Sec' => 0],
-            ],
-            'source' => 'manual',
-            'dedupe_key' => 'ts-window-1',
-        ]);
-        Workout::create([
-            'user_id' => 1,
-            'action' => 'save',
-            'kind' => 'training',
-            'summary' => [
-                'startTimeIso' => '2025-12-10T12:00:00Z',
-                'intensity' => 20,
-                'intensityBuckets' => ['z1Sec' => 30, 'z2Sec' => 30, 'z3Sec' => 0, 'z4Sec' => 0, 'z5Sec' => 0],
-            ],
-            'source' => 'manual',
-            'dedupe_key' => 'ts-window-2',
-        ]);
+        // windowEnd is anchored to now (UTC). Freeze wall clock so the assertions stay
+        // deterministic regardless of the real date at which tests are executed.
+        Carbon::setTestNow('2025-12-10T12:00:00Z');
+        try {
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => [
+                    'startTimeIso' => '2025-12-01T10:00:00Z',
+                    'intensity' => 10,
+                    'intensityBuckets' => ['z1Sec' => 60, 'z2Sec' => 0, 'z3Sec' => 0, 'z4Sec' => 0, 'z5Sec' => 0],
+                ],
+                'source' => 'manual',
+                'dedupe_key' => 'ts-window-1',
+            ]);
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => [
+                    'startTimeIso' => '2025-12-10T12:00:00Z',
+                    'intensity' => 20,
+                    'intensityBuckets' => ['z1Sec' => 30, 'z2Sec' => 30, 'z3Sec' => 0, 'z4Sec' => 0, 'z5Sec' => 0],
+                ],
+                'source' => 'manual',
+                'dedupe_key' => 'ts-window-2',
+            ]);
 
-        $response = $this->getJson('/api/training-signals?days=7');
-        $response->assertStatus(200);
+            $response = $this->getJson('/api/training-signals?days=7');
+            $response->assertStatus(200);
 
-        $response->assertJsonPath('windowDays', 7);
-        $response->assertJsonPath('windowEnd', '2025-12-10T12:00:00.000000Z');
-        $response->assertJsonPath('windowStart', '2025-12-03T12:00:00.000000Z');
-        $response->assertJsonPath('generatedAtIso', '2025-12-10T12:00:00.000000Z');
-        $response->assertJsonPath('totalWorkouts', 1);
-        $this->assertEquals(20.0, (float) $response->json('weeklyLoad'));
-        $this->assertEquals(20.0, (float) $response->json('rolling4wLoad'));
+            $response->assertJsonPath('windowDays', 7);
+            $response->assertJsonPath('windowEnd', '2025-12-10T12:00:00.000000Z');
+            $response->assertJsonPath('windowStart', '2025-12-03T12:00:00.000000Z');
+            $response->assertJsonPath('generatedAtIso', '2025-12-10T12:00:00.000000Z');
+            // Only workout at 2025-12-10 is inside the 7d window. w1 (2025-12-01) is outside.
+            $response->assertJsonPath('totalWorkouts', 1);
+            // Buckets are primary: w2 load = (30*1 + 30*2)/60 = 1.5 (rounded to 0 decimals = 2).
+            $this->assertEquals(2.0, (float) $response->json('weeklyLoad'));
+            $this->assertEquals(2.0, (float) $response->json('rolling4wLoad'));
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
-    public function test_training_signals_endpoint_handles_numeric_vs_object_intensity(): void
+    public function test_training_signals_endpoint_uses_weighted_buckets_as_primary_load(): void
     {
-        Workout::create([
-            'user_id' => 1,
-            'action' => 'save',
-            'kind' => 'training',
-            'summary' => [
-                'startTimeIso' => '2025-12-08T10:00:00Z',
-                'intensity' => 40,
-                'intensityBuckets' => ['z1Sec' => 60, 'z2Sec' => 120, 'z3Sec' => 0, 'z4Sec' => 0, 'z5Sec' => 0],
-            ],
-            'source' => 'manual',
-            'dedupe_key' => 'ts-intensity-1',
-        ]);
-        Workout::create([
-            'user_id' => 1,
-            'action' => 'save',
-            'kind' => 'training',
-            'summary' => [
-                'startTimeIso' => '2025-12-09T10:00:00Z',
-                'intensity' => ['z1Sec' => 10, 'z2Sec' => 20, 'z3Sec' => 30, 'z4Sec' => 40, 'z5Sec' => 50],
-            ],
-            'source' => 'manual',
-            'dedupe_key' => 'ts-intensity-2',
-        ]);
+        Carbon::setTestNow('2025-12-10T00:00:00Z');
+        try {
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => [
+                    'startTimeIso' => '2025-12-08T10:00:00Z',
+                    'intensity' => 40,
+                    'intensityBuckets' => ['z1Sec' => 60, 'z2Sec' => 120, 'z3Sec' => 0, 'z4Sec' => 0, 'z5Sec' => 0],
+                ],
+                'source' => 'manual',
+                'dedupe_key' => 'ts-intensity-1',
+            ]);
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => [
+                    'startTimeIso' => '2025-12-09T10:00:00Z',
+                    'intensity' => ['z1Sec' => 10, 'z2Sec' => 20, 'z3Sec' => 30, 'z4Sec' => 40, 'z5Sec' => 50],
+                ],
+                'source' => 'manual',
+                'dedupe_key' => 'ts-intensity-2',
+            ]);
 
-        $response = $this->getJson('/api/training-signals?days=28');
-        $response->assertStatus(200);
+            $response = $this->getJson('/api/training-signals?days=28');
+            $response->assertStatus(200);
 
-        // Only numeric intensity contributes to load
-        $this->assertEquals(40.0, (float) $response->json('weeklyLoad'));
-        $this->assertEquals(40.0, (float) $response->json('rolling4wLoad'));
+            // Weighted TRIMP minutes wins over the legacy numeric intensity score.
+            // w1: (60*1 + 120*2)/60 = 5.0, w2: (10 + 40 + 90 + 160 + 250)/60 ≈ 9.17. Sum ≈ 14.17, rounded to 14.
+            $this->assertEquals(14.0, (float) $response->json('weeklyLoad'));
+            $this->assertEquals(14.0, (float) $response->json('rolling4wLoad'));
 
-        // Buckets aggregate from intensityBuckets OR object intensity
-        $this->assertEquals(70.0, (float) $response->json('buckets.z1Sec'));
-        $this->assertEquals(140.0, (float) $response->json('buckets.z2Sec'));
-        $this->assertEquals(30.0, (float) $response->json('buckets.z3Sec'));
-        $this->assertEquals(40.0, (float) $response->json('buckets.z4Sec'));
-        $this->assertEquals(50.0, (float) $response->json('buckets.z5Sec'));
-        $this->assertEquals(330.0, (float) $response->json('buckets.totalSec'));
-        $response->assertJsonPath('totalWorkouts', 2);
+            // Buckets aggregate from intensityBuckets OR object intensity.
+            $this->assertEquals(70.0, (float) $response->json('buckets.z1Sec'));
+            $this->assertEquals(140.0, (float) $response->json('buckets.z2Sec'));
+            $this->assertEquals(30.0, (float) $response->json('buckets.z3Sec'));
+            $this->assertEquals(40.0, (float) $response->json('buckets.z4Sec'));
+            $this->assertEquals(50.0, (float) $response->json('buckets.z5Sec'));
+            $this->assertEquals(330.0, (float) $response->json('buckets.totalSec'));
+            $response->assertJsonPath('totalWorkouts', 2);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_training_signals_endpoint_uses_duration_fallback_when_no_intensity_data(): void
+    {
+        Carbon::setTestNow('2025-12-10T00:00:00Z');
+        try {
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => [
+                    'startTimeIso' => '2025-12-09T10:00:00Z',
+                    'trimmed' => ['durationSec' => 1800, 'distanceM' => 5000],
+                ],
+                'source' => 'manual',
+                'dedupe_key' => 'ts-duration-fallback',
+            ]);
+
+            $response = $this->getJson('/api/training-signals?days=28');
+            $response->assertStatus(200);
+            // No intensity / buckets present → fall back to duration/60 = 30 minutes.
+            $this->assertEquals(30.0, (float) $response->json('weeklyLoad'));
+            $this->assertEquals(30.0, (float) $response->json('rolling4wLoad'));
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_training_signals_endpoint_handles_empty_dataset(): void
@@ -2102,6 +2204,93 @@ class WorkoutsTest extends TestCase
         $response = $this->getJson('/api/training-signals');
         $response->assertStatus(200);
         $response->assertJsonPath('windowDays', 28);
+        $this->assertArrayNotHasKey('adaptation', $response->json());
+    }
+
+    public function test_tcx_import_persists_rich_summary_fields(): void
+    {
+        $tcx = <<<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
+  <Activities>
+    <Activity Sport="Running">
+      <Id>2026-04-20T10:00:00Z</Id>
+      <Lap StartTime="2026-04-20T10:00:00Z">
+        <TotalTimeSeconds>3000</TotalTimeSeconds>
+        <DistanceMeters>10000</DistanceMeters>
+        <Track>
+          <Trackpoint><Time>2026-04-20T10:00:00Z</Time><HeartRateBpm><Value>120</Value></HeartRateBpm></Trackpoint>
+          <Trackpoint><Time>2026-04-20T10:10:00Z</Time><HeartRateBpm><Value>140</Value></HeartRateBpm></Trackpoint>
+          <Trackpoint><Time>2026-04-20T10:50:00Z</Time><HeartRateBpm><Value>160</Value></HeartRateBpm></Trackpoint>
+        </Track>
+      </Lap>
+    </Activity>
+  </Activities>
+</TrainingCenterDatabase>
+XML;
+
+        $response = $this->postJson('/api/workouts/import', [
+            'source' => 'tcx',
+            'sourceActivityId' => 'rich-summary-1',
+            'startTimeIso' => '2026-04-20T10:00:00Z',
+            'durationSec' => 3000,
+            'distanceM' => 10000,
+            'rawTcxXml' => $tcx,
+        ]);
+        $response->assertStatus(201);
+
+        $workout = Workout::find($response->json('id'));
+        $this->assertNotNull($workout);
+        $summary = is_array($workout->summary) ? $workout->summary : [];
+
+        $this->assertSame('run', $summary['sport'] ?? null);
+        $this->assertSame(300, $summary['avgPaceSecPerKm'] ?? null);
+        $this->assertIsArray($summary['hr'] ?? null);
+        $this->assertSame(140, $summary['hr']['avgBpm'] ?? null);
+        $this->assertSame(160, $summary['hr']['maxBpm'] ?? null);
+        $this->assertIsArray($summary['intensityBuckets'] ?? null);
+        $this->assertSame(3000, $summary['intensityBuckets']['totalSec'] ?? null);
+    }
+
+    public function test_training_signals_longrun_only_counts_runs_when_sport_tagged(): void
+    {
+        Carbon::setTestNow('2026-04-25T00:00:00Z');
+        try {
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => [
+                    'startTimeIso' => '2026-04-20T10:00:00Z',
+                    'sport' => 'bike',
+                    'trimmed' => ['durationSec' => 7200, 'distanceM' => 60000],
+                    'distanceM' => 60000,
+                ],
+                'source' => 'manual',
+                'dedupe_key' => 'long-run-filter-bike',
+            ]);
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => [
+                    'startTimeIso' => '2026-04-21T10:00:00Z',
+                    'sport' => 'run',
+                    'trimmed' => ['durationSec' => 5400, 'distanceM' => 18000],
+                    'distanceM' => 18000,
+                ],
+                'source' => 'manual',
+                'dedupe_key' => 'long-run-filter-run',
+            ]);
+
+            $response = $this->getJson('/api/training-signals?days=28');
+            $response->assertStatus(200);
+            // The 60km bike must NOT hijack longRun detection.
+            $this->assertSame(18.0, (float) $response->json('longRun.distanceKm'));
+            $this->assertTrue((bool) $response->json('longRun.exists'));
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 }
 

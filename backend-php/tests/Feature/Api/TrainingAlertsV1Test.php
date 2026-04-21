@@ -272,6 +272,77 @@ class TrainingAlertsV1Test extends TestCase
         $this->assertSame('INFO', $alert->severity);
     }
 
+    public function test_load_spike_generates_warning_alert(): void
+    {
+        // Previous week baseline (low load)
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2025-01-01T10:00:00Z',
+                'durationSec' => 1800,
+                'distanceM' => 5000,
+                'intensity' => 30,
+            ],
+            'source' => 'manual',
+            'dedupe_key' => 'test-load-spike-prev',
+        ]);
+
+        // Current week workout with much higher load
+        $workout = Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2025-01-12T10:00:00Z',
+                'durationSec' => 5400,
+                'distanceM' => 15000,
+                'intensity' => 120,
+            ],
+            'source' => 'manual',
+            'dedupe_key' => 'test-load-spike-current',
+        ]);
+
+        // Add compliance and signals records so only LOAD_SPIKE is safety-specific here.
+        DB::table('plan_compliance_v1')->insert([
+            'workout_id' => $workout->id,
+            'expected_duration_sec' => 5400,
+            'actual_duration_sec' => 5400,
+            'delta_duration_sec' => 0,
+            'duration_ratio' => 1.0,
+            'status' => 'OK',
+            'flag_overshoot_duration' => false,
+            'flag_undershoot_duration' => false,
+            'generated_at' => now(),
+        ]);
+        DB::table('training_signals_v2')->insert([
+            'workout_id' => $workout->id,
+            'hr_available' => 1,
+            'hr_avg_bpm' => 150,
+            'hr_max_bpm' => 180,
+            'hr_z1_sec' => 0,
+            'hr_z2_sec' => 0,
+            'hr_z3_sec' => 0,
+            'hr_z4_sec' => 0,
+            'hr_z5_sec' => 0,
+            'generated_at' => now(),
+        ]);
+
+        $service = app(TrainingAlertsV1Service::class);
+        $service->upsertForWorkout($workout->id);
+
+        $alert = DB::table('training_alerts_v1')
+            ->where('workout_id', $workout->id)
+            ->where('code', 'LOAD_SPIKE')
+            ->first();
+
+        $this->assertNotNull($alert);
+        $this->assertSame('WARNING', $alert->severity);
+        $payload = json_decode($alert->payload_json, true);
+        $this->assertGreaterThan(1.3, $payload['rampRatio']);
+    }
+
     public function test_plan_missing_generates_info_alert(): void
     {
         // given
@@ -907,6 +978,101 @@ class TrainingAlertsV1Test extends TestCase
         $this->assertGreaterThan(0, $alerts->count(), 'Alerts should be generated/updated after UPDATED import');
 
         Carbon::setTestNow();
+    }
+
+    public function test_missed_key_workout_generates_situational_alert(): void
+    {
+        DB::table('plan_snapshots')->insert([
+            'user_id' => 1,
+            'snapshot_json' => json_encode([
+                'items' => [[
+                    'startTimeIso' => '2025-01-10T10:00:00Z',
+                    'expectedDurationSec' => 3600,
+                ]],
+            ]),
+            'window_start_iso' => '2025-01-01T00:00:00Z',
+            'window_end_iso' => '2025-01-31T23:59:59Z',
+            'created_at' => now(),
+        ]);
+
+        $workout = Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2025-01-12T10:00:00Z',
+                'durationSec' => 1800,
+                'distanceM' => 5000,
+            ],
+            'source' => 'manual',
+            'dedupe_key' => 'test-missed-key',
+        ]);
+
+        $service = app(TrainingAlertsV1Service::class);
+        $service->upsertForWorkout($workout->id);
+
+        $alert = DB::table('training_alerts_v1')
+            ->where('workout_id', $workout->id)
+            ->where('code', 'MISSED_KEY_WORKOUT')
+            ->first();
+
+        $this->assertNotNull($alert);
+        $this->assertSame('WARNING', $alert->severity);
+    }
+
+    public function test_easier_than_planned_streak_generates_situational_alert(): void
+    {
+        $workoutA = Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => ['startTimeIso' => '2025-01-10T10:00:00Z', 'durationSec' => 1800, 'distanceM' => 5000],
+            'source' => 'manual',
+            'dedupe_key' => 'test-easier-streak-a',
+        ]);
+        $workoutB = Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => ['startTimeIso' => '2025-01-11T10:00:00Z', 'durationSec' => 1800, 'distanceM' => 5000],
+            'source' => 'manual',
+            'dedupe_key' => 'test-easier-streak-b',
+        ]);
+        $workoutC = Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => ['startTimeIso' => '2025-01-12T10:00:00Z', 'durationSec' => 1800, 'distanceM' => 5000],
+            'source' => 'manual',
+            'dedupe_key' => 'test-easier-streak-c',
+        ]);
+
+        foreach ([$workoutA->id, $workoutB->id, $workoutC->id] as $id) {
+            DB::table('plan_compliance_v1')->insert([
+                'workout_id' => $id,
+                'expected_duration_sec' => 3600,
+                'actual_duration_sec' => 1800,
+                'delta_duration_sec' => -1800,
+                'duration_ratio' => 0.5,
+                'status' => 'MAJOR_DEVIATION',
+                'flag_overshoot_duration' => false,
+                'flag_undershoot_duration' => true,
+                'generated_at' => now(),
+            ]);
+        }
+
+        $service = app(TrainingAlertsV1Service::class);
+        $service->upsertForWorkout($workoutC->id);
+
+        $alert = DB::table('training_alerts_v1')
+            ->where('workout_id', $workoutC->id)
+            ->where('code', 'EASIER_THAN_PLANNED_STREAK')
+            ->first();
+
+        $this->assertNotNull($alert);
+        $this->assertSame('INFO', $alert->severity);
+        $payload = json_decode($alert->payload_json, true);
+        $this->assertGreaterThanOrEqual(2, (int) ($payload['streak'] ?? 0));
     }
 }
 
