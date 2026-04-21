@@ -77,6 +77,7 @@ class ContractFreezeTest extends TestCase
             'summary',
             'rationale',
             'appliedAdjustmentsCodes',
+            'blockContext',
         ]);
     }
 
@@ -274,6 +275,21 @@ class ContractFreezeTest extends TestCase
             $this->assertArrayHasKey('evidence', $adj);
             $this->assertIsString($adj['code']);
             $this->assertContains($adj['severity'], ['low', 'medium', 'high']);
+            $this->assertArrayNotHasKey(
+                'adaptationType',
+                $adj,
+                'adaptationType must not appear in public /api/training-adjustments response'
+            );
+            $this->assertArrayNotHasKey(
+                'confidence',
+                $adj,
+                'confidence must not appear in public /api/training-adjustments response'
+            );
+            $this->assertArrayNotHasKey(
+                'decisionBasis',
+                $adj,
+                'decisionBasis must not appear in public /api/training-adjustments response'
+            );
         }
     }
 
@@ -291,6 +307,7 @@ class ContractFreezeTest extends TestCase
             'windowDays',
             'signals',
             'profile',
+            'blockContext',
         ]);
     }
 
@@ -309,6 +326,13 @@ class ContractFreezeTest extends TestCase
                 'totalWorkouts',
             ],
         ]);
+        $signals = $response->json('signals');
+        $this->assertIsArray($signals);
+        $this->assertArrayNotHasKey(
+            'adaptation',
+            $signals,
+            'adaptation must not appear in public /api/training-context signals payload'
+        );
     }
 
     public function test_training_context_contract_profile_has_required_keys(): void

@@ -21,7 +21,11 @@ class TrainingContextController extends Controller
 
         $days = isset($validated['days']) ? (int) $validated['days'] : 28;
         $userId = $this->authUserId($request);
+        $payload = $this->contextService->getContextForUser($userId, $days);
+        if (isset($payload['signals']) && is_array($payload['signals'])) {
+            unset($payload['signals']['adaptation']);
+        }
 
-        return response()->json($this->contextService->getContextForUser($userId, $days));
+        return response()->json($payload);
     }
 }

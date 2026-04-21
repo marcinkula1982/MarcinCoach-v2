@@ -32,6 +32,10 @@ class TrainingAdjustmentsController extends Controller
         $feedbackSignals = $this->feedbackV2Service->getLatestFeedbackSignalsForUser($userId);
 
         $result = $this->adjustmentsService->generate($context, $feedbackSignals);
+        $result['adjustments'] = array_values(array_map(function (array $adjustment): array {
+            unset($adjustment['adaptationType'], $adjustment['confidence'], $adjustment['decisionBasis']);
+            return $adjustment;
+        }, $result['adjustments'] ?? []));
 
         return response()->json($result)
             ->header('Cache-Control', 'private, no-cache, must-revalidate');
