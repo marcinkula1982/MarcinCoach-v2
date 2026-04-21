@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Workout;
 use App\Models\WorkoutImportEvent;
+use App\Support\WorkoutSummaryBuilder;
 
 class ExternalWorkoutImportService
 {
@@ -46,12 +47,7 @@ class ExternalWorkoutImportService
                 continue;
             }
 
-            $summary = [
-                'startTimeIso' => $startTimeIso,
-                'durationSec' => $durationSec,
-                'distanceM' => $distanceM,
-                'provider' => $provider,
-            ];
+            $summary = WorkoutSummaryBuilder::build($startTimeIso, $durationSec, $distanceM, ['provider' => $provider]);
             $dedupeKey = sprintf('%s:%s', strtolower($provider), $sourceActivityId);
 
             $workout = Workout::create([

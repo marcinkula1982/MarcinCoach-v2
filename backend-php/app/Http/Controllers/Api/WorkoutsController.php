@@ -7,6 +7,7 @@ use App\Models\Workout;
 use App\Models\WorkoutRawTcx;
 use App\Models\WorkoutImportEvent;
 use App\Services\PlanComplianceService;
+use App\Support\WorkoutSummaryBuilder;
 use App\Services\PlanComplianceV2Service;
 use App\Services\TrainingAlertsV1Service;
 use App\Services\TrainingSignalsService;
@@ -226,11 +227,7 @@ class WorkoutsController extends Controller
                         $dedupeKey = $this->generateDedupeKey($source, $sourceActivityId, $startTimeIso, $durationSec, $distanceM);
                         
                         // Update summary
-                        $summary = [
-                            'startTimeIso' => $startTimeIso,
-                            'durationSec' => $durationSec,
-                            'distanceM' => $distanceM,
-                        ];
+                        $summary = WorkoutSummaryBuilder::build($startTimeIso, $durationSec, $distanceM);
                         
                         // Update workout
                         $existing->summary = $summary;
@@ -303,11 +300,7 @@ class WorkoutsController extends Controller
             $dedupeKey = $this->generateDedupeKey($source, $sourceActivityId, $startTimeIso, $durationSec, $distanceM);
 
             // Create summary JSON
-            $summary = [
-                'startTimeIso' => $startTimeIso,
-                'durationSec' => $durationSec,
-                'distanceM' => $distanceM,
-            ];
+            $summary = WorkoutSummaryBuilder::build($startTimeIso, $durationSec, $distanceM);
 
             // Create workout
             $workout = Workout::create([
