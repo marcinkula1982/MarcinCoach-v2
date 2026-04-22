@@ -14,6 +14,10 @@ This directory contains the domain architecture design documentation for the Mar
 8. **[API Contracts](08-api-contracts.md)** - API endpoint specifications, request/response formats
 9. **[Database Schema](09-database-schema.md)** - Database table definitions and migration strategy
 
+## Architecture Decisions
+
+- **[AI Integration](architecture/ai-integration.md)** - Model selection, API design, escalation rules, privacy
+
 ## Design Principles
 
 1. **Clean Architecture**: Separation of domain logic from infrastructure
