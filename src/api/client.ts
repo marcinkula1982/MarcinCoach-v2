@@ -13,6 +13,27 @@ if (username) {
   axios.defaults.headers.common['x-username'] = username
 }
 
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('tcx-session-token')
+  const user = localStorage.getItem('tcx-username')
+
+  config.headers = config.headers ?? {}
+
+  if (token) {
+    ;(config.headers as Record<string, string>)['x-session-token'] = token
+  } else {
+    delete (config.headers as Record<string, string>)['x-session-token']
+  }
+
+  if (user) {
+    ;(config.headers as Record<string, string>)['x-username'] = user
+  } else {
+    delete (config.headers as Record<string, string>)['x-username']
+  }
+
+  return config
+})
+
 axios.interceptors.response.use(
   (response) => response,
   (error) => {
