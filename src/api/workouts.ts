@@ -85,6 +85,7 @@ export async function updateWorkoutMeta(id: number, workoutMeta: WorkoutMeta): P
 export async function fetchWeeklyPlan(days = 28): Promise<WeeklyPlan> {
   const res = await client.get<WeeklyPlan>('/weekly-plan', {
     params: { days },
+    headers: buildAuthHeaders(),
   })
   return res.data
 }
