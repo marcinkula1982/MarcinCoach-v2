@@ -115,6 +115,101 @@ interface WorkoutRawTcxRepositoryInterface
 }
 ```
 
+## Zasada: walidacja importu — dyscyplina i dane
+
+### 1. Filtr dyscypliny (sport detection)
+
+Backend importuje **wyłącznie treningi biegowe**. Każdy import — manualny TCX, Garmin API, Strava API — musi sprawdzić dyscyplinę przed zapisem.
+
+**Źródła dyscypliny:**
+
+| Źródło | Pole | Akceptowana wartość |
+|--------|------|---------------------|
+| TCX | `<Activity Sport="...">` | `Running` |
+| Garmin API | `activityType.typeKey` | `running`, `trail_running`, `treadmill_running`, `track_running` |
+| Strava API | `sport_type` / `type` | `Run`, `TrailRun`, `VirtualRun` |
+
+Jeśli dyscyplina nie jest biegiem → **odrzuć import, zwróć błąd z kodem `WRONG_SPORT`**.
+Nie zapisuj, nie generuj sygnałów, nie informuj planu.
+
+Przykładowe wartości do odrzucenia: `Biking`, `Cycling`, `Swimming`, `rowing`, `Ride`, `Walk` i wszystko inne poza listą akceptowanych.
+
+### 2. Sanity check prędkości
+
+Po wyliczeniu metryk sprawdź czy dane nie są fizycznie absurdalne.
+
+**Progi dla biegacza:**
+
+| Sygnał | Próg | Interpretacja |
+|--------|------|---------------|
+| Średnie tempo całego treningu | < 3:00/km (> 20 km/h) | prawdopodobnie rower lub błąd GPS |
+| Maksymalna prędkość w jednym punkcie GPS | > 35 km/h | błąd GPS, nie sprint |
+| Średnie tempo całego treningu | > 15:00/km (< 4 km/h) | spacer, nie bieg — ostrzeżenie |
+| Dystans / czas — niespójność | czas > 0, dystans = 0 | błąd parsowania TCX |
+
+**Kontekst:** rekord świata w maratonie to ~20.4 km/h (Kipchoge). Dla amatora średnie tempo powyżej 20 km/h przez cały trening jest fizycznie niemożliwe — to niemal na pewno rower lub błąd danych.
+
+**Zachowanie przy przekroczeniu progu:**
+
+- Średnie tempo < 3:00/km → odrzuć, `IMPORT_SANITY_SPEED_TOO_HIGH`
+- Pojedynczy punkt GPS > 35 km/h → nie odrzucaj całego treningu, usuń/wygładź punkt, dodaj flagę `gps_anomaly` do metadanych
+- Średnie tempo > 15:00/km → zapisz, ale dodaj flagę `low_pace_warning`, nie generuj planu compliance
+- Dystans = 0 przy czasie > 0 → odrzuć, `IMPORT_SANITY_MISSING_DISTANCE`
+
+### 3. Kody błędów importu
+
+```
+WRONG_SPORT               — dyscyplina inna niż bieg
+IMPORT_SANITY_SPEED_TOO_HIGH   — średnie tempo < 3:00/km
+IMPORT_SANITY_MISSING_DISTANCE — dystans zerowy przy niezerowym czasie
+```
+
+Ostrzeżenia (import przebiega, ale z flagą):
+```
+gps_anomaly       — pojedynczy punkt GPS > 35 km/h (wygładzony)
+low_pace_warning  — średnie tempo > 15:00/km
+```
+
+---
+
+## Zasada: świadomość daty przy imporcie
+
+**Każdy import — manualny (TCX upload) i automatyczny (API Garmin/Strava) — musi porównać datę treningu z datą bieżącą (UTC) natychmiast po zapisie.**
+
+### Po co
+
+Backend musi wiedzieć czy zaimportowany trening to trening z **dzisiaj**, żeby:
+
+- odnieść się do zaplanowanej sesji na ten dzień (z `PlanSnapshot`)
+- wygenerować feedback w kontekście bieżącego dnia ("dzisiaj miałeś jakość, zrobiłeś easy — to dobrze / to za wolno")
+- poinformować użytkownika o nadchodzących wydarzeniach jeśli jest to ważne (np. jutro długi bieg, pojutrze start)
+
+### Logika
+
+```
+workoutDate = date(workout.summary.startTimeIso)  // strefa UTC
+today       = date(now(), UTC)
+
+if workoutDate == today:
+    → tryb "feedback dziś"
+    → pobierz plannedSession na dziś z PlanSnapshot
+    → wygeneruj post-workout summary z odniesieniem do planu
+    → sprawdź jutrzejsze i pojutrznyszne sesje — jeśli ważne (long, race, quality) → alert
+else:
+    → tryb "historyczny"
+    → zapisz sygnały, zaktualizuj compliance, nie generuj alertów kontekstowych
+```
+
+### Implementacja
+
+Sprawdzenie daty należy do pipeline'u importu (`ExternalWorkoutImportService` i kontroler manualnego uploadu), **nie** do serwisu feedbacku. Serwis feedbacku dostaje już flagę `isToday: bool` jako parametr.
+
+### Strefa czasowa
+
+Zawsze porównuj w **UTC**. Użytkownik może biegać o 23:50 czasu lokalnego — trening zapisany jako następny dzień UTC nie jest "dzisiejszym" treningiem. W przyszłości można dodać `userTimezone` do profilu i porównywać w strefie użytkownika.
+
+---
+
 ## Domain Services
 
 ### WorkoutMetricsCalculator

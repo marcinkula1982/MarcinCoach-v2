@@ -92,7 +92,7 @@ class AiPlanService
             return $this->buildStubExplanation($context, $adjustments, $plan);
         }
 
-        $model = (string) env('AI_PLAN_MODEL', 'gpt-5');
+        $model = (string) env('AI_PLAN_MODEL', 'gpt-5.4-nano');
         $maxTokens = (int) env('AI_PLAN_MAX_OUTPUT_TOKENS', 2000);
         $instructions =
             'Napisz po polsku krótkie objaśnienie planu tygodniowego. Zwróć wyłącznie JSON: ' .
@@ -102,9 +102,11 @@ class AiPlanService
             ->timeout(45)
             ->post('https://api.openai.com/v1/responses', [
                 'model' => $model,
+                'max_output_tokens' => $maxTokens,
                 'instructions' => $instructions,
                 'input' => json_encode(['context' => $context, 'adjustments' => $adjustments, 'plan' => $plan], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-                'max_output_tokens' => $maxTokens,
+                'reasoning' => ['effort' => 'none'],
+                'text' => ['verbosity' => 'low'],
             ]);
 
         if (!$response->successful()) {
