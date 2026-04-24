@@ -3,6 +3,11 @@
         Options -MultiViews -Indexes
     </IfModule>
 
+    <IfModule mod_headers.c>
+        SetEnvIf Request_URI "^/api/ai/" no_cache_ai=1
+        Header set Cache-Control "no-store, no-cache, must-revalidate" env=no_cache_ai
+    </IfModule>
+
     RewriteEngine On
 
     # Handle Authorization Header
