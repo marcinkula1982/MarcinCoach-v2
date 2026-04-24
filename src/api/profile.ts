@@ -7,6 +7,12 @@ export type UserProfile = {
   preferredSurface: string | null
   goals: string | null
   constraints: string | null
+  races?: unknown[] | null
+  availability?: Record<string, unknown> | null
+  health?: Record<string, unknown> | null
+  equipment?: Record<string, unknown> | null
+  hrZones?: Record<string, unknown> | null
+  onboardingCompleted?: boolean
   createdAt: string
   updatedAt: string
 }

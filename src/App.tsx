@@ -17,10 +17,12 @@ import {
   getWorkoutDate,
 } from './api/workouts'
 import { login } from './api/auth'
+import { getMyProfile } from './api/profile'
 import WorkoutsList from './components/WorkoutsList'
 import AnalyticsSummary from './components/AnalyticsSummary'
 import WeeklyPlanSection from './components/WeeklyPlanSection'
 import AiPlanSection from './components/AiPlanSection'
+import Onboarding from './components/Onboarding'
 
 // ---------- Format helpers ----------
 const formatSeconds = (value: number) => {
@@ -137,6 +139,7 @@ const App = () => {
   const [note, setNote] = useState('')
   const [suggestion, setSuggestion] = useState<'planned' | 'modified' | 'unplanned' | null>(null)
   const [suggestionReason, setSuggestionReason] = useState<string | null>(null)
+  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null)
 
   // Auth headers are injected by the axios interceptor in `src/api/client.ts`
 
@@ -244,6 +247,22 @@ const App = () => {
     [],
   )
 
+  const refreshOnboardingStatus = useCallback(async () => {
+    const t = localStorage.getItem('tcx-session-token')
+    const u = localStorage.getItem('tcx-username')
+    if (!t || !u) {
+      setOnboardingCompleted(null)
+      return
+    }
+    try {
+      const profile = await getMyProfile()
+      setOnboardingCompleted(Boolean(profile.onboardingCompleted))
+    } catch (err) {
+      console.warn('Nie udało się pobrać profilu', err)
+      setOnboardingCompleted(true)
+    }
+  }, [])
+
   useEffect(() => {
     const t = localStorage.getItem('tcx-session-token')
     const u = localStorage.getItem('tcx-username')
@@ -255,6 +274,14 @@ const App = () => {
 
     loadWorkouts()
   }, [loggedInUser, loadWorkouts])
+
+  useEffect(() => {
+    if (!loggedInUser) {
+      setOnboardingCompleted(null)
+      return
+    }
+    refreshOnboardingStatus()
+  }, [loggedInUser, refreshOnboardingStatus])
 
   const handleLogout = () => {
     setLoggedInUser(null)
@@ -269,6 +296,7 @@ const App = () => {
     setEndIndex(0)
     setSaveError(null)
     setSaveSuccess(null)
+    setOnboardingCompleted(null)
   }
 
   const handleLogin = async () => {
@@ -278,6 +306,8 @@ const App = () => {
       localStorage.setItem('tcx-session-token', result.sessionToken)
       localStorage.setItem('tcx-username', result.username)
       setPassword('')
+      setOnboardingCompleted(null)
+      await refreshOnboardingStatus()
     } catch (err) {
       console.error('Login failed', err)
     }
@@ -496,6 +526,14 @@ const App = () => {
         </div>
         {loggedInUser ? (
           <>
+            {onboardingCompleted === false ? (
+              <Onboarding onCompleted={() => setOnboardingCompleted(true)} />
+            ) : onboardingCompleted === null ? (
+              <div className="mt-10 rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-8 text-center text-slate-300">
+                Sprawdzanie statusu onboardingu...
+              </div>
+            ) : (
+              <>
             <header
               className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
               aria-label="TCX workspace"
@@ -804,6 +842,8 @@ const App = () => {
                 onLoadWorkout={loadTrainingFromDb}
                 onDeleteWorkout={handleDeleteWorkout}
               />
+            )}
+              </>
             )}
           </>
         ) : (
