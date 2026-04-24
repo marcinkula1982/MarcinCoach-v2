@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import type { ChangeEvent } from 'react'
+import axios from 'axios'
 import { computeMetrics } from './utils/metrics'
 import { parseTcx } from './utils/tcxParser'
 import type {
@@ -302,9 +303,14 @@ const App = () => {
   const handleLogin = async () => {
     try {
       const result = await login(username, password)
-      setLoggedInUser(result.username)
+
+      // Ensure auth is globally ready before any post-login fetch starts.
       localStorage.setItem('tcx-session-token', result.sessionToken)
       localStorage.setItem('tcx-username', result.username)
+      axios.defaults.headers.common['x-session-token'] = result.sessionToken
+      axios.defaults.headers.common['x-username'] = result.username
+
+      setLoggedInUser(result.username)
       setPassword('')
       setOnboardingCompleted(null)
       await refreshOnboardingStatus()
