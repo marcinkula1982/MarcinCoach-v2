@@ -15,7 +15,11 @@ const dayToPl = (day: string): string => {
   return map[day] ?? day
 }
 
-export default function AiPlanSection() {
+type AiPlanSectionProps = {
+  refreshToken?: number
+}
+
+export default function AiPlanSection({ refreshToken = 0 }: AiPlanSectionProps) {
   const [data, setData] = useState<AiPlanResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -59,7 +63,7 @@ export default function AiPlanSection() {
       inFlight.current?.abort()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [refreshToken])
 
   return (
     <section className="mt-6 rounded-2xl bg-slate-900/60 p-6 shadow-lg ring-1 ring-white/5">

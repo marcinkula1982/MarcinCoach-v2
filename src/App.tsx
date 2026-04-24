@@ -141,6 +141,7 @@ const App = () => {
   const [suggestion, setSuggestion] = useState<'planned' | 'modified' | 'unplanned' | null>(null)
   const [suggestionReason, setSuggestionReason] = useState<string | null>(null)
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null)
+  const [authRefreshToken, setAuthRefreshToken] = useState(0)
 
   // Auth headers are injected by the axios interceptor in `src/api/client.ts`
 
@@ -288,6 +289,8 @@ const App = () => {
     setLoggedInUser(null)
     localStorage.removeItem('tcx-session-token')
     localStorage.removeItem('tcx-username')
+    delete axios.defaults.headers.common['x-session-token']
+    delete axios.defaults.headers.common['x-username']
     setPassword('')
     setWorkouts([])
     setCurrentFileName(null)
@@ -298,7 +301,14 @@ const App = () => {
     setSaveError(null)
     setSaveSuccess(null)
     setOnboardingCompleted(null)
+    setAuthRefreshToken((prev) => prev + 1)
   }
+
+  useEffect(() => {
+    const onUnauthorized = () => handleLogout()
+    window.addEventListener('tcx-auth-logout', onUnauthorized)
+    return () => window.removeEventListener('tcx-auth-logout', onUnauthorized)
+  }, [handleLogout])
 
   const handleLogin = async () => {
     try {
@@ -313,7 +323,9 @@ const App = () => {
       setLoggedInUser(result.username)
       setPassword('')
       setOnboardingCompleted(null)
+      setAuthRefreshToken((prev) => prev + 1)
       await refreshOnboardingStatus()
+      await loadWorkouts()
     } catch (err) {
       console.error('Login failed', err)
     }
@@ -586,9 +598,9 @@ const App = () => {
 
             <AnalyticsSummary />
 
-            <WeeklyPlanSection />
+            <WeeklyPlanSection refreshToken={authRefreshToken} />
 
-            <AiPlanSection />
+            <AiPlanSection refreshToken={authRefreshToken} />
 
             {error && (
               <div className="mt-6 rounded-lg border border-red-500/40 bg-red-900/40 p-4 text-sm text-red-100">

@@ -63,7 +63,11 @@ const isoToDate = (iso?: string): string =>
   iso && iso.length >= 10 ? iso.slice(0, 10) : '–'
 
 // ---------- Component ----------
-export default function WeeklyPlanSection() {
+type WeeklyPlanSectionProps = {
+  refreshToken?: number
+}
+
+export default function WeeklyPlanSection({ refreshToken = 0 }: WeeklyPlanSectionProps) {
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan | null>(null)
   const [weeklyPlanLoading, setWeeklyPlanLoading] = useState(false)
   const [weeklyPlanError, setWeeklyPlanError] = useState<string | null>(null)
@@ -97,7 +101,7 @@ export default function WeeklyPlanSection() {
       loadWeeklyPlan()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [refreshToken])
 
   return (
     <section className="mt-6 rounded-2xl bg-slate-900/60 p-6 shadow-lg ring-1 ring-white/5">
