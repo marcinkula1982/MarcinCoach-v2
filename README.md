@@ -45,5 +45,15 @@ Aplikacja startuje domyślnie pod adresem wyświetlanym przez Vite (np. http://l
 - `npm run build` – build produkcyjny.
 - `npm run preview` – podgląd buildu.
 
+## Build produkcyjny a API
+
+Przed `npm run build` ustaw produkcyjny adres backendu w `/.env.production`:
+
+```bash
+VITE_API_BASE_URL=https://api.coach.host89998.iqhs.pl/api
+```
+
+Bez tego Vite może zbudować paczkę z lokalnym adresem API (np. `localhost`), jeśli taki jest w `/.env`.
+
 
 
