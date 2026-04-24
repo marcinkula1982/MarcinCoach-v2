@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import type { ChangeEvent } from 'react'
-import axios from 'axios'
+import { clearSessionHeaders } from './api/client'
 import { computeMetrics } from './utils/metrics'
 import { parseTcx } from './utils/tcxParser'
 import type {
@@ -289,10 +289,7 @@ const App = () => {
 
   const handleLogout = () => {
     setLoggedInUser(null)
-    localStorage.removeItem('tcx-session-token')
-    localStorage.removeItem('tcx-username')
-    delete axios.defaults.headers.common['x-session-token']
-    delete axios.defaults.headers.common['x-username']
+    clearSessionHeaders()
     setPassword('')
     setWorkouts([])
     setCurrentFileName(null)
@@ -315,12 +312,7 @@ const App = () => {
   const handleLogin = async () => {
     try {
       const result = await login(username, password)
-
-      // Ensure auth is globally ready before any post-login fetch starts.
-      localStorage.setItem('tcx-session-token', result.sessionToken)
-      localStorage.setItem('tcx-username', result.username)
-      axios.defaults.headers.common['x-session-token'] = result.sessionToken
-      axios.defaults.headers.common['x-username'] = result.username
+      // setSessionHeaders + localStorage już ustawione wewnątrz login() → auth.ts
 
       setLoggedInUser(result.username)
       setPassword('')

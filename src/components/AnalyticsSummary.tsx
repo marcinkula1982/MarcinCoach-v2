@@ -330,15 +330,3 @@ export default function AnalyticsSummary({ refreshToken = 0 }: AnalyticsSummaryP
     </section>
   )
 }
-
-
-
-
-
-
-
-
-
-
-
-

@@ -4,26 +4,26 @@ import axios from 'axios'
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || '/api'
 axios.defaults.baseURL = apiBaseUrl
 
-axios.interceptors.request.use((config) => {
-  const token = localStorage.getItem('tcx-session-token')
-  const user = localStorage.getItem('tcx-username')
+// Przywróć sesję z localStorage przy starcie (np. po F5)
+const _token = localStorage.getItem('tcx-session-token')
+const _user = localStorage.getItem('tcx-username')
+if (_token) axios.defaults.headers.common['x-session-token'] = _token
+if (_user) axios.defaults.headers.common['x-username'] = _user
 
-  config.headers = config.headers ?? {}
+// Eksportowane funkcje do zarządzania sesją (używane w auth.ts i App.tsx)
+export function setSessionHeaders(token: string, username: string) {
+  axios.defaults.headers.common['x-session-token'] = token
+  axios.defaults.headers.common['x-username'] = username
+  localStorage.setItem('tcx-session-token', token)
+  localStorage.setItem('tcx-username', username)
+}
 
-  if (token) {
-    ;(config.headers as Record<string, string>)['x-session-token'] = token
-  } else {
-    delete (config.headers as Record<string, string>)['x-session-token']
-  }
-
-  if (user) {
-    ;(config.headers as Record<string, string>)['x-username'] = user
-  } else {
-    delete (config.headers as Record<string, string>)['x-username']
-  }
-
-  return config
-})
+export function clearSessionHeaders() {
+  delete axios.defaults.headers.common['x-session-token']
+  delete axios.defaults.headers.common['x-username']
+  localStorage.removeItem('tcx-session-token')
+  localStorage.removeItem('tcx-username')
+}
 
 axios.interceptors.response.use(
   (response) => response,
@@ -49,10 +49,7 @@ axios.interceptors.response.use(
       message === 'SESSION_USER_MISMATCH'
 
     if (shouldForceLogout && hasSession && !isAutoLoadEndpoint) {
-      localStorage.removeItem('tcx-session-token')
-      localStorage.removeItem('tcx-username')
-      delete axios.defaults.headers.common['x-session-token']
-      delete axios.defaults.headers.common['x-username']
+      clearSessionHeaders()
       window.dispatchEvent(new CustomEvent('tcx-auth-logout'))
     }
 

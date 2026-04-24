@@ -1,5 +1,5 @@
-import axios from 'axios'
 import client from './client'
+import { setSessionHeaders } from './client'
 
 export interface LoginResponse {
   sessionToken: string
@@ -15,9 +15,6 @@ export const login = async (
     password,
   })
   const { sessionToken, username: loggedUsername } = response.data
-  axios.defaults.headers.common['x-session-token'] = sessionToken
-  axios.defaults.headers.common['x-username'] = loggedUsername
+  setSessionHeaders(sessionToken, loggedUsername)
   return response.data
 }
-
-
