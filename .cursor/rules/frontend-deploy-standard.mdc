@@ -1,0 +1,13 @@
+---
+description: Frontend deploy standard for coach subdomain
+alwaysApply: true
+---
+
+# Frontend Deploy Standard
+
+- Treat `post-receive` as the primary deploy path for frontend.
+- Never rely on committing `dist/` artifacts for production publish.
+- For `coach.host89998.iqhs.pl`, standard flow is: `git push` -> hook checkout -> `npm ci` -> `npm run build` -> copy `dist/*` to `public_html`.
+- If deploy fails, verify hook content first, then inspect `~/.iq-git/deploy.log`.
+- For production build configuration, ensure `/.env.production` provides valid `VITE_API_BASE_URL` (never `localhost`).
+- Use manual `scp dist/*` only as emergency fallback, and keep it documented as non-standard path.
