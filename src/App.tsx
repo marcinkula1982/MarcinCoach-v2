@@ -258,6 +258,8 @@ const App = () => {
     }
     try {
       const profile = await getMyProfile()
+      console.log('PROFILE RESPONSE:', profile)
+      console.log('onboardingCompleted value:', profile.onboardingCompleted)
       setOnboardingCompleted(Boolean(profile.onboardingCompleted))
     } catch (err) {
       console.warn('Nie udało się pobrać profilu', err)
