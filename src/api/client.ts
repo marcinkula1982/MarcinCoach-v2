@@ -1,7 +1,8 @@
 // src/api/client.ts
 import axios from 'axios'
 
-axios.defaults.baseURL = 'http://localhost:8000/api'
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || '/api'
+axios.defaults.baseURL = apiBaseUrl
 
 const sessionToken = localStorage.getItem('tcx-session-token')
 const username = localStorage.getItem('tcx-username')
@@ -16,9 +17,17 @@ axios.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error?.response?.status as number | undefined
+    const message = error?.response?.data?.message as string | undefined
     const hasSession = Boolean(localStorage.getItem('tcx-session-token'))
+    const shouldForceLogout =
+      status === 401 ||
+      status === 403 ||
+      message === 'INVALID_SESSION' ||
+      message === 'SESSION_EXPIRED' ||
+      message === 'MISSING_SESSION_HEADERS' ||
+      message === 'SESSION_USER_MISMATCH'
 
-    if (status === 401 && hasSession) {
+    if (shouldForceLogout && hasSession) {
       localStorage.removeItem('tcx-session-token')
       localStorage.removeItem('tcx-username')
       delete axios.defaults.headers.common['x-session-token']
