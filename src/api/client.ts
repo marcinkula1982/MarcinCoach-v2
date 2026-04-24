@@ -4,15 +4,6 @@ import axios from 'axios'
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || '/api'
 axios.defaults.baseURL = apiBaseUrl
 
-const sessionToken = localStorage.getItem('tcx-session-token')
-const username = localStorage.getItem('tcx-username')
-if (sessionToken) {
-  axios.defaults.headers.common['x-session-token'] = sessionToken
-}
-if (username) {
-  axios.defaults.headers.common['x-username'] = username
-}
-
 axios.interceptors.request.use((config) => {
   const token = localStorage.getItem('tcx-session-token')
   const user = localStorage.getItem('tcx-username')
@@ -40,6 +31,14 @@ axios.interceptors.response.use(
     const status = error?.response?.status as number | undefined
     const message = error?.response?.data?.message as string | undefined
     const hasSession = Boolean(localStorage.getItem('tcx-session-token'))
+
+    const isAutoLoadEndpoint =
+      error?.config?.url?.includes('weekly-plan') ||
+      error?.config?.url?.includes('workouts') ||
+      error?.config?.url?.includes('training-signals') ||
+      error?.config?.url?.includes('ai/plan') ||
+      error?.config?.url?.includes('summary')
+
     const shouldForceLogout =
       status === 401 ||
       status === 403 ||
@@ -48,7 +47,7 @@ axios.interceptors.response.use(
       message === 'MISSING_SESSION_HEADERS' ||
       message === 'SESSION_USER_MISMATCH'
 
-    if (shouldForceLogout && hasSession) {
+    if (shouldForceLogout && hasSession && !isAutoLoadEndpoint) {
       localStorage.removeItem('tcx-session-token')
       localStorage.removeItem('tcx-username')
       delete axios.defaults.headers.common['x-session-token']
