@@ -37,7 +37,8 @@ axios.interceptors.response.use(
       error?.config?.url?.includes('workouts') ||
       error?.config?.url?.includes('training-signals') ||
       error?.config?.url?.includes('ai/plan') ||
-      error?.config?.url?.includes('summary')
+      error?.config?.url?.includes('summary') ||
+      error?.config?.url?.includes('me/profile')
 
     const shouldForceLogout =
       status === 401 ||
