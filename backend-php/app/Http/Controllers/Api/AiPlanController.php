@@ -31,7 +31,7 @@ class AiPlanController extends Controller
         ]);
         $days = isset($validated['days']) ? (int) $validated['days'] : 28;
         $userId = $this->authUserId($request);
-        $limitResult = $this->rateLimitService->consume($userId, 20);
+        $limitResult = $this->rateLimitService->consume($userId, 100);
         if (!$limitResult['allowed']) {
             return response()->json([
                 'message' => 'AI daily limit exceeded',
