@@ -261,7 +261,7 @@ const App = () => {
       setOnboardingCompleted(Boolean(profile.onboardingCompleted))
     } catch (err) {
       console.warn('Nie udało się pobrać profilu', err)
-      setOnboardingCompleted(true)
+      setOnboardingCompleted(false)
     }
   }, [])
 
