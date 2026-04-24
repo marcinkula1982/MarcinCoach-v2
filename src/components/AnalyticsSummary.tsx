@@ -42,7 +42,11 @@ type Summary = {
   }>
 }
 
-export default function AnalyticsSummary() {
+interface AnalyticsSummaryProps {
+  refreshToken?: number
+}
+
+export default function AnalyticsSummary({ refreshToken = 0 }: AnalyticsSummaryProps) {
   const [data, setData] = useState<Summary | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -71,7 +75,7 @@ export default function AnalyticsSummary() {
   useEffect(() => {
     load(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [refreshToken])
 
   if (error) {
     return (

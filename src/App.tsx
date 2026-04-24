@@ -326,8 +326,7 @@ const App = () => {
       setPassword('')
       setOnboardingCompleted(null)
       setAuthRefreshToken((prev) => prev + 1)
-      await refreshOnboardingStatus()
-      await loadWorkouts()
+      // refreshOnboardingStatus i loadWorkouts wywołują useEffect([loggedInUser]) — nie dublujemy
     } catch (err) {
       console.error('Login failed', err)
     }
@@ -598,7 +597,7 @@ const App = () => {
               <FilePicker onChange={handleFile} disabled={isParsing} />
             </header>
 
-            <AnalyticsSummary />
+            <AnalyticsSummary refreshToken={authRefreshToken} />
 
             <WeeklyPlanSection refreshToken={authRefreshToken} />
 
