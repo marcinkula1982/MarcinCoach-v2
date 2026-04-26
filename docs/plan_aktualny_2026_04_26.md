@@ -83,7 +83,7 @@ Stan lokalny jest dalej niż pierwotny opis: fundamenty M3/M4 beyond zostały za
 
 ### Onboarding — PRZEPROJEKTOWANIE ✅ MVP LOKALNIE / ⏳ PROD
 
-Stara ankieta (`Ankieta użytkownika`) była 11-sekcyjna i została zastąpiona lokalnie przez data-first onboarding MVP.
+Poprzedni 11-sekcyjny formularz został usunięty z repo. Obowiązuje data-first onboarding MVP opisany w raporcie zbiorczym.
 
 #### Nowe podejście (zgodnie z planem z 2026-04-26):
 
@@ -166,5 +166,5 @@ M2 deeper data — dopiero po M3/M4, bo nowe sygnały mają sens tylko gdy logik
 - `docs/laravel-mvp-implementation-backlog.md` — szczegóły D1
 - `m3_m4_beyond_current_scope.plan.md` — szczegóły M3/M4
 - `integrations/integracje_wnioski.md` — integracje Garmin/Strava/Polar/Suunto
-- `Ankieta użytkownika (pod plan treni.txt` — stara ankieta (do zastąpienia)
+- `docs/raport-zbiorczy-status-technologia-2026-04-26.md` — aktualne źródło prawdy dla statusu, technologii i integracji
 - `CLAUDE.md` — zasady deployu
