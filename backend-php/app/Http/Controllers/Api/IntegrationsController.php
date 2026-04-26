@@ -105,9 +105,16 @@ class IntegrationsController extends Controller
 
     public function garminConnect(Request $request): JsonResponse
     {
+        $validated = $request->validate([
+            'garminEmail'    => ['required', 'email', 'max:255'],
+            'garminPassword' => ['required', 'string', 'min:1', 'max:255'],
+        ]);
         $userId = $this->authUserId($request);
-        $username = (string) $request->header('x-username', '');
-        $result = $this->garminConnectorService->startConnect($userId, $username);
+        $result = $this->garminConnectorService->startConnect(
+            $userId,
+            (string) $validated['garminEmail'],
+            (string) $validated['garminPassword'],
+        );
         if (!$result['ok']) {
             return response()->json($result['payload'], 502);
         }

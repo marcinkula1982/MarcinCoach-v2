@@ -24,6 +24,7 @@ import AnalyticsSummary from './components/AnalyticsSummary'
 import WeeklyPlanSection from './components/WeeklyPlanSection'
 import AiPlanSection from './components/AiPlanSection'
 import Onboarding from './components/Onboarding'
+import GarminSection from './components/GarminSection'
 
 // ---------- Format helpers ----------
 const formatSeconds = (value: number) => {
@@ -598,6 +599,8 @@ const App = () => {
             </header>
 
             <AnalyticsSummary refreshToken={authRefreshToken} />
+
+            <GarminSection refreshToken={authRefreshToken} />
 
             <WeeklyPlanSection refreshToken={authRefreshToken} />
 

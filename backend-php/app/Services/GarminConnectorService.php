@@ -10,11 +10,12 @@ class GarminConnectorService
     /**
      * @return array{ok:bool,payload:array<string,mixed>}
      */
-    public function startConnect(int $userId, string $username): array
+    public function startConnect(int $userId, string $email, string $password): array
     {
         return $this->post('/v1/garmin/connect/start', [
-            'userRef' => (string) $userId,
-            'username' => $username,
+            'userRef'  => (string) $userId,
+            'email'    => $email,
+            'password' => $password,
         ]);
     }
 
