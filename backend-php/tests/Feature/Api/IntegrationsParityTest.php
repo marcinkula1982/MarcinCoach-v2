@@ -101,4 +101,29 @@ class IntegrationsParityTest extends TestCase
         $status->assertOk();
         $status->assertJsonPath('connected', true);
     }
+
+    public function test_garmin_connector_error_payload_is_preserved(): void
+    {
+        putenv('GARMIN_CONNECTOR_BASE_URL=https://connector.local');
+        putenv('GARMIN_CONNECTOR_API_KEY=secret-key');
+
+        Http::fake([
+            'https://connector.local/v1/garmin/sync' => Http::response([
+                'detail' => [
+                    'error' => 'GARMIN_MFA_REQUIRED',
+                    'message' => 'Set GARMIN_MFA_CODE for the first Garmin login.',
+                ],
+            ], 409),
+        ]);
+
+        $sync = $this->postJson('/api/integrations/garmin/sync');
+        $sync->assertStatus(502);
+        $sync->assertJsonPath('error', 'GARMIN_MFA_REQUIRED');
+
+        $this->assertDatabaseHas('integration_sync_runs', [
+            'provider' => 'garmin',
+            'status' => 'failed',
+            'error_code' => 'GARMIN_MFA_REQUIRED',
+        ]);
+    }
 }

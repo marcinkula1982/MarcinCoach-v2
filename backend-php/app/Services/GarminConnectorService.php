@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
 class GarminConnectorService
@@ -42,7 +43,7 @@ class GarminConnectorService
             ->withHeaders($this->headers())
             ->get($baseUrl . '/v1/garmin/accounts/' . $userId . '/status');
         if (!$response->successful()) {
-            return ['ok' => false, 'payload' => ['error' => 'GARMIN_CONNECTOR_REQUEST_FAILED']];
+            return ['ok' => false, 'payload' => $this->failurePayload($response)];
         }
         $json = $response->json();
         return ['ok' => true, 'payload' => is_array($json) ? $json : []];
@@ -63,7 +64,7 @@ class GarminConnectorService
             ->post($baseUrl . $path, $payload);
 
         if (!$response->successful()) {
-            return ['ok' => false, 'payload' => ['error' => 'GARMIN_CONNECTOR_REQUEST_FAILED']];
+            return ['ok' => false, 'payload' => $this->failurePayload($response)];
         }
         $json = $response->json();
         return ['ok' => true, 'payload' => is_array($json) ? $json : []];
@@ -80,5 +81,17 @@ class GarminConnectorService
             $headers['x-connector-key'] = $key;
         }
         return $headers;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function failurePayload(Response $response): array
+    {
+        $json = $response->json();
+        if (is_array($json) && isset($json['detail']) && is_array($json['detail'])) {
+            return $json['detail'];
+        }
+        return is_array($json) ? $json : ['error' => 'GARMIN_CONNECTOR_REQUEST_FAILED'];
     }
 }
