@@ -18,9 +18,10 @@ const SYNC_OPTIONS = [
 
 interface Props {
   refreshToken: number
+  onSyncComplete?: (result: GarminSyncResponse) => void | Promise<void>
 }
 
-export default function GarminSection({ refreshToken }: Props) {
+export default function GarminSection({ refreshToken, onSyncComplete }: Props) {
   const [view, setView] = useState<ViewState>('loading')
   const [displayName, setDisplayName] = useState<string | null>(null)
 
@@ -84,6 +85,7 @@ export default function GarminSection({ refreshToken }: Props) {
       from.setDate(from.getDate() - syncDays)
       const result = await garminSync(from.toISOString(), now.toISOString(), syncActivityType || null)
       setSyncResult(result)
+      await onSyncComplete?.(result)
     } catch (err: any) {
       const msg =
         err?.response?.data?.message ||

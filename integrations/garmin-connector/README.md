@@ -7,6 +7,7 @@ Important: this is an unofficial Garmin Connect connector. It logs in as a user 
 ## Endpoints
 - `POST /v1/garmin/connect/start`
 - `POST /v1/garmin/sync`
+- `POST /v1/garmin/workouts`
 - `GET /v1/garmin/accounts/{userRef}/status`
 - `GET /v1/garmin/activities/{activityId}/download?userRef={userRef}&format=tcx`
 
@@ -23,6 +24,20 @@ Important: this is an unofficial Garmin Connect connector. It logs in as a user 
       "activityType": "running"
     }
   ]
+}
+```
+
+`/workouts` uploads a planned running workout and, when `date` is present, schedules it in the Garmin calendar:
+
+```json
+{
+  "userRef": "1",
+  "date": "2026-04-27",
+  "workoutName": "MarcinCoach easy 2026-04-27",
+  "type": "easy",
+  "durationMin": 40,
+  "intensityHint": "Z2",
+  "notes": ["keep it easy"]
 }
 ```
 
@@ -84,5 +99,6 @@ Verified on IQHost on 2026-04-26 in read-only live mode:
 - `POST /v1/garmin/sync` for the last 30 days -> HTTP 200, 9 normalized activities.
 - `GET /v1/garmin/accounts/1/status` -> HTTP 200, `connected=true`, `connectorMode=live`.
 - `GET /v1/garmin/activities/{activityId}/download?userRef=1&format=tcx` -> HTTP 200, TCX XML downloaded.
+- `POST /v1/garmin/workouts` -> implemented for workout upload + calendar scheduling; live smoke should be run with a disposable planned workout before production use.
 
 `GARMIN_MFA_CODE` was not required during this smoke and is not kept in the connector env after login. Credentials and tokens stay outside git.

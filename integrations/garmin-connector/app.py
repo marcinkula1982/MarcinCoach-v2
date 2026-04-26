@@ -21,6 +21,21 @@ except ImportError:  # pragma: no cover - lets stub mode run without Garmin deps
     GarminConnectConnectionError = Exception
     GarminConnectTooManyRequestsError = Exception
 
+try:
+    from garminconnect.workout import (
+        RunningWorkout,
+        WorkoutSegment,
+        create_cooldown_step,
+        create_interval_step,
+        create_warmup_step,
+    )
+except ImportError:  # pragma: no cover - stub mode can run without workout deps.
+    RunningWorkout = None
+    WorkoutSegment = None
+    create_cooldown_step = None
+    create_interval_step = None
+    create_warmup_step = None
+
 app = FastAPI(title="garmin-connector")
 
 
@@ -55,6 +70,21 @@ class SyncRequest(BaseModel):
     mfaCode: str | None = None
     activityType: str | None = None
     limit: int | None = None
+
+
+class WorkoutPushRequest(BaseModel):
+    userRef: str
+    date: str | None = None
+    workoutName: str | None = None
+    day: str | None = None
+    type: str = "easy"
+    durationMin: int
+    intensityHint: str | None = None
+    structure: str | None = None
+    notes: list[str] | None = None
+    email: str | None = None
+    password: str | None = None
+    mfaCode: str | None = None
 
 
 def _env(name: str, default: str = "") -> str:
@@ -114,6 +144,18 @@ def _parse_iso(value: str | None) -> datetime | None:
 def _date_str(value: str | None, fallback: datetime) -> str:
     parsed = _parse_iso(value)
     return (parsed or fallback).date().isoformat()
+
+
+def _schedule_date(value: str | None) -> str | None:
+    if not value:
+        return None
+    parsed = _parse_iso(value)
+    if parsed:
+        return parsed.date().isoformat()
+    try:
+        return datetime.strptime(value.strip(), "%Y-%m-%d").date().isoformat()
+    except ValueError as exc:
+        raise ConnectorError("GARMIN_INVALID_WORKOUT_DATE", 422, str(exc)) from exc
 
 
 def _stub_items(from_iso: str | None, to_iso: str | None) -> list[dict[str, Any]]:
@@ -263,6 +305,80 @@ def _filter_by_type(items: list[dict[str, Any]], activity_type: str | None) -> l
     return [item for item in items if (item.get("activityType") or "").lower() == needle]
 
 
+def _workout_name(payload: WorkoutPushRequest, scheduled_date: str | None) -> str:
+    if payload.workoutName and payload.workoutName.strip():
+        return payload.workoutName.strip()[:80]
+    suffix = f" {scheduled_date}" if scheduled_date else ""
+    return f"MarcinCoach {payload.type}{suffix}"[:80]
+
+
+def _workout_description(payload: WorkoutPushRequest) -> str:
+    parts = []
+    if payload.intensityHint:
+        parts.append(f"Intensity: {payload.intensityHint}")
+    if payload.structure:
+        parts.append(f"Structure: {payload.structure}")
+    if payload.notes:
+        parts.append("Notes: " + "; ".join(note for note in payload.notes if note))
+    return "\n".join(parts)
+
+
+def _extract_workout_id(upload_result: Any) -> int | str | None:
+    if not isinstance(upload_result, dict):
+        return None
+    for key in ("workoutId", "id"):
+        value = upload_result.get(key)
+        if value not in (None, ""):
+            return value
+    nested = upload_result.get("workout")
+    if isinstance(nested, dict):
+        for key in ("workoutId", "id"):
+            value = nested.get(key)
+            if value not in (None, ""):
+                return value
+    return None
+
+
+def _build_running_workout(payload: WorkoutPushRequest, scheduled_date: str | None) -> Any:
+    if (
+        RunningWorkout is None
+        or WorkoutSegment is None
+        or create_warmup_step is None
+        or create_interval_step is None
+        or create_cooldown_step is None
+    ):
+        raise ConnectorError("GARMIN_WORKOUT_MODELS_NOT_AVAILABLE", 500)
+
+    duration_seconds = max(5, min(int(payload.durationMin), 360)) * 60
+    session_type = (payload.type or "easy").lower()
+    quality_types = {"quality", "threshold", "intervals", "fartlek", "tempo"}
+
+    if session_type in quality_types and duration_seconds >= 30 * 60:
+        warmup = min(10 * 60, max(5 * 60, int(duration_seconds * 0.2)))
+        cooldown = min(10 * 60, max(5 * 60, int(duration_seconds * 0.2)))
+        main = max(5 * 60, duration_seconds - warmup - cooldown)
+        steps = [
+            create_warmup_step(float(warmup), 1),
+            create_interval_step(float(main), 2),
+            create_cooldown_step(float(cooldown), 3),
+        ]
+    else:
+        steps = [create_interval_step(float(duration_seconds), 1)]
+
+    segment = WorkoutSegment(
+        segmentOrder=1,
+        sportType={"sportTypeId": 1, "sportTypeKey": "running", "displayOrder": 1},
+        workoutSteps=steps,
+    )
+
+    return RunningWorkout(
+        workoutName=_workout_name(payload, scheduled_date),
+        estimatedDurationInSecs=duration_seconds,
+        workoutSegments=[segment],
+        description=_workout_description(payload),
+    )
+
+
 def _fetch_activities(client: Any, payload: SyncRequest) -> list[dict[str, Any]]:
     limit = _requested_limit(payload.limit)
     if payload.fromIso or payload.toIso:
@@ -325,6 +441,62 @@ def garmin_sync(payload: SyncRequest, x_connector_key: str | None = Header(defau
         "syncRunId": f"sync-{payload.userRef}",
         "connectorMode": "live",
         "items": items,
+    }
+
+
+@app.post("/v1/garmin/workouts")
+def garmin_push_workout(payload: WorkoutPushRequest, x_connector_key: str | None = Header(default=None)):
+    _check_api_key(x_connector_key)
+    if payload.durationMin <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "GARMIN_INVALID_WORKOUT_DURATION", "message": "durationMin must be positive"},
+        )
+
+    try:
+        scheduled_date = _schedule_date(payload.date)
+    except ConnectorError as exc:
+        _raise_http_error(exc)
+
+    mode = _connector_mode()
+    if mode == "stub":
+        return {
+            "connectorMode": "stub",
+            "status": "scheduled" if scheduled_date else "uploaded",
+            "workoutId": f"stub-workout-{payload.userRef}-{payload.day or payload.type}",
+            "scheduledDate": scheduled_date,
+        }
+
+    try:
+        client = _garmin_client(payload.userRef, payload.email, payload.password, payload.mfaCode)
+        workout = _build_running_workout(payload, scheduled_date)
+        if hasattr(client, "upload_running_workout"):
+            upload_result = client.upload_running_workout(workout)
+        else:
+            upload_result = client.upload_workout(workout.to_dict())
+
+        workout_id = _extract_workout_id(upload_result)
+        schedule_result = None
+        if scheduled_date:
+            if workout_id is None:
+                raise ConnectorError(
+                    "GARMIN_WORKOUT_ID_MISSING",
+                    502,
+                    "Garmin upload did not return workoutId, cannot schedule workout.",
+                )
+            schedule_result = client.schedule_workout(workout_id, scheduled_date)
+    except ConnectorError as exc:
+        _raise_http_error(exc)
+    except Exception as exc:
+        _raise_http_error(ConnectorError("GARMIN_WORKOUT_UPLOAD_FAILED", 502, str(exc)))
+
+    return {
+        "connectorMode": "live",
+        "status": "scheduled" if scheduled_date else "uploaded",
+        "workoutId": workout_id,
+        "scheduledDate": scheduled_date,
+        "upload": upload_result,
+        "schedule": schedule_result,
     }
 
 

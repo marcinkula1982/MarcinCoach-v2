@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { hasStoredSession } from '../api/client'
 import { fetchWeeklyPlan } from '../api/workouts'
-import type { WeeklyPlan, TrainingDay } from '../types/weekly-plan'
+import { garminSendWorkout } from '../api/garmin'
+import type { WeeklyPlan, TrainingDay, PlannedSession } from '../types/weekly-plan'
 
 const ADJUSTMENT_LABELS: Record<string, string> = {
   reduce_load: 'Zmniejszono obciążenie (−20%)',
@@ -38,12 +39,33 @@ const NOTES_PL: Record<string, string> = {
   recovery: 'akcent regeneracyjny',
 }
 
+const SESSION_TYPE_PL: Record<string, string> = {
+  easy: 'easy',
+  long: 'long',
+  quality: 'akcent',
+  threshold: 'próg',
+  intervals: 'interwały',
+  fartlek: 'fartlek',
+  tempo: 'tempo',
+  strides: 'przebieżki',
+}
+
 const HR_ZONE_LABELS: Record<string, string> = {
   Z1: 'Strefa tętna 1 – bardzo lekko (regeneracja)',
   Z2: 'Strefa tętna 2 – lekko (tlen)',
   Z3: 'Strefa tętna 3 – umiarkowanie (tempo)',
   Z4: 'Strefa tętna 4 – mocno (próg)',
   Z5: 'Strefa tętna 5 – bardzo mocno (VO₂max)',
+}
+
+const DAY_OFFSETS: Record<TrainingDay, number> = {
+  mon: 0,
+  tue: 1,
+  wed: 2,
+  thu: 3,
+  fri: 4,
+  sat: 5,
+  sun: 6,
 }
 
 // ---------- Helpers ----------
@@ -63,6 +85,25 @@ const dayToPl = (day: TrainingDay): string => {
 const isoToDate = (iso?: string): string =>
   iso && iso.length >= 10 ? iso.slice(0, 10) : '–'
 
+const resolveSessionDate = (weekStartIso: string, day: TrainingDay): string | null => {
+  const offset = DAY_OFFSETS[day]
+  if (offset === undefined) return null
+  const date = new Date(weekStartIso)
+  if (Number.isNaN(date.getTime())) return null
+  date.setUTCDate(date.getUTCDate() + offset)
+  return date.toISOString().slice(0, 10)
+}
+
+const isSendableSession = (session: PlannedSession) =>
+  session.type !== 'rest' && session.durationMin > 0
+
+const sendKey = (session: PlannedSession, index: number) => `${session.day}-${index}`
+
+const garminWorkoutName = (session: PlannedSession, date: string) => {
+  const type = SESSION_TYPE_PL[session.type] ?? session.type
+  return `MarcinCoach ${type} ${date}`
+}
+
 // ---------- Component ----------
 type WeeklyPlanSectionProps = {
   refreshToken?: number
@@ -72,6 +113,10 @@ export default function WeeklyPlanSection({ refreshToken = 0 }: WeeklyPlanSectio
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan | null>(null)
   const [weeklyPlanLoading, setWeeklyPlanLoading] = useState(false)
   const [weeklyPlanError, setWeeklyPlanError] = useState<string | null>(null)
+  const [sendingKey, setSendingKey] = useState<string | null>(null)
+  const [sendStatuses, setSendStatuses] = useState<
+    Record<string, { type: 'success' | 'error'; message: string }>
+  >({})
 
   const loadWeeklyPlan = async () => {
     setWeeklyPlanLoading(true)
@@ -100,6 +145,47 @@ export default function WeeklyPlanSection({ refreshToken = 0 }: WeeklyPlanSectio
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshToken])
+
+  const handleSendToGarmin = async (session: PlannedSession, index: number) => {
+    if (!weeklyPlan || !isSendableSession(session)) return
+
+    const key = sendKey(session, index)
+    const date = resolveSessionDate(weeklyPlan.weekStartIso, session.day)
+    if (!date) {
+      setSendStatuses((prev) => ({
+        ...prev,
+        [key]: { type: 'error', message: 'Brak daty' },
+      }))
+      return
+    }
+
+    setSendingKey(key)
+    setSendStatuses((prev) => {
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+
+    try {
+      await garminSendWorkout(date, session, garminWorkoutName(session, date))
+      setSendStatuses((prev) => ({
+        ...prev,
+        [key]: { type: 'success', message: 'Wysłano' },
+      }))
+    } catch (e: any) {
+      const message =
+        e?.response?.data?.message ||
+        e?.response?.data?.error ||
+        e?.message ||
+        'Błąd wysyłki'
+      setSendStatuses((prev) => ({
+        ...prev,
+        [key]: { type: 'error', message: String(message) },
+      }))
+    } finally {
+      setSendingKey(null)
+    }
+  }
 
   return (
     <section className="mt-6 rounded-2xl bg-slate-900/60 p-6 shadow-lg ring-1 ring-white/5">
@@ -151,41 +237,78 @@ export default function WeeklyPlanSection({ refreshToken = 0 }: WeeklyPlanSectio
                   <th className="text-left py-2 px-3 text-slate-300">Intensywność</th>
                   <th className="text-left py-2 px-3 text-slate-300">Powierzchnia</th>
                   <th className="text-left py-2 px-3 text-slate-300">Uwagi</th>
+                  <th className="text-left py-2 px-3 text-slate-300">Garmin</th>
                 </tr>
               </thead>
               <tbody>
-                {weeklyPlan.sessions.map((session, idx) => (
-                  <tr key={`${session.day}-${idx}`} className="border-b border-slate-800/50 hover:bg-slate-800/30">
-                    <td className="py-2 px-3 text-white font-medium">{dayToPl(session.day)}</td>
-                    <td className="py-2 px-3 text-slate-300">{session.type}</td>
-                    <td className="py-2 px-3 text-slate-300">{session.durationMin} min</td>
-                    <td className="py-2 px-3 text-slate-300">
-                      {session.intensityHint
-                        ? HR_ZONE_LABELS[session.intensityHint] ?? session.intensityHint
-                        : '–'}
-                    </td>
-                    <td className="py-2 px-3 text-slate-300">
-                      {session.surfaceHint
-                        ? SURFACE_PL[session.surfaceHint] || session.surfaceHint
-                        : '–'}
-                    </td>
-                    <td className="py-2 px-3 text-slate-300">
-                      {session.notes && session.notes.length > 0 ? (
-                        <ul className="list-disc list-inside space-y-1">
-                          {session.notes.map((note, i) => (
-                            <li key={i} className="text-xs">
-                              {note === 'Include 4-6 strides (20-30s each)'
-                                ? 'Dodaj 4–6 przebieżek (po 20–30 s)'
-                                : NOTES_PL[note] ?? note}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        '–'
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {weeklyPlan.sessions.map((session, idx) => {
+                  const key = sendKey(session, idx)
+                  const status = sendStatuses[key]
+                  const sendable = isSendableSession(session)
+                  const isSending = sendingKey === key
+
+                  return (
+                    <tr key={key} className="border-b border-slate-800/50 hover:bg-slate-800/30">
+                      <td className="py-2 px-3 text-white font-medium">{dayToPl(session.day)}</td>
+                      <td className="py-2 px-3 text-slate-300">{session.type}</td>
+                      <td className="py-2 px-3 text-slate-300">{session.durationMin} min</td>
+                      <td className="py-2 px-3 text-slate-300">
+                        {session.intensityHint
+                          ? HR_ZONE_LABELS[session.intensityHint] ?? session.intensityHint
+                          : '–'}
+                      </td>
+                      <td className="py-2 px-3 text-slate-300">
+                        {session.surfaceHint
+                          ? SURFACE_PL[session.surfaceHint] || session.surfaceHint
+                          : '–'}
+                      </td>
+                      <td className="py-2 px-3 text-slate-300">
+                        {session.notes && session.notes.length > 0 ? (
+                          <ul className="list-disc list-inside space-y-1">
+                            {session.notes.map((note, i) => (
+                              <li key={i} className="text-xs">
+                                {note === 'Include 4-6 strides (20-30s each)'
+                                  ? 'Dodaj 4–6 przebieżek (po 20–30 s)'
+                                  : NOTES_PL[note] ?? note}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          '–'
+                        )}
+                      </td>
+                      <td className="py-2 px-3 text-slate-300">
+                        {sendable ? (
+                          <div className="space-y-1">
+                            <button
+                              type="button"
+                              onClick={() => handleSendToGarmin(session, idx)}
+                              disabled={isSending}
+                              className={`min-w-36 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition ${
+                                isSending
+                                  ? 'cursor-not-allowed bg-slate-700 text-slate-300'
+                                  : 'bg-emerald-600 hover:bg-emerald-500'
+                              }`}
+                            >
+                              {isSending ? 'Wysyłam...' : 'Wyślij do urządzenia'}
+                            </button>
+                            {status && (
+                              <div
+                                className={`max-w-44 text-xs ${
+                                  status.type === 'success' ? 'text-emerald-300' : 'text-amber-300'
+                                }`}
+                              >
+                                {status.message}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          '–'
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

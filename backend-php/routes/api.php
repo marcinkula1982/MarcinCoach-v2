@@ -26,6 +26,7 @@ Route::get('/integrations/strava/callback', [IntegrationsController::class, 'str
 Route::post('/integrations/strava/sync', [IntegrationsController::class, 'stravaSync']);
 Route::post('/integrations/garmin/connect', [IntegrationsController::class, 'garminConnect']);
 Route::post('/integrations/garmin/sync', [IntegrationsController::class, 'garminSync']);
+Route::post('/integrations/garmin/workouts/send', [IntegrationsController::class, 'garminSendWorkout']);
 Route::get('/integrations/garmin/status', [IntegrationsController::class, 'garminStatus']);
 Route::get('/me', [MeController::class, 'index']);
 Route::get('/me/profile', [ProfileController::class, 'show']);
@@ -60,4 +61,3 @@ Route::get('/workouts/{id}/signals', [WorkoutsController::class, 'signals']);
 Route::get('/workouts/{id}/compliance', [WorkoutsController::class, 'compliance']);
 Route::get('/workouts/{id}/compliance-v2', [WorkoutsController::class, 'complianceV2']);
 Route::get('/workouts/{id}/alerts-v1', [WorkoutsController::class, 'alertsV1']);
-

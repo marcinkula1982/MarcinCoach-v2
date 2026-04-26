@@ -8,6 +8,7 @@ use App\Models\IntegrationSyncRun;
 use App\Services\ExternalWorkoutImportService;
 use App\Services\GarminConnectorService;
 use App\Services\StravaOAuthService;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -173,6 +174,44 @@ class IntegrationsController extends Controller
         ]);
     }
 
+    public function garminSendWorkout(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'date' => ['required', 'date'],
+            'name' => ['nullable', 'string', 'max:80'],
+            'session' => ['required', 'array'],
+            'session.day' => ['nullable', 'string', 'max:16'],
+            'session.type' => ['required', 'string', 'max:64'],
+            'session.durationMin' => ['required', 'integer', 'min:1', 'max:360'],
+            'session.intensityHint' => ['nullable', 'string', 'max:32'],
+            'session.structure' => ['nullable', 'string', 'max:255'],
+            'session.notes' => ['nullable', 'array'],
+            'session.notes.*' => ['string', 'max:160'],
+        ]);
+
+        $userId = $this->authUserId($request);
+        $session = $validated['session'];
+        $scheduledDate = CarbonImmutable::parse((string) $validated['date'])->toDateString();
+
+        $payload = [
+            'date' => $scheduledDate,
+            'workoutName' => (string) ($validated['name'] ?? $this->defaultGarminWorkoutName($session, $scheduledDate)),
+            'day' => isset($session['day']) ? (string) $session['day'] : null,
+            'type' => (string) $session['type'],
+            'durationMin' => (int) $session['durationMin'],
+            'intensityHint' => isset($session['intensityHint']) ? (string) $session['intensityHint'] : null,
+            'structure' => isset($session['structure']) ? (string) $session['structure'] : null,
+            'notes' => array_values(array_map('strval', $session['notes'] ?? [])),
+        ];
+
+        $result = $this->garminConnectorService->sendWorkout($userId, $payload);
+        if (!$result['ok']) {
+            return response()->json($result['payload'], 502);
+        }
+
+        return response()->json($result['payload']);
+    }
+
     public function garminStatus(Request $request): JsonResponse
     {
         $userId = $this->authUserId($request);
@@ -181,5 +220,14 @@ class IntegrationsController extends Controller
             return response()->json($result['payload'], 502);
         }
         return response()->json($result['payload']);
+    }
+
+    /**
+     * @param array<string,mixed> $session
+     */
+    private function defaultGarminWorkoutName(array $session, string $scheduledDate): string
+    {
+        $type = (string) ($session['type'] ?? 'run');
+        return substr("MarcinCoach {$type} {$scheduledDate}", 0, 80);
     }
 }

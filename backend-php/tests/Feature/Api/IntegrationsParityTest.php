@@ -87,6 +87,12 @@ class IntegrationsParityTest extends TestCase
                 'connected' => true,
                 'health' => 'ok',
             ], 200),
+            'https://connector.local/v1/garmin/workouts' => Http::response([
+                'connectorMode' => 'stub',
+                'status' => 'scheduled',
+                'workoutId' => 'workout-1',
+                'scheduledDate' => '2026-04-27',
+            ], 200),
         ]);
 
         $connect = $this->postJson('/api/integrations/garmin/connect');
@@ -100,6 +106,28 @@ class IntegrationsParityTest extends TestCase
         $status = $this->getJson('/api/integrations/garmin/status');
         $status->assertOk();
         $status->assertJsonPath('connected', true);
+
+        $send = $this->postJson('/api/integrations/garmin/workouts/send', [
+            'date' => '2026-04-27',
+            'session' => [
+                'day' => 'mon',
+                'type' => 'easy',
+                'durationMin' => 40,
+                'intensityHint' => 'Z2',
+                'notes' => ['keep it easy'],
+            ],
+        ]);
+        $send->assertOk();
+        $send->assertJsonPath('status', 'scheduled');
+        $send->assertJsonPath('workoutId', 'workout-1');
+
+        Http::assertSent(fn ($request) =>
+            $request->url() === 'https://connector.local/v1/garmin/workouts'
+            && $request['userRef'] === '1'
+            && $request['date'] === '2026-04-27'
+            && $request['type'] === 'easy'
+            && $request['durationMin'] === 40
+        );
     }
 
     public function test_garmin_connector_error_payload_is_preserved(): void

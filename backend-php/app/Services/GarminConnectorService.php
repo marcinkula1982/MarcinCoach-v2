@@ -40,6 +40,18 @@ class GarminConnectorService
     }
 
     /**
+     * @param array<string,mixed> $workout
+     * @return array{ok:bool,payload:array<string,mixed>}
+     */
+    public function sendWorkout(int $userId, array $workout): array
+    {
+        return $this->post('/v1/garmin/workouts', array_merge(
+            ['userRef' => (string) $userId],
+            $workout,
+        ));
+    }
+
+    /**
      * @return array{ok:bool,payload:array<string,mixed>}
      */
     public function status(int $userId): array

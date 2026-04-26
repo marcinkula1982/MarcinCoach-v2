@@ -331,6 +331,11 @@ const App = () => {
     }
   }
 
+  const handleOnboardingCompleted = useCallback(() => {
+    setOnboardingCompleted(true)
+    void loadWorkouts()
+  }, [loadWorkouts])
+
   const handleSaveToBackend = async () => {
     if (!getStoredSessionToken() || !getStoredUsername()) {
       console.error('Not logged in - cannot save workout')
@@ -498,6 +503,10 @@ const App = () => {
     }
   }
 
+  const handleGarminSyncComplete = useCallback(async () => {
+    await loadWorkouts()
+  }, [loadWorkouts])
+
   // ---------- JSX ----------
   return (
     <div className="bg-slate-950 min-h-screen text-white">
@@ -556,7 +565,7 @@ const App = () => {
         {loggedInUser ? (
           <>
             {onboardingCompleted === false ? (
-              <Onboarding onCompleted={() => setOnboardingCompleted(true)} />
+              <Onboarding onCompleted={handleOnboardingCompleted} />
             ) : onboardingCompleted === null ? (
               <div className="mt-10 rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-8 text-center text-slate-300">
                 Sprawdzanie statusu onboardingu...
@@ -609,7 +618,10 @@ const App = () => {
 
             <AnalyticsSummary refreshToken={authRefreshToken} />
 
-            <GarminSection refreshToken={authRefreshToken} />
+            <GarminSection
+              refreshToken={authRefreshToken}
+              onSyncComplete={handleGarminSyncComplete}
+            />
 
             <WeeklyPlanSection refreshToken={authRefreshToken} />
 
