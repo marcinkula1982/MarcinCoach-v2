@@ -12,6 +12,8 @@ export type UserProfile = {
   health?: Record<string, unknown> | null
   equipment?: Record<string, unknown> | null
   hrZones?: Record<string, unknown> | null
+  primaryRace?: Record<string, unknown> | null
+  quality?: Record<string, unknown> | null
   onboardingCompleted?: boolean
   createdAt: string
   updatedAt: string
@@ -22,6 +24,11 @@ export type UpdateProfilePayload = {
   preferredSurface?: string
   goals?: string
   constraints?: string
+  races?: Array<Record<string, unknown>>
+  availability?: Record<string, unknown>
+  health?: Record<string, unknown>
+  equipment?: Record<string, unknown>
+  hrZones?: Record<string, unknown>
 }
 
 export async function getMyProfile(): Promise<UserProfile> {

@@ -101,6 +101,44 @@ class AuthAndProfileTest extends TestCase
         $response->assertJsonPath('hrZones.z2.max', 140);
     }
 
+    public function test_profile_accepts_minimal_data_first_onboarding_payload(): void
+    {
+        $response = $this->putJson('/api/me/profile', [
+            'goals' => 'przebiec 10 km ponizej 50 minut',
+            'races' => [
+                ['date' => '2026-10-11', 'distanceKm' => 10.0, 'priority' => 'A'],
+            ],
+            'availability' => [
+                'runningDays' => ['mon', 'wed', 'fri', 'sun'],
+                'requestedTrainingDays' => 4,
+                'unavailableDays' => ['sat'],
+            ],
+            'health' => [
+                'currentPain' => false,
+                'injuryHistory' => [],
+            ],
+            'equipment' => [
+                'watch' => true,
+                'hrSensor' => true,
+            ],
+            'constraints' => json_encode([
+                'onboarding' => [
+                    'source' => 'tcx',
+                    'uploadedWorkoutsCount' => 6,
+                    'confidenceHint' => 'standard',
+                ],
+            ]),
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('onboardingCompleted', true);
+        $response->assertJsonPath('goals', 'przebiec 10 km ponizej 50 minut');
+        $this->assertEquals(10.0, (float) $response->json('primaryRace.distanceKm'));
+        $response->assertJsonPath('availability.runningDays', ['mon', 'wed', 'fri', 'sun']);
+        $response->assertJsonPath('health.currentPain', false);
+        $response->assertJsonPath('equipment.hrSensor', true);
+    }
+
     // --- M1 beyond minimum: primaryRace projection ---
 
     public function test_profile_update_projects_primary_race_for_future_a_race(): void

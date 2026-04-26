@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import type { ChangeEvent } from 'react'
 import { clearSessionHeaders } from './api/client'
 import { computeMetrics } from './utils/metrics'
@@ -111,6 +111,8 @@ const App = () => {
     return localStorage.getItem('tcx-username') || ''
   })
   const [password, setPassword] = useState<string>('')
+  const usernameInputRef = useRef<HTMLInputElement>(null)
+  const passwordInputRef = useRef<HTMLInputElement>(null)
   const [loggedInUser, setLoggedInUser] = useState<string | null>(() => {
     return localStorage.getItem('tcx-username') || null
   })
@@ -311,7 +313,9 @@ const App = () => {
 
   const handleLogin = async () => {
     try {
-      const result = await login(username, password)
+      const loginUsername = usernameInputRef.current?.value ?? username
+      const loginPassword = passwordInputRef.current?.value ?? password
+      const result = await login(loginUsername.trim(), loginPassword)
       // setSessionHeaders + localStorage już ustawione wewnątrz login() → auth.ts
 
       setLoggedInUser(result.username)
@@ -505,15 +509,19 @@ const App = () => {
             {!loggedInUser && (
               <>
                 <input
+                  ref={usernameInputRef}
                   className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm"
                   placeholder="Login"
+                  autoComplete="username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                 />
                 <input
+                  ref={passwordInputRef}
                   type="password"
                   className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm"
                   placeholder="Hasło"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />

@@ -1,434 +1,609 @@
 import { useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { ChangeEvent, FormEvent } from 'react'
 import client from '../api/client'
+import { uploadTcxFile } from '../api/workouts'
 
+type Source = 'strava' | 'garmin' | 'tcx' | 'manual'
+type ManualLastRun = 'last_7_days' | 'last_30_days' | 'over_30_days' | 'never'
 type YesNo = 'yes' | 'no'
-type StressLevel = 'low' | 'medium' | 'high'
-type WorkType = 'sedentary' | 'physical' | 'mixed'
-type Surface = 'asphalt' | 'trail' | 'mixed'
-type Gender = 'female' | 'male' | 'other'
-
-const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-
-type OnboardingForm = {
-  age: string
-  heightCm: string
-  weightKg: string
-  gender: Gender
-  city: string
-  availableTerrain: string
-  runningSince: string
-  weeklyKm: string
-  longestRunKm: string
-  runsPerWeek: string
-  time5k: string
-  time10k: string
-  timeHalfMarathon: string
-  timeMarathon: string
-  formScore: string
-  afterBreak: YesNo
-  breakDuration: string
-  goalDistance: string
-  raceDate: string
-  goalTime: string
-  goalPriority: string
-  availableDays: string[]
-  maxTrainingMinutes: string
-  unavailableDays: string
-  watch: string
-  heartRateMonitor: string
-  treadmill: YesNo
-  gym: YesNo
-  terrainAccess: string
-  currentPain: string
-  injuryHistory: string
-  painDuringRun: string
-  painAfterRun: string
-  restingHr: string
-  maxHr: string
-  hasHrZones: YesNo
-  hrZone1: string
-  hrZone2: string
-  hrZone3: string
-  hrZone4: string
-  hrZone5: string
-  preferredSurface: Surface
-  trainingStyle: string
-  doesStrengthCore: YesNo
-  sleepHours: string
-  workType: WorkType
-  stressLevel: StressLevel
-}
-
-const initialForm: OnboardingForm = {
-  age: '',
-  heightCm: '',
-  weightKg: '',
-  gender: 'other',
-  city: '',
-  availableTerrain: '',
-  runningSince: '',
-  weeklyKm: '',
-  longestRunKm: '',
-  runsPerWeek: '',
-  time5k: '',
-  time10k: '',
-  timeHalfMarathon: '',
-  timeMarathon: '',
-  formScore: '',
-  afterBreak: 'no',
-  breakDuration: '',
-  goalDistance: '',
-  raceDate: '',
-  goalTime: '',
-  goalPriority: '1',
-  availableDays: [],
-  maxTrainingMinutes: '',
-  unavailableDays: '',
-  watch: '',
-  heartRateMonitor: '',
-  treadmill: 'no',
-  gym: 'no',
-  terrainAccess: '',
-  currentPain: '',
-  injuryHistory: '',
-  painDuringRun: '',
-  painAfterRun: '',
-  restingHr: '',
-  maxHr: '',
-  hasHrZones: 'no',
-  hrZone1: '',
-  hrZone2: '',
-  hrZone3: '',
-  hrZone4: '',
-  hrZone5: '',
-  preferredSurface: 'mixed',
-  trainingStyle: '',
-  doesStrengthCore: 'no',
-  sleepHours: '',
-  workType: 'mixed',
-  stressLevel: 'medium',
-}
-
-const steps = [
-  'Dane podstawowe',
-  'Doświadczenie biegowe',
-  'Wyniki',
-  'Cele',
-  'Dostępność',
-  'Sprzęt',
-  'Zdrowie',
-  'Tętno',
-  'Preferencje',
-  'Regeneracja',
-]
-
-const toNumber = (value: string): number | null => {
-  if (!value.trim()) return null
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : null
-}
 
 type OnboardingProps = {
   onCompleted?: () => void
 }
 
+const WEEK_DAYS = [
+  { id: 'mon', label: 'Pon' },
+  { id: 'tue', label: 'Wt' },
+  { id: 'wed', label: 'Sr' },
+  { id: 'thu', label: 'Czw' },
+  { id: 'fri', label: 'Pt' },
+  { id: 'sat', label: 'Sob' },
+  { id: 'sun', label: 'Nd' },
+]
+
+const SOURCE_OPTIONS: Array<{
+  id: Source
+  title: string
+  text: string
+}> = [
+  { id: 'strava', title: 'Strava', text: 'OAuth + synchronizacja aktywności' },
+  { id: 'garmin', title: 'Garmin', text: 'Connector Garmin Connect' },
+  { id: 'tcx', title: 'Pliki TCX', text: 'Upload historii treningów' },
+  { id: 'manual', title: 'Bez danych', text: 'Krótka ankieta diagnostyczna' },
+]
+
+const FUTURE_SOURCES = [
+  { title: 'Polar', text: 'AccessLink' },
+  { title: 'Suunto', text: 'Cloud API' },
+]
+
+const toNumber = (value: string): number | null => {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const parsed = Number(trimmed.replace(',', '.'))
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const parseDistanceKm = (goal: string): number | null => {
+  const lower = goal.toLowerCase()
+  if (lower.includes('polmaraton') || lower.includes('polmaratonu') || lower.includes('half')) return 21.1
+  if (lower.includes('półmaraton') || lower.includes('półmaratonu')) return 21.1
+  if (lower.includes('maraton')) return 42.2
+
+  const match = lower.match(/(\d+(?:[,.]\d+)?)\s*(km|k)\b/)
+  if (!match) return null
+
+  const parsed = Number(match[1].replace(',', '.'))
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+const deriveRunningDays = (countRaw: string, unavailableDays: string[]) => {
+  const count = Math.max(1, Math.min(7, toNumber(countRaw) ?? 3))
+  const available = WEEK_DAYS
+    .map((day) => day.id)
+    .filter((day) => !unavailableDays.includes(day))
+
+  return available.slice(0, Math.min(count, available.length || 1))
+}
+
 export default function Onboarding({ onCompleted }: OnboardingProps) {
-  const [form, setForm] = useState<OnboardingForm>(initialForm)
-  const [step, setStep] = useState(0)
+  const [phase, setPhase] = useState<'source' | 'questions'>('source')
+  const [source, setSource] = useState<Source | null>(null)
+  const [sourceStatus, setSourceStatus] = useState('')
+  const [sourceError, setSourceError] = useState('')
+  const [uploadedCount, setUploadedCount] = useState(0)
+  const [isSourceBusy, setIsSourceBusy] = useState(false)
+
+  const [goalText, setGoalText] = useState('')
+  const [raceDate, setRaceDate] = useState('')
+  const [currentPain, setCurrentPain] = useState<YesNo>('no')
+  const [painNote, setPainNote] = useState('')
+  const [trainingDays, setTrainingDays] = useState('4')
+  const [unavailableDays, setUnavailableDays] = useState<string[]>([])
+
+  const [lastRun, setLastRun] = useState<ManualLastRun>('last_30_days')
+  const [runsLast2Weeks, setRunsLast2Weeks] = useState('')
+  const [longestRunKm, setLongestRunKm] = useState('')
+  const [canRun30Min, setCanRun30Min] = useState<YesNo>('yes')
+
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [message, setMessage] = useState('')
-  const [error, setError] = useState('')
+  const [isSkipping, setIsSkipping] = useState(false)
+  const [formError, setFormError] = useState('')
 
-  const isLastStep = step === steps.length - 1
-  const progress = useMemo(() => Math.round(((step + 1) / steps.length) * 100), [step])
+  const distanceKm = useMemo(() => parseDistanceKm(goalText), [goalText])
+  const derivedRunningDays = useMemo(
+    () => deriveRunningDays(trainingDays, unavailableDays),
+    [trainingDays, unavailableDays],
+  )
 
-  const setField = <K extends keyof OnboardingForm>(key: K, value: OnboardingForm[K]) => {
-    setForm((prev) => ({ ...prev, [key]: value }))
+  const toggleUnavailableDay = (day: string) => {
+    setUnavailableDays((prev) =>
+      prev.includes(day) ? prev.filter((item) => item !== day) : [...prev, day],
+    )
   }
 
-  const toggleDay = (day: string) => {
-    setForm((prev) => {
-      const exists = prev.availableDays.includes(day)
-      return {
-        ...prev,
-        availableDays: exists
-          ? prev.availableDays.filter((d) => d !== day)
-          : [...prev.availableDays, day],
+  const connectStrava = async () => {
+    setSource('strava')
+    setSourceError('')
+    setSourceStatus('')
+    setIsSourceBusy(true)
+
+    try {
+      const response = await client.post<{ url?: string }>('/integrations/strava/connect')
+      const url = response.data.url
+      if (!url) {
+        setSourceStatus('Strava zwróciła pusty adres autoryzacji.')
+        return
       }
-    })
-  }
 
-  const buildPayload = () => {
-    const races = [
-      { distance: '5k', result: form.time5k || null },
-      { distance: '10k', result: form.time10k || null },
-      { distance: 'halfMarathon', result: form.timeHalfMarathon || null },
-      { distance: 'marathon', result: form.timeMarathon || null },
-    ].filter((r) => r.result)
-
-    return {
-      preferredRunDays: form.availableDays.join(','),
-      preferredSurface: form.preferredSurface,
-      goals: {
-        distance: form.goalDistance || null,
-        raceDate: form.raceDate || null,
-        goalTime: form.goalTime || null,
-        priority: toNumber(form.goalPriority),
-        formScore: toNumber(form.formScore),
-        trainingStyle: form.trainingStyle || null,
-      },
-      races,
-      availability: {
-        availableDays: form.availableDays,
-        unavailableDays: form.unavailableDays
-          .split(',')
-          .map((d) => d.trim())
-          .filter(Boolean),
-        maxTrainingMinutes: toNumber(form.maxTrainingMinutes),
-        runsPerWeek: toNumber(form.runsPerWeek),
-        weeklyKm: toNumber(form.weeklyKm),
-      },
-      equipment: {
-        watch: form.watch || null,
-        heartRateMonitor: form.heartRateMonitor || null,
-        treadmill: form.treadmill === 'yes',
-        gym: form.gym === 'yes',
-        terrainAccess: form.terrainAccess || null,
-        availableTerrain: form.availableTerrain || null,
-      },
-      health: {
-        currentPain: form.currentPain || null,
-        injuryHistory: form.injuryHistory || null,
-        painDuringRun: form.painDuringRun || null,
-        painAfterRun: form.painAfterRun || null,
-        afterBreak: form.afterBreak === 'yes',
-        breakDuration: form.breakDuration || null,
-      },
-      hrZones: {
-        restingHr: toNumber(form.restingHr),
-        maxHr: toNumber(form.maxHr),
-        hasHrZones: form.hasHrZones === 'yes',
-        zones: {
-          z1: form.hrZone1 || null,
-          z2: form.hrZone2 || null,
-          z3: form.hrZone3 || null,
-          z4: form.hrZone4 || null,
-          z5: form.hrZone5 || null,
-        },
-      },
-      constraints: {
-        age: toNumber(form.age),
-        heightCm: toNumber(form.heightCm),
-        weightKg: toNumber(form.weightKg),
-        gender: form.gender,
-        city: form.city || null,
-        runningSince: form.runningSince || null,
-        longestRunKm: toNumber(form.longestRunKm),
-        sleepHours: toNumber(form.sleepHours),
-        workType: form.workType,
-        stressLevel: form.stressLevel,
-        strengthCore: form.doesStrengthCore === 'yes',
-      },
+      window.location.href = url
+    } catch (error: any) {
+      const message = error?.response?.data?.message || error?.message || 'Nie udało się połączyć Stravy.'
+      setSourceError(message)
+    } finally {
+      setIsSourceBusy(false)
     }
   }
 
-  const onSubmit = async (event: FormEvent) => {
+  const connectGarmin = async () => {
+    setSource('garmin')
+    setSourceError('')
+    setSourceStatus('')
+    setIsSourceBusy(true)
+
+    try {
+      await client.post('/integrations/garmin/connect')
+      const sync = await client.post('/integrations/garmin/sync')
+      const imported = sync.data?.imported ?? 0
+      const deduped = sync.data?.deduped ?? 0
+      setSourceStatus(`Garmin: pobrano ${imported} nowych, ${deduped} już było.`)
+    } catch (error: any) {
+      const message = error?.response?.data?.error || error?.response?.data?.message || error?.message || 'Garmin connector niedostępny.'
+      setSourceError(message)
+    } finally {
+      setIsSourceBusy(false)
+    }
+  }
+
+  const uploadFiles = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
+    if (files.length === 0) return
+
+    setSource('tcx')
+    setSourceError('')
+    setSourceStatus('')
+    setIsSourceBusy(true)
+
+    let imported = 0
+    let duplicates = 0
+    let failed = 0
+
+    for (const file of files) {
+      try {
+        await uploadTcxFile(file)
+        imported += 1
+      } catch (error: any) {
+        if (error?.response?.status === 409) {
+          duplicates += 1
+        } else {
+          failed += 1
+        }
+      }
+    }
+
+    setUploadedCount((prev) => prev + imported + duplicates)
+    setSourceStatus(`TCX: dodano ${imported}, duplikaty ${duplicates}, błędy ${failed}.`)
+    if (failed > 0) {
+      setSourceError('Część plików nie przeszła importu TCX.')
+    }
+    setIsSourceBusy(false)
+    event.target.value = ''
+  }
+
+  const buildPayload = () => {
+    const hasPain = currentPain === 'yes'
+    const manualPath = source === 'manual'
+
+    const payload: Record<string, unknown> = {
+      goals: goalText.trim(),
+      availability: {
+        runningDays: derivedRunningDays,
+        requestedTrainingDays: toNumber(trainingDays),
+        unavailableDays,
+      },
+      health: {
+        currentPain: hasPain,
+        injuryHistory: hasPain && painNote.trim() ? [painNote.trim()] : [],
+      },
+      equipment: {
+        watch: source !== 'manual',
+        hrSensor: source !== 'manual',
+      },
+      constraints: JSON.stringify({
+        onboarding: {
+          source,
+          uploadedWorkoutsCount: uploadedCount,
+          confidenceHint: source === 'tcx' && uploadedCount < 6 ? 'low_data_sample' : 'standard',
+          goalClassification: {
+            distanceKm,
+            goalType: distanceKm ? 'race_distance' : 'open_text',
+            priority: 'A',
+          },
+          manual: manualPath
+            ? {
+                lastRun,
+                runsLast2Weeks: toNumber(runsLast2Weeks),
+                longestRunKm: toNumber(longestRunKm),
+                canRun30Min: canRun30Min === 'yes',
+              }
+            : null,
+        },
+      }),
+    }
+
+    if (raceDate && distanceKm) {
+      payload.races = [
+        {
+          date: raceDate,
+          distanceKm,
+          priority: 'A',
+        },
+      ]
+    }
+
+    return payload
+  }
+
+  const submitProfile = async (event: FormEvent) => {
     event.preventDefault()
-    setError('')
-    setMessage('')
+    setFormError('')
+
+    if (!source) {
+      setFormError('Wybierz źródło danych.')
+      setPhase('source')
+      return
+    }
+    if (!goalText.trim()) {
+      setFormError('Wpisz cel jednym zdaniem.')
+      return
+    }
+    if (derivedRunningDays.length === 0) {
+      setFormError('Zostaw co najmniej jeden dzień dostępny.')
+      return
+    }
+
     setIsSubmitting(true)
     try {
-      const payload = buildPayload()
-      await client.put('/me/profile', payload)
-      setMessage('Profil został zapisany.')
-      if (onCompleted) {
-        onCompleted()
-      }
-    } catch {
-      setError('Nie udało się zapisać formularza. Spróbuj ponownie.')
+      await client.put('/me/profile', buildPayload())
+      onCompleted?.()
+    } catch (error: any) {
+      const message = error?.response?.data?.message || error?.message || 'Nie udało się zapisać profilu.'
+      setFormError(message)
     } finally {
       setIsSubmitting(false)
     }
   }
 
+  const skipOnboarding = async () => {
+    setFormError('')
+    setIsSkipping(true)
+
+    try {
+      await client.put('/me/profile', {
+        goals: 'Pominieto onboarding',
+        availability: {
+          runningDays: ['mon', 'wed', 'fri'],
+          skipped: true,
+        },
+        health: {
+          currentPain: false,
+          injuryHistory: [],
+        },
+        equipment: {
+          watch: false,
+          hrSensor: false,
+        },
+        constraints: JSON.stringify({
+          onboarding: {
+            skipped: true,
+            source: 'skipped',
+            confidenceHint: 'missing_onboarding',
+            skippedAt: new Date().toISOString(),
+          },
+        }),
+      })
+      onCompleted?.()
+    } catch (error: any) {
+      const message = error?.response?.data?.message || error?.message || 'Nie udalo sie pominac ankiety.'
+      setFormError(message)
+    } finally {
+      setIsSkipping(false)
+    }
+  }
+
   return (
-    <form onSubmit={onSubmit} className="space-y-6 rounded border border-slate-200 p-6">
-      <div>
-        <p className="text-sm text-slate-600">
-          Krok {step + 1} z {steps.length}: {steps[step]}
-        </p>
-        <div className="mt-2 h-2 w-full rounded bg-slate-200">
-          <div className="h-2 rounded bg-slate-800" style={{ width: `${progress}%` }} />
+    <form onSubmit={submitProfile} className="space-y-6 rounded-xl border border-slate-800 bg-slate-900/60 p-6 text-slate-100 shadow-lg shadow-slate-950/30">
+      <div className="flex flex-col gap-3 border-b border-slate-800 pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-300">Onboarding</p>
+          <h1 className="mt-2 text-2xl font-semibold text-white">Skąd mamy pobrać Twoje treningi?</h1>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-lg border border-slate-700 bg-slate-950 p-1 text-sm">
+            <button
+              type="button"
+              onClick={() => setPhase('source')}
+              className={`rounded-md px-3 py-1.5 ${phase === 'source' ? 'bg-indigo-500 text-white' : 'text-slate-300'}`}
+            >
+              Źródło
+            </button>
+            <button
+              type="button"
+              onClick={() => source && setPhase('questions')}
+              className={`rounded-md px-3 py-1.5 ${phase === 'questions' ? 'bg-indigo-500 text-white' : 'text-slate-300'}`}
+            >
+              Pytania
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={skipOnboarding}
+            disabled={isSubmitting || isSkipping}
+            className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSkipping ? 'Pomijanie...' : 'Pomiń'}
+          </button>
         </div>
       </div>
 
-      {step === 0 && (
-        <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <input className="rounded border p-2" placeholder="Wiek" value={form.age} onChange={(e) => setField('age', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Wzrost (cm)" value={form.heightCm} onChange={(e) => setField('heightCm', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Masa ciała (kg)" value={form.weightKg} onChange={(e) => setField('weightKg', e.target.value)} />
-          <select className="rounded border p-2" value={form.gender} onChange={(e) => setField('gender', e.target.value as Gender)}>
-            <option value="female">Kobieta</option>
-            <option value="male">Mężczyzna</option>
-            <option value="other">Inna / nie podaję</option>
-          </select>
-        </section>
-      )}
+      {phase === 'source' && (
+        <section className="space-y-5">
+          <div className="grid gap-3 md:grid-cols-2">
+            {SOURCE_OPTIONS.map((option) => {
+              const active = source === option.id
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => {
+                    setSource(option.id)
+                    setSourceError('')
+                    setSourceStatus('')
+                  }}
+                  className={`min-h-28 rounded-lg border p-4 text-left transition ${
+                    active
+                      ? 'border-indigo-400 bg-indigo-500/15 text-white'
+                      : 'border-slate-700 bg-slate-950/60 text-slate-200 hover:border-slate-500'
+                  }`}
+                >
+                  <span className="text-lg font-semibold">{option.title}</span>
+                  <span className="mt-2 block text-sm text-slate-400">{option.text}</span>
+                </button>
+              )
+            })}
+          </div>
 
-      {step === 1 && (
-        <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <input className="rounded border p-2" placeholder="Od kiedy biegasz? (np. 2 lata)" value={form.runningSince} onChange={(e) => setField('runningSince', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Tygodniowy kilometraż" value={form.weeklyKm} onChange={(e) => setField('weeklyKm', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Najdłuższy bieg (km)" value={form.longestRunKm} onChange={(e) => setField('longestRunKm', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Liczba treningów/tydzień" value={form.runsPerWeek} onChange={(e) => setField('runsPerWeek', e.target.value)} />
-        </section>
-      )}
-
-      {step === 2 && (
-        <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <input className="rounded border p-2" placeholder="Czas 5 km (mm:ss)" value={form.time5k} onChange={(e) => setField('time5k', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Czas 10 km (mm:ss)" value={form.time10k} onChange={(e) => setField('time10k', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Czas półmaraton (hh:mm:ss)" value={form.timeHalfMarathon} onChange={(e) => setField('timeHalfMarathon', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Czas maraton (hh:mm:ss)" value={form.timeMarathon} onChange={(e) => setField('timeMarathon', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Forma (1-10)" value={form.formScore} onChange={(e) => setField('formScore', e.target.value)} />
-          <select className="rounded border p-2" value={form.afterBreak} onChange={(e) => setField('afterBreak', e.target.value as YesNo)}>
-            <option value="no">Bez przerwy</option>
-            <option value="yes">Po przerwie</option>
-          </select>
-          {form.afterBreak === 'yes' && (
-            <input className="rounded border p-2 md:col-span-2" placeholder="Długość przerwy (np. 3 tygodnie)" value={form.breakDuration} onChange={(e) => setField('breakDuration', e.target.value)} />
-          )}
-        </section>
-      )}
-
-      {step === 3 && (
-        <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <input className="rounded border p-2" placeholder="Docelowy dystans (np. półmaraton)" value={form.goalDistance} onChange={(e) => setField('goalDistance', e.target.value)} />
-          <input className="rounded border p-2" type="date" value={form.raceDate} onChange={(e) => setField('raceDate', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Cel czasowy (np. 1:39:00)" value={form.goalTime} onChange={(e) => setField('goalTime', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Priorytet (1-3)" value={form.goalPriority} onChange={(e) => setField('goalPriority', e.target.value)} />
-        </section>
-      )}
-
-      {step === 4 && (
-        <section className="space-y-3">
-          <div className="flex flex-wrap gap-3">
-            {DAYS.map((day) => (
-              <label key={day} className="inline-flex items-center gap-2 rounded border px-2 py-1">
-                <input type="checkbox" checked={form.availableDays.includes(day)} onChange={() => toggleDay(day)} />
-                {day}
-              </label>
+          <div className="grid gap-3 md:grid-cols-2">
+            {FUTURE_SOURCES.map((option) => (
+              <div key={option.title} className="min-h-20 rounded-lg border border-slate-800 bg-slate-950/40 p-4 text-slate-500">
+                <div className="text-base font-semibold">{option.title}</div>
+                <div className="mt-1 text-sm">{option.text}</div>
+              </div>
             ))}
           </div>
-          <input className="w-full rounded border p-2" placeholder="Maksymalny czas treningu (min)" value={form.maxTrainingMinutes} onChange={(e) => setField('maxTrainingMinutes', e.target.value)} />
-          <input className="w-full rounded border p-2" placeholder="Dni niedostępne (oddziel przecinkami)" value={form.unavailableDays} onChange={(e) => setField('unavailableDays', e.target.value)} />
-        </section>
-      )}
 
-      {step === 5 && (
-        <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <input className="rounded border p-2" placeholder="Zegarek (model lub brak)" value={form.watch} onChange={(e) => setField('watch', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Pomiar tętna (np. pas HR)" value={form.heartRateMonitor} onChange={(e) => setField('heartRateMonitor', e.target.value)} />
-          <select className="rounded border p-2" value={form.treadmill} onChange={(e) => setField('treadmill', e.target.value as YesNo)}>
-            <option value="yes">Bieżnia: tak</option>
-            <option value="no">Bieżnia: nie</option>
-          </select>
-          <select className="rounded border p-2" value={form.gym} onChange={(e) => setField('gym', e.target.value as YesNo)}>
-            <option value="yes">Siłownia: tak</option>
-            <option value="no">Siłownia: nie</option>
-          </select>
-          <input className="rounded border p-2 md:col-span-2" placeholder="Teren (np. las, asfalt, góry)" value={form.terrainAccess} onChange={(e) => setField('terrainAccess', e.target.value)} />
-        </section>
-      )}
-
-      {step === 6 && (
-        <section className="grid grid-cols-1 gap-3">
-          <input className="rounded border p-2" placeholder="Aktualne bóle / urazy" value={form.currentPain} onChange={(e) => setField('currentPain', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Historia kontuzji (12 miesięcy)" value={form.injuryHistory} onChange={(e) => setField('injuryHistory', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Ból podczas biegania?" value={form.painDuringRun} onChange={(e) => setField('painDuringRun', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Ból po biegu / rano?" value={form.painAfterRun} onChange={(e) => setField('painAfterRun', e.target.value)} />
-        </section>
-      )}
-
-      {step === 7 && (
-        <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <input className="rounded border p-2" placeholder="Tętno spoczynkowe" value={form.restingHr} onChange={(e) => setField('restingHr', e.target.value)} />
-          <input className="rounded border p-2" placeholder="Tętno maksymalne" value={form.maxHr} onChange={(e) => setField('maxHr', e.target.value)} />
-          <select className="rounded border p-2 md:col-span-2" value={form.hasHrZones} onChange={(e) => setField('hasHrZones', e.target.value as YesNo)}>
-            <option value="no">Brak stref HR</option>
-            <option value="yes">Mam strefy HR</option>
-          </select>
-          {form.hasHrZones === 'yes' && (
-            <>
-              <input className="rounded border p-2" placeholder="Strefa Z1" value={form.hrZone1} onChange={(e) => setField('hrZone1', e.target.value)} />
-              <input className="rounded border p-2" placeholder="Strefa Z2" value={form.hrZone2} onChange={(e) => setField('hrZone2', e.target.value)} />
-              <input className="rounded border p-2" placeholder="Strefa Z3" value={form.hrZone3} onChange={(e) => setField('hrZone3', e.target.value)} />
-              <input className="rounded border p-2" placeholder="Strefa Z4" value={form.hrZone4} onChange={(e) => setField('hrZone4', e.target.value)} />
-              <input className="rounded border p-2 md:col-span-2" placeholder="Strefa Z5" value={form.hrZone5} onChange={(e) => setField('hrZone5', e.target.value)} />
-            </>
+          {source === 'strava' && (
+            <div className="rounded-lg border border-slate-700 bg-slate-950/60 p-4">
+              <button
+                type="button"
+                onClick={connectStrava}
+                disabled={isSourceBusy}
+                className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                Polacz Strave
+              </button>
+            </div>
           )}
+
+          {source === 'garmin' && (
+            <div className="rounded-lg border border-slate-700 bg-slate-950/60 p-4">
+              <button
+                type="button"
+                onClick={connectGarmin}
+                disabled={isSourceBusy}
+                className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                Polacz Garmina
+              </button>
+            </div>
+          )}
+
+          {source === 'tcx' && (
+            <div className="rounded-lg border border-slate-700 bg-slate-950/60 p-4">
+              <label className="inline-flex cursor-pointer rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500">
+                <input
+                  type="file"
+                  accept=".tcx,application/vnd.garmin.tcx+xml"
+                  multiple
+                  className="hidden"
+                  onChange={uploadFiles}
+                  disabled={isSourceBusy}
+                />
+                Wgraj pliki TCX
+              </label>
+              <div className="mt-3 text-sm text-slate-400">Zaimportowane w onboardingu: {uploadedCount}</div>
+            </div>
+          )}
+
+          {source === 'manual' && (
+            <div className="rounded-lg border border-slate-700 bg-slate-950/60 p-4 text-sm text-slate-300">
+              Przejdziesz przez krótką diagnostykę bez danych treningowych.
+            </div>
+          )}
+
+          {(sourceStatus || sourceError) && (
+            <div className="space-y-2 text-sm">
+              {sourceStatus && <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-emerald-100">{sourceStatus}</div>}
+              {sourceError && <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-100">{sourceError}</div>}
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <button
+              type="button"
+              disabled={!source}
+              onClick={() => setPhase('questions')}
+              className="rounded-lg bg-indigo-500 px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+            >
+              Dalej
+            </button>
+          </div>
         </section>
       )}
 
-      {step === 8 && (
-        <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <select className="rounded border p-2" value={form.preferredSurface} onChange={(e) => setField('preferredSurface', e.target.value as Surface)}>
-            <option value="asphalt">Asfalt</option>
-            <option value="trail">Las / trail</option>
-            <option value="mixed">Mieszany</option>
-          </select>
-          <input className="rounded border p-2" placeholder="Krótkie szybsze / długie spokojne" value={form.trainingStyle} onChange={(e) => setField('trainingStyle', e.target.value)} />
-          <select className="rounded border p-2 md:col-span-2" value={form.doesStrengthCore} onChange={(e) => setField('doesStrengthCore', e.target.value as YesNo)}>
-            <option value="yes">Siła / core: tak</option>
-            <option value="no">Siła / core: nie</option>
-          </select>
+      {phase === 'questions' && (
+        <section className="space-y-5">
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2 md:col-span-2">
+              <span className="text-sm font-medium text-slate-300">Cel</span>
+              <textarea
+                value={goalText}
+                onChange={(event) => setGoalText(event.target.value)}
+                rows={3}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-indigo-400"
+                placeholder="Np. przebiec 10 km poniżej 50 minut"
+              />
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-slate-300">Data startu</span>
+              <input
+                type="date"
+                value={raceDate}
+                onChange={(event) => setRaceDate(event.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-indigo-400"
+              />
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-slate-300">Dni treningowe w tygodniu</span>
+              <input
+                inputMode="numeric"
+                value={trainingDays}
+                onChange={(event) => setTrainingDays(event.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-indigo-400"
+                placeholder="4"
+              />
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-slate-300">Czy coś teraz boli?</span>
+              <select
+                value={currentPain}
+                onChange={(event) => setCurrentPain(event.target.value as YesNo)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-indigo-400"
+              >
+                <option value="no">Nie</option>
+                <option value="yes">Tak</option>
+              </select>
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-slate-300">Opis bólu</span>
+              <input
+                value={painNote}
+                onChange={(event) => setPainNote(event.target.value)}
+                disabled={currentPain === 'no'}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-indigo-400 disabled:opacity-50"
+                placeholder="Lokalizacja / kiedy się pojawia"
+              />
+            </label>
+          </div>
+
+          <div className="space-y-3">
+            <div className="text-sm font-medium text-slate-300">Dni bez biegania</div>
+            <div className="flex flex-wrap gap-2">
+              {WEEK_DAYS.map((day) => {
+                const checked = unavailableDays.includes(day.id)
+                return (
+                  <label
+                    key={day.id}
+                    className={`inline-flex min-w-16 items-center justify-center rounded-lg border px-3 py-2 text-sm ${
+                      checked
+                        ? 'border-amber-400 bg-amber-500/10 text-amber-100'
+                        : 'border-slate-700 bg-slate-950 text-slate-300'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleUnavailableDay(day.id)}
+                      className="sr-only"
+                    />
+                    {day.label}
+                  </label>
+                )
+              })}
+            </div>
+            <div className="text-xs text-slate-500">Planowane dni: {derivedRunningDays.join(', ') || 'brak'}</div>
+          </div>
+
+          {source === 'manual' && (
+            <div className="grid gap-4 rounded-lg border border-slate-700 bg-slate-950/60 p-4 md:grid-cols-2">
+              <label className="space-y-2">
+                <span className="text-sm font-medium text-slate-300">Ostatni bieg</span>
+                <select
+                  value={lastRun}
+                  onChange={(event) => setLastRun(event.target.value as ManualLastRun)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-indigo-400"
+                >
+                  <option value="last_7_days">W ostatnich 7 dniach</option>
+                  <option value="last_30_days">W ostatnich 30 dniach</option>
+                  <option value="over_30_days">Ponad 30 dni temu</option>
+                  <option value="never">Nie biegalem regularnie</option>
+                </select>
+              </label>
+
+              <label className="space-y-2">
+                <span className="text-sm font-medium text-slate-300">Biegi w ostatnich 2 tygodniach</span>
+                <input
+                  inputMode="numeric"
+                  value={runsLast2Weeks}
+                  onChange={(event) => setRunsLast2Weeks(event.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-indigo-400"
+                  placeholder="3"
+                />
+              </label>
+
+              <label className="space-y-2">
+                <span className="text-sm font-medium text-slate-300">Najdłuższy bieg w miesiącu</span>
+                <input
+                  inputMode="decimal"
+                  value={longestRunKm}
+                  onChange={(event) => setLongestRunKm(event.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-indigo-400"
+                  placeholder="8 km"
+                />
+              </label>
+
+              <label className="space-y-2">
+                <span className="text-sm font-medium text-slate-300">30 minut bez przerwy</span>
+                <select
+                  value={canRun30Min}
+                  onChange={(event) => setCanRun30Min(event.target.value as YesNo)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-indigo-400"
+                >
+                  <option value="yes">Tak</option>
+                  <option value="no">Nie</option>
+                </select>
+              </label>
+            </div>
+          )}
+
+          {formError && (
+            <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-100">
+              {formError}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <button
+              type="button"
+              onClick={() => setPhase('source')}
+              className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-slate-500"
+            >
+              Wstecz
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+            >
+              {isSubmitting ? 'Zapisywanie...' : 'Zapisz profil'}
+            </button>
+          </div>
         </section>
       )}
-
-      {step === 9 && (
-        <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <input className="rounded border p-2" placeholder="Sen (h / noc)" value={form.sleepHours} onChange={(e) => setField('sleepHours', e.target.value)} />
-          <select className="rounded border p-2" value={form.workType} onChange={(e) => setField('workType', e.target.value as WorkType)}>
-            <option value="sedentary">Praca siedząca</option>
-            <option value="physical">Praca fizyczna</option>
-            <option value="mixed">Praca mieszana</option>
-          </select>
-          <select className="rounded border p-2 md:col-span-2" value={form.stressLevel} onChange={(e) => setField('stressLevel', e.target.value as StressLevel)}>
-            <option value="low">Stres niski</option>
-            <option value="medium">Stres średni</option>
-            <option value="high">Stres wysoki</option>
-          </select>
-        </section>
-      )}
-
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      {message && <p className="text-sm text-emerald-700">{message}</p>}
-
-      <div className="flex items-center justify-between">
-        <button
-          type="button"
-          className="rounded border px-4 py-2 disabled:opacity-50"
-          disabled={step === 0}
-          onClick={() => setStep((prev) => Math.max(0, prev - 1))}
-        >
-          Wstecz
-        </button>
-
-        {isLastStep ? (
-          <button className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-50" type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Zapisywanie...' : 'Zapisz onboarding'}
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="rounded bg-slate-900 px-4 py-2 text-white"
-            onClick={() => setStep((prev) => Math.min(steps.length - 1, prev + 1))}
-          >
-            Dalej
-          </button>
-        )}
-      </div>
     </form>
   )
 }

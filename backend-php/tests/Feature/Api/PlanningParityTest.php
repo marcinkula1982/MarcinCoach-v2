@@ -4,6 +4,7 @@ namespace Tests\Feature\Api;
 
 use App\Models\User;
 use App\Models\Workout;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -70,38 +71,42 @@ class PlanningParityTest extends TestCase
 
     public function test_weekly_plan_uses_total_workouts_from_php_training_signals_contract(): void
     {
-        Workout::create([
-            'user_id' => 1,
-            'action' => 'save',
-            'kind' => 'training',
-            'summary' => ['startTimeIso' => '2026-04-18T10:00:00Z', 'durationSec' => 1800, 'distanceM' => 5000, 'intensity' => 20],
-            'source' => 'manual',
-            'dedupe_key' => 'planning-contract-freeze-1',
-        ]);
-        Workout::create([
-            'user_id' => 1,
-            'action' => 'save',
-            'kind' => 'training',
-            'summary' => ['startTimeIso' => '2026-04-19T10:00:00Z', 'durationSec' => 2000, 'distanceM' => 5500, 'intensity' => 25],
-            'source' => 'manual',
-            'dedupe_key' => 'planning-contract-freeze-2',
-        ]);
-        Workout::create([
-            'user_id' => 1,
-            'action' => 'save',
-            'kind' => 'training',
-            'summary' => ['startTimeIso' => '2026-04-20T10:00:00Z', 'durationSec' => 2100, 'distanceM' => 5600, 'intensity' => 30],
-            'source' => 'manual',
-            'dedupe_key' => 'planning-contract-freeze-3',
-        ]);
+        Carbon::setTestNow(Carbon::parse('2026-04-21T12:00:00Z'));
 
-        $plan = $this->getJson('/api/weekly-plan?days=28');
-        $plan->assertOk();
+        try {
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => ['startTimeIso' => '2026-04-18T10:00:00Z', 'durationSec' => 1800, 'distanceM' => 5000, 'intensity' => 20],
+                'source' => 'manual',
+                'dedupe_key' => 'planning-contract-freeze-1',
+            ]);
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => ['startTimeIso' => '2026-04-19T10:00:00Z', 'durationSec' => 2000, 'distanceM' => 5500, 'intensity' => 25],
+                'source' => 'manual',
+                'dedupe_key' => 'planning-contract-freeze-2',
+            ]);
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => ['startTimeIso' => '2026-04-20T10:00:00Z', 'durationSec' => 2100, 'distanceM' => 5600, 'intensity' => 30],
+                'source' => 'manual',
+                'dedupe_key' => 'planning-contract-freeze-3',
+            ]);
 
-        $sessions = $plan->json('sessions');
-        $qualityCount = count(array_filter($sessions, fn ($s) => ($s['type'] ?? null) === 'quality'));
-        $this->assertGreaterThanOrEqual(1, $qualityCount);
-        $this->assertContains('surface_constraint', $plan->json('appliedAdjustmentsCodes'));
+            $plan = $this->getJson('/api/weekly-plan?days=28');
+            $plan->assertOk();
+
+            $this->assertGreaterThanOrEqual(1, (int) $plan->json('summary.qualitySessions'));
+            $this->assertContains('surface_constraint', $plan->json('appliedAdjustmentsCodes'));
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_post_race_week_blocks_quality_in_weekly_plan(): void
