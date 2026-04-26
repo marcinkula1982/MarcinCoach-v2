@@ -44,10 +44,12 @@ export async function garminConnect(
 export async function garminSync(
   fromIso?: string,
   toIso?: string,
+  activityType?: string | null,
 ): Promise<GarminSyncResponse> {
   const res = await client.post<GarminSyncResponse>('/integrations/garmin/sync', {
     fromIso: fromIso ?? null,
     toIso: toIso ?? null,
+    activityType: activityType ?? null,
   })
   return res.data
 }

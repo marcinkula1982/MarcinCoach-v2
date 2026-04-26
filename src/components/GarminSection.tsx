@@ -32,6 +32,7 @@ export default function GarminSection({ refreshToken }: Props) {
 
   // sync
   const [syncDays, setSyncDays] = useState(30)
+  const [syncActivityType, setSyncActivityType] = useState<string>('running')
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<GarminSyncResponse | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -81,7 +82,7 @@ export default function GarminSection({ refreshToken }: Props) {
       const now = new Date()
       const from = new Date(now)
       from.setDate(from.getDate() - syncDays)
-      const result = await garminSync(from.toISOString(), now.toISOString())
+      const result = await garminSync(from.toISOString(), now.toISOString(), syncActivityType || null)
       setSyncResult(result)
     } catch (err: any) {
       const msg =
@@ -179,6 +180,18 @@ export default function GarminSection({ refreshToken }: Props) {
                 {SYNC_OPTIONS.map((o) => (
                   <option key={o.days} value={o.days}>{o.label}</option>
                 ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="block text-sm text-slate-300">Typ aktywności</label>
+              <select
+                value={syncActivityType}
+                onChange={(e) => setSyncActivityType(e.target.value)}
+                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-indigo-400 focus:outline-none"
+              >
+                <option value="running">Bieganie</option>
+                <option value="cycling">Kolarstwo</option>
+                <option value="">Wszystkie</option>
               </select>
             </div>
             <button

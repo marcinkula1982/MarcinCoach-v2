@@ -881,7 +881,7 @@ const App = () => {
           </>
         ) : (
           <div className="mt-10 rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-8 text-center text-slate-300">
-            Zaloguj się, aby korzystać z edytora i listy treningów.
+            Zaloguj si\u0119, aby korzysta\u0107 z edytora i listy trening\u00f3w.
           </div>
         )}
       </div>

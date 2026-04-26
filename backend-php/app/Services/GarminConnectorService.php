@@ -22,12 +22,13 @@ class GarminConnectorService
     /**
      * @return array{ok:bool,payload:array<string,mixed>}
      */
-    public function sync(int $userId, ?string $fromIso, ?string $toIso): array
+    public function sync(int $userId, ?string $fromIso, ?string $toIso, ?string $activityType = null): array
     {
         return $this->post('/v1/garmin/sync', [
-            'userRef' => (string) $userId,
-            'fromIso' => $fromIso,
-            'toIso' => $toIso,
+            'userRef'      => (string) $userId,
+            'fromIso'      => $fromIso,
+            'toIso'        => $toIso,
+            'activityType' => $activityType,
         ]);
     }
 
@@ -93,6 +94,4 @@ class GarminConnectorService
         if (is_array($json) && isset($json['detail']) && is_array($json['detail'])) {
             return $json['detail'];
         }
-        return is_array($json) ? $json : ['error' => 'GARMIN_CONNECTOR_REQUEST_FAILED'];
-    }
-}
+        return is

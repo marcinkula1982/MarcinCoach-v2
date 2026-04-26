@@ -128,8 +128,9 @@ class IntegrationsController extends Controller
     public function garminSync(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'fromIso' => ['nullable', 'date'],
-            'toIso' => ['nullable', 'date'],
+            'fromIso'      => ['nullable', 'date'],
+            'toIso'        => ['nullable', 'date'],
+            'activityType' => ['nullable', 'string', 'max:64'],
         ]);
         $userId = $this->authUserId($request);
         $syncRun = IntegrationSyncRun::create([
@@ -138,7 +139,12 @@ class IntegrationsController extends Controller
             'status' => 'started',
             'started_at' => now(),
         ]);
-        $result = $this->garminConnectorService->sync($userId, $validated['fromIso'] ?? null, $validated['toIso'] ?? null);
+        $result = $this->garminConnectorService->sync(
+            $userId,
+            $validated['fromIso'] ?? null,
+            $validated['toIso'] ?? null,
+            $validated['activityType'] ?? null,
+        );
         if (!$result['ok']) {
             $syncRun->status = 'failed';
             $syncRun->error_code = (string) ($result['payload']['error'] ?? 'GARMIN_SYNC_FAILED');

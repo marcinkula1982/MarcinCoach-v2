@@ -255,6 +255,14 @@ def _normalize_activity(activity: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in item.items() if value not in (None, "")}
 
 
+def _filter_by_type(items: list[dict[str, Any]], activity_type: str | None) -> list[dict[str, Any]]:
+    """Client-side filter — Garmin API server-side filtering is unreliable."""
+    if not activity_type:
+        return items
+    needle = activity_type.lower()
+    return [item for item in items if (item.get("activityType") or "").lower() == needle]
+
+
 def _fetch_activities(client: Any, payload: SyncRequest) -> list[dict[str, Any]]:
     limit = _requested_limit(payload.limit)
     if payload.fromIso or payload.toIso:
@@ -267,12 +275,14 @@ def _fetch_activities(client: Any, payload: SyncRequest) -> list[dict[str, Any]]
             activitytype=payload.activityType,
             sortorder="asc",
         )
-        return [_normalize_activity(row) for row in raw[:limit] if isinstance(row, dict)]
+        items = [_normalize_activity(row) for row in raw if isinstance(row, dict)]
+        return _filter_by_type(items, payload.activityType)[:limit]
 
     raw = client.get_activities(0, limit, activitytype=payload.activityType)
     if not isinstance(raw, list):
         return []
-    return [_normalize_activity(row) for row in raw if isinstance(row, dict)]
+    items = [_normalize_activity(row) for row in raw if isinstance(row, dict)]
+    return _filter_by_type(items, payload.activityType)
 
 
 @app.post("/v1/garmin/connect/start")
