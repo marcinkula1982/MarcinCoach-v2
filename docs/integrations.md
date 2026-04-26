@@ -26,6 +26,20 @@ Onboarding data-first:
 | Suunto | Planowane | Suunto API Zone / partner program | Wymaga formalnosci partnerskich. |
 | Apple Watch / Health | Poza backendowym MVP | HealthKit tylko przez aplikacje iOS/watchOS lub eksport plikow | Brak prostego backendowego logowania do Apple Health. |
 
+## Garmin - status live
+
+2026-04-26 potwierdzono end-to-end live smoke wysylki zaplanowanego treningu do Garmin Connect:
+
+- endpoint connectora: `POST /v1/garmin/workouts`,
+- endpoint Laravel: `POST /api/integrations/garmin/workouts/send`,
+- testowy workout: `MarcinCoach TEST 2026-04-26`,
+- Garmin `workoutId`: `1548384239`,
+- status: `scheduled`,
+- data w kalendarzu Garmin: `2026-04-26`,
+- potwierdzenie uzytkownika: trening widoczny/dziala na koncie Garmin.
+
+To potwierdza, ze `python-garminconnect` w obecnej integracji obsluguje nie tylko sync aktywnosci do MarcinCoach, ale tez upload zaplanowanego treningu do Garmin Connect i przypisanie go do kalendarza. Nadal jest to nieoficjalna sciezka Garmin Connect, wiec utrzymujemy jawne ryzyka auth/MFA/rate limit/regulaminu.
+
 ## Minimalna probka danych
 
 Dla pierwszego sensownego profilu:

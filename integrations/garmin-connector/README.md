@@ -93,12 +93,12 @@ curl -X POST http://127.0.0.1:8090/v1/garmin/sync ^
 
 ## Production smoke
 
-Verified on IQHost on 2026-04-26 in read-only live mode:
+Verified on IQHost on 2026-04-26 in live mode:
 
 - `POST /v1/garmin/connect/start` -> HTTP 200, `connectorMode=live`.
 - `POST /v1/garmin/sync` for the last 30 days -> HTTP 200, 9 normalized activities.
 - `GET /v1/garmin/accounts/1/status` -> HTTP 200, `connected=true`, `connectorMode=live`.
 - `GET /v1/garmin/activities/{activityId}/download?userRef=1&format=tcx` -> HTTP 200, TCX XML downloaded.
-- `POST /v1/garmin/workouts` -> implemented for workout upload + calendar scheduling; live smoke should be run with a disposable planned workout before production use.
+- `POST /v1/garmin/workouts` -> HTTP 200, `status=scheduled`; disposable workout `MarcinCoach TEST 2026-04-26`, `workoutId=1548384239`, `scheduledDate=2026-04-26`; user confirmed it appears/works in Garmin Connect.
 
 `GARMIN_MFA_CODE` was not required during this smoke and is not kept in the connector env after login. Credentials and tokens stay outside git.

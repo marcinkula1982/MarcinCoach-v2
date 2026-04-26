@@ -24,6 +24,7 @@ Zasada:
 | 2026-04-26 | Repo cleanup | Usunieto legacy backend Node/Nest z aktywnego repo oraz parity Node-vs-PHP | `git ls-files` dla legacy backendu, `dist` i starych skryptow parity zwraca pusto. |
 | 2026-04-26 | Frontend | Usunieto stara widoczna tozsamosc toolkitowa i stare prefiksy kluczy sesji z aktywnego kodu | Aktywny grep dla dawnych nazw produktu i dawnych kluczy sesji zwraca pusto. |
 | 2026-04-26 | Backend integracje | Naprawiono `GarminConnectorService.php` i dopuszczono connect Garmina bez body, gdy credentials sa po stronie connectora/env | `php artisan test --filter=IntegrationsParityTest` -> 3 passed; pelny suite -> 260 passed. |
+| 2026-04-26 | Garmin workout export | Dodano wysylke zaplanowanych treningow z weekly plan do Garmin Connect i przycisk `Wyslij do urzadzenia` w UI | Live smoke IQHost: `POST /v1/garmin/workouts` -> `scheduled`; test `MarcinCoach TEST 2026-04-26`, `workoutId=1548384239`, potwierdzone na koncie Garmin. |
 
 ## Decyzja o starej ankiecie
 
@@ -54,7 +55,7 @@ Aktualny onboarding:
 | M4 - deeper adaptation / alerting | WYKONANE | `TrainingAdjustmentsService`, `TrainingAlertsV1Service`, testy unit/feature alertow i adjustmentow | Adaptacje maja typy, confidence i reguly trendowe; publiczny kontrakt ukrywa pola debugowe. |
 | M3/M4 hardening UX | CZESCIOWO | backend gotowy, ale UX nie pokazuje jeszcze pelnego trace decyzji | Do dopracowania: ekspozycja blokow, alertow, uzasadnien i scenariusze manual smoke. |
 | M2 deeper data | PLANOWANE | brak FIT/GPX/cadence/power/elevation/pace-zones w aktualnym MVP | Kolejny pakiet po hardeningu M3/M4. |
-| M5 - integracje sportowe produkcyjne | CZESCIOWO | trasy Strava/Garmin sa w Laravel; lokalne testy integracji przechodza; oficjalne Polar/Suunto jeszcze nie | Strava ma sciezke OAuth. Garmin connector dziala w trybie `live` na `python-garminconnect`; to nie jest oficjalny Garmin Activity API. Adapter pozostaje sciezka MVP z jawnie zaakceptowanym ryzykiem nieoficjalnego logowania. |
+| M5 - integracje sportowe produkcyjne | CZESCIOWO | trasy Strava/Garmin sa w Laravel; lokalne testy integracji przechodza; Garmin live smoke potwierdzil sync aktywnosci, download TCX i upload zaplanowanego workoutu; oficjalne Polar/Suunto jeszcze nie | Strava ma sciezke OAuth. Garmin connector dziala w trybie `live` na `python-garminconnect`; to nie jest oficjalny Garmin Activity API. Adapter pozostaje sciezka MVP z jawnie zaakceptowanym ryzykiem nieoficjalnego logowania. |
 | M6 - AI provider hardening | CZESCIOWO | `/api/ai/plan`, `/api/ai/insights`, feedback-v2 AI endpointy istnieja; env moze dzialac jako stub | Do dopracowania provider OpenAI, limity, cache i observability produkcyjne. |
 
 ## Aktualne rozwiazania technologiczne
@@ -96,7 +97,7 @@ Te endpointy istnieja w Laravelze, ale frontend nie pokazuje jeszcze pelnego UX/
 |---|---|---|---|---|---|
 | Upload plikow | Obowiazkowy fallback | import plikow FIT/TCX/GPX; obecnie TCX jest wdrozony, FIT/GPX planowane | treningi, czas, dystans, HR, tempo, docelowo cadence/power/elevation | niezalezny od API dostawcow; wymaga parserow i cleaning rules | lokalny kontrakt `POST /api/workouts/upload` i `POST /api/workouts/import` |
 | Strava | Na start / czesciowo wdrozone | oficjalne OAuth2, token exchange, refresh token, sync aktywnosci | zakresy `activity:read`, `activity:read_all`; aktywnosci uzytkownika | wymagane pilnowanie scope, prywatnosci i zasad Stravy | https://developers.strava.com/docs/authentication/ |
-| Garmin | Na start jako wysokie ryzyko / read-only live smoke wykonany | **Kod aktualnie uzywa zewnetrznego connectora** `GARMIN_CONNECTOR_BASE_URL` / `GARMIN_CONNECTOR_API_KEY`, opartego na `python-garminconnect==0.3.3`, z trybem `stub/live`; oficjalna alternatywa to Garmin Connect Developer Program / Activity API dla approved business developers | Connector zwraca znormalizowane aktywnosci do importu i ma endpoint download FIT/TCX/GPX/KML/CSV; smoke IQHost pobral 9 aktywnosci z ostatnich 30 dni i TCX jednej aktywnosci | To nadal nieoficjalna sciezka z ryzykiem auth/MFA/rate limit/regulaminu; upload treningow i Garmin Calendar sa poza obecnym zakresem. | https://developer.garmin.com/gc-developer-program/activity-api/ |
+| Garmin | Na start jako wysokie ryzyko / live smoke wykonany | **Kod aktualnie uzywa zewnetrznego connectora** `GARMIN_CONNECTOR_BASE_URL` / `GARMIN_CONNECTOR_API_KEY`, opartego na `python-garminconnect==0.3.3`, z trybem `stub/live`; oficjalna alternatywa to Garmin Connect Developer Program / Activity API dla approved business developers | Connector zwraca znormalizowane aktywnosci do importu, ma endpoint download FIT/TCX/GPX/KML/CSV oraz endpoint uploadu zaplanowanych workoutow; smoke IQHost pobral 9 aktywnosci z ostatnich 30 dni, TCX jednej aktywnosci i zaplanowal testowy workout `1548384239` w kalendarzu Garmin | To nadal nieoficjalna sciezka z ryzykiem auth/MFA/rate limit/regulaminu; funkcja "wyslij do urzadzenia" jest wdrozona jako MVP. | https://developer.garmin.com/gc-developer-program/activity-api/ |
 | Polar | Kolejny etap | oficjalne AccessLink API v3, OAuth2, register user, pull notifications/webhooki | exercises, FIT, TCX, GPX, daily activity, sleep, HR | wymaga rejestracji klienta i obslugi rate limitow oraz webhook signature | https://www.polar.com/accesslink-api/ |
 | Suunto | Kolejny etap po akceptacji | oficjalne Suunto API Zone / partner program | transfer danych treningowych z Suunto App do aplikacji | wymagana akceptacja partner program; nie blokuje MVP | https://apizone.suunto.com/apis |
 | Apple Watch / Apple Health | Nie jako backend cloud API w MVP | HealthKit przez aplikacje iOS/watchOS z lokalna zgoda uzytkownika; alternatywnie eksport plikow lub sync przez Strava | dane HealthKit i workouty na urzadzeniu Apple | brak prostego backendowego logowania do Apple Health; osobny produkt iOS | https://developer.apple.com/documentation/healthkit |
@@ -126,24 +127,30 @@ Wszystkie pozostale dokumenty `.md` / `.txt` z poprzedniego katalogu `docs/` ora
 
 ## Aktualna kolejnosc dalszych prac
 
-1. Smoke produkcji core flow:
+1. Fundament provider-neutral analytics:
+   - F1: kontrakty DTO + pusty `UserTrainingAnalysisService`,
+   - F2: `WorkoutFactsExtractor` z istniejacych `Workout` + raw TCX,
+   - F3: agregaty: load 7d/28d, ACWR, regularnosc, status stref HR,
+   - F4: endpoint `GET /api/me/training-analysis` + cache,
+   - F5: onboardingowa laurka oparta tylko na faktach.
+2. Smoke produkcji core flow:
    - register/login/profile,
    - import/upload treningu,
    - training signals/context/adjustments,
    - weekly plan,
    - onboarding skip i normalny zapis profilu.
-2. M3/M4 hardening UX:
+3. M3/M4 hardening UX:
    - ekspozycja `blockContext`,
    - widoczne alerty i decision trace,
    - scenariusze reczne: powrot po przerwie, load spike, taper, chroniczne niedowykonanie.
-3. M2 deeper data:
+4. M2 deeper data:
    - FIT/GPX,
    - moving time,
    - cadence, power, elevation,
    - pace-zones per user.
-4. M5/M6:
+5. M5/M6:
    - produkcyjne credentials i smoke Strava,
-   - Garmin: utrzymac read-only MVP connectora, dodac monitoring/rate-limit handling i dopiero pozniej rozwazyc upload planow,
+   - Garmin: utrzymac connector MVP, dodac monitoring/rate-limit/MFA handling i stabilizacje uploadu zaplanowanych treningow,
    - Polar/Suunto,
    - AI provider hardening, rate limit, cache, observability.
 
@@ -153,7 +160,7 @@ Wszystkie pozostale dokumenty `.md` / `.txt` z poprzedniego katalogu `docs/` ora
 |---|---|
 | Lokalny backend test suite | `php artisan test` -> `260 passed, 1240 assertions` |
 | Garmin connector stub smoke | FastAPI `TestClient` -> `connect/start`, `sync`, `status` HTTP 200 |
-| Garmin connector live smoke IQHost | `connect/start` -> HTTP 200; `sync` ostatnich 30 dni -> 9 aktywnosci; `status` -> `connected=true`; download TCX jednej aktywnosci -> HTTP 200, 464313 B; `GARMIN_MFA_CODE` nie jest trzymany po logowaniu |
+| Garmin connector live smoke IQHost | `connect/start` -> HTTP 200; `sync` ostatnich 30 dni -> 9 aktywnosci; `status` -> `connected=true`; download TCX jednej aktywnosci -> HTTP 200, 464313 B; `POST /v1/garmin/workouts` -> `scheduled`, `workoutId=1548384239`, kalendarz `2026-04-26`; `GARMIN_MFA_CODE` nie jest trzymany po logowaniu |
 | Frontend build | `npm run build` -> OK |
 | Lokalna lista tras API | `php artisan route:list --path=api` -> 43 trasy |
 | Produkcyjna lista tras API | Historycznie: SSH IQHost `php artisan route:list --path=api` -> 42 trasy; do ponowienia przy kolejnym smoke produkcyjnym. |

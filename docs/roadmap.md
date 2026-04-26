@@ -6,6 +6,19 @@ Po zrealizowaniu funkcjonalnosci nie dopisuj jej tutaj jako historii. Przenies j
 
 ## Najblizsza kolejnosc
 
+0. Fundament provider-neutral analytics (priorytet):
+   - zasada: importer provider-specific -> `WorkoutFacts` -> `UserTrainingAnalysis` -> AI / plan / alerty / feedback,
+   - backend liczy fakty; OpenAI tylko ubiera gotowy pakiet faktow w narracje,
+   - strefy HR zawsze maja jawny status: `known | derived | estimated | missing`,
+   - plan tygodniowy korzysta z `UserTrainingAnalysis` + ankiety/celow/ograniczen, nie z luznego tekstu AI,
+   - F1: kontrakty DTO + szkielet `UserTrainingAnalysisService` (bez logiki),
+   - F2: `WorkoutFactsExtractor` z istniejacych `Workout` + raw TCX,
+   - F3: realne agregaty (load 7d/28d, ACWR, regularnosc, status stref HR),
+   - F4: endpoint `GET /api/me/training-analysis` + cache + snapshot w bazie,
+   - F5: laurka onboardingowa na nowym kontrakcie,
+   - F6: migracja `WeeklyPlanService` na nowy wsad,
+   - F7: alerty i feedback-v2 na nowym kontrakcie, oznaczenie starych sciezek `@deprecated`.
+
 1. Produkcyjny smoke po porzadkach repo:
    - register/login/profile,
    - import/upload treningu,
