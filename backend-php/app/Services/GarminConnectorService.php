@@ -10,13 +10,20 @@ class GarminConnectorService
     /**
      * @return array{ok:bool,payload:array<string,mixed>}
      */
-    public function startConnect(int $userId, string $email, string $password): array
+    public function startConnect(int $userId, ?string $email = null, ?string $password = null): array
     {
-        return $this->post('/v1/garmin/connect/start', [
+        $payload = [
             'userRef'  => (string) $userId,
-            'email'    => $email,
-            'password' => $password,
-        ]);
+        ];
+
+        if ($email !== null && $email !== '') {
+            $payload['email'] = $email;
+        }
+        if ($password !== null && $password !== '') {
+            $payload['password'] = $password;
+        }
+
+        return $this->post('/v1/garmin/connect/start', $payload);
     }
 
     /**
@@ -94,4 +101,13 @@ class GarminConnectorService
         if (is_array($json) && isset($json['detail']) && is_array($json['detail'])) {
             return $json['detail'];
         }
-        return is
+        if (is_array($json)) {
+            return $json;
+        }
+
+        return [
+            'error' => 'GARMIN_CONNECTOR_FAILED',
+            'message' => $response->body(),
+        ];
+    }
+}

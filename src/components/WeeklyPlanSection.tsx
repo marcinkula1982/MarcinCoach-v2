@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { hasStoredSession } from '../api/client'
 import { fetchWeeklyPlan } from '../api/workouts'
 import type { WeeklyPlan, TrainingDay } from '../types/weekly-plan'
 
@@ -94,10 +95,7 @@ export default function WeeklyPlanSection({ refreshToken = 0 }: WeeklyPlanSectio
   }
 
   useEffect(() => {
-    const sessionToken = localStorage.getItem('tcx-session-token')
-    const loggedInUser = localStorage.getItem('tcx-username')
-    
-    if (loggedInUser && sessionToken) {
+    if (hasStoredSession()) {
       loadWeeklyPlan()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

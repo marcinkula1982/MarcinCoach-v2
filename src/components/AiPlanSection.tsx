@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { fetchAiPlan } from '../api/ai-plan'
+import { getStoredSessionToken } from '../api/client'
 import type { AiPlanResponse } from '../types/ai-plan'
 
 const dayToPl = (day: string): string => {
@@ -55,7 +56,7 @@ export default function AiPlanSection({ refreshToken = 0 }: AiPlanSectionProps) 
   }
 
   useEffect(() => {
-    const sessionToken = localStorage.getItem('tcx-session-token')
+    const sessionToken = getStoredSessionToken()
     if (sessionToken) {
       load()
     }

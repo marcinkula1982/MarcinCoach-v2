@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import type { ChangeEvent } from 'react'
-import { clearSessionHeaders } from './api/client'
+import {
+  AUTH_LOGOUT_EVENT,
+  clearSessionHeaders,
+  getStoredSessionToken,
+  getStoredUsername,
+  hasStoredSession,
+} from './api/client'
 import { computeMetrics } from './utils/metrics'
 import { parseTcx } from './utils/tcxParser'
 import type {
@@ -110,13 +116,13 @@ const useTrimmedSelection = (parsed: ParsedTcx | null, startIndex: number, endIn
 const App = () => {
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string
   const [username, setUsername] = useState<string>(() => {
-    return localStorage.getItem('tcx-username') || ''
+    return getStoredUsername() || ''
   })
   const [password, setPassword] = useState<string>('')
   const usernameInputRef = useRef<HTMLInputElement>(null)
   const passwordInputRef = useRef<HTMLInputElement>(null)
   const [loggedInUser, setLoggedInUser] = useState<string | null>(() => {
-    return localStorage.getItem('tcx-username') || null
+    return getStoredUsername()
   })
   const [currentFileName, setCurrentFileName] = useState<string | null>(null)
   const [currentFile, setCurrentFile] = useState<File | null>(null)
@@ -254,9 +260,7 @@ const App = () => {
   )
 
   const refreshOnboardingStatus = useCallback(async () => {
-    const t = localStorage.getItem('tcx-session-token')
-    const u = localStorage.getItem('tcx-username')
-    if (!t || !u) {
+    if (!hasStoredSession()) {
       setOnboardingCompleted(null)
       return
     }
@@ -272,10 +276,7 @@ const App = () => {
   }, [])
 
   useEffect(() => {
-    const t = localStorage.getItem('tcx-session-token')
-    const u = localStorage.getItem('tcx-username')
-
-    if (!t || !u) {
+    if (!hasStoredSession()) {
       setWorkouts([])
       return
     }
@@ -309,8 +310,8 @@ const App = () => {
 
   useEffect(() => {
     const onUnauthorized = () => handleLogout()
-    window.addEventListener('tcx-auth-logout', onUnauthorized)
-    return () => window.removeEventListener('tcx-auth-logout', onUnauthorized)
+    window.addEventListener(AUTH_LOGOUT_EVENT, onUnauthorized)
+    return () => window.removeEventListener(AUTH_LOGOUT_EVENT, onUnauthorized)
   }, [handleLogout])
 
   const handleLogin = async () => {
@@ -331,9 +332,7 @@ const App = () => {
   }
 
   const handleSaveToBackend = async () => {
-    const t = localStorage.getItem('tcx-session-token')
-    const u = localStorage.getItem('tcx-username')
-    if (!t || !u) {
+    if (!getStoredSessionToken() || !getStoredUsername()) {
       console.error('Not logged in - cannot save workout')
       return
     }
@@ -566,7 +565,7 @@ const App = () => {
               <>
             <header
               className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
-              aria-label="TCX workspace"
+              aria-label="MarcinCoach workout workspace"
             >
               <div>
                 <div className="flex flex-col gap-1">
@@ -574,10 +573,10 @@ const App = () => {
                     Ten konkretny trening
                   </div>
                   <h1 className="text-3xl font-bold leading-tight text-white sm:text-4xl">
-                    TCX Toolkit
+                    MarcinCoach
                   </h1>
                   <p className="text-sm text-slate-400">
-                    Podgląd i edycja pojedynczego TCX (oddzielone od analityki historycznej).
+                    Treningi, plan tygodniowy i sygnały adaptacji w jednym miejscu.
                   </p>
                 </div>
                 {(currentFileName || currentWorkoutDate) && (
@@ -602,7 +601,7 @@ const App = () => {
                   </div>
                 )}
                 <p className="mt-2 text-slate-300">
-                  Wszystko lokalnie w przeglądarce – wczytaj, przytnij, pobierz.
+                  Wgraj trening, sprawdź historię i odśwież plan na podstawie aktualnych danych.
                 </p>
               </div>
               <FilePicker onChange={handleFile} disabled={isParsing} />

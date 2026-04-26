@@ -1,0 +1,234 @@
+> HISTORYCZNE - nie uzywac jako aktualnej instrukcji.
+> Aktywne dokumenty: `docs/status.md` (wykonane funkcjonalnosci), `docs/roadmap.md` (plan), `docs/deploy/frontend-iqhost-deploy.txt` (deploy frontu), `docs/integrations.md` (integracje).
+# MarcinCoach v2 — integracje ze źródłami danych treningowych
+
+Status dokumentu: źródło wiedzy projektowej
+Rekomendowana ścieżka w repo: docs/integrations/training-data-sources.txt
+Data ustalenia: 2026-04-26
+
+## 1. Kontekst decyzji
+
+Po pierwszym uruchomieniu frontu pojawiła się potrzeba przebudowy onboardingu. Wniosek: start użytkownika nie powinien zaczynać się od długiej ankiety dla świadomych biegaczy, tylko od podłączenia źródła danych treningowych.
+
+MarcinCoach ma budować profil użytkownika przede wszystkim z realnych danych treningowych: aktywności z API lub plików FIT/TCX/GPX. Ankieta powinna uzupełniać tylko te informacje, których backend nie może wiarygodnie wyciągnąć z danych.
+
+## 2. Diff decyzji względem wcześniejszego podejścia
+
+### Było
+
+- Długi onboarding z pytaniami o doświadczenie, sen, stres, cele, tętno, preferencje, sprzęt i historię urazów.
+- Użytkownik miał ręcznie deklarować dużo parametrów, także takich, które system może później odczytać z danych treningowych.
+- Ryzyko: nowy użytkownik ma zerowe zaufanie do narzędzia i może nie chcieć odpowiadać na zbyt osobiste lub zbyt szczegółowe pytania.
+
+### Ma być
+
+- Pierwszy ekran onboardingu zaczyna się od pytania o źródło danych:
+  - Strava
+  - Garmin
+  - Polar
+  - Suunto
+  - upload plików FIT/TCX/GPX
+  - ścieżka ręczna, jeśli użytkownik nie ma danych
+- Backend najpierw próbuje zbudować profil na podstawie historii treningowej.
+- Ankieta startowa ma być minimalna i pytać tylko o rzeczy, których backend nie wie:
+  - cel użytkownika opisany tekstem,
+  - ewentualna data startu,
+  - aktualny ból/kontuzja,
+  - realna dostępność treningowa,
+  - ograniczenia dniowe.
+- Pełny profil ma być uzupełniany progresywnie, po zdobyciu zaufania użytkownika.
+
+## 3. Integracje — decyzje produktowe
+
+### 3.1 Strava
+
+Status: obowiązkowo na start.
+
+Charakter:
+- oficjalne API,
+- OAuth2,
+- stabilna i dokumentowana ścieżka integracji,
+- dobre źródło aktywności użytkownika.
+
+Ryzyka:
+- trzeba pilnować aktualnych zasad użycia API Stravy,
+- Strava ogranicza użycie danych do określonych przypadków i wymaga ostrożności przy funkcjach AI/ML.
+
+Decyzja:
+- wdrażać jako pierwsze oficjalne źródło danych.
+
+Źródła:
+- https://developers.strava.com/docs/reference/
+- https://developers.strava.com/docs/authentication/
+
+### 3.2 Garmin
+
+Status: obowiązkowo na start, ale jako integracja podwyższonego ryzyka.
+
+Charakter:
+- Garmin Connect nie daje powszechnie otwartego API dla każdego zewnętrznego dewelopera,
+- praktyczna ścieżka MVP: nieoficjalna biblioteka `python-garminconnect`,
+- biblioteka loguje się do Garmin Connect i pozwala pobierać dane z konta użytkownika.
+
+Link do repozytorium:
+- https://github.com/cyberjunky/python-garminconnect
+
+Plusy:
+- brak konieczności czekania na oficjalną akceptację partnerską Garmin,
+- projekt jest aktywnie używany przez społeczność,
+- pozwala testować realny import z Garmin Connect.
+
+Ryzyka:
+- nieoficjalna integracja,
+- możliwe zmiany logowania po stronie Garmin,
+- potencjalne problemy z MFA/2FA,
+- ryzyko zgodności z regulaminem Garmin,
+- nie traktować jako równie stabilnej jak Strava/Polar.
+
+Decyzja:
+- użyć w MVP, bo Garmin jest krytyczny dla grupy docelowej,
+- od początku oznaczyć w dokumentacji jako integrację nieoficjalną,
+- zachować upload FIT/TCX jako fallback.
+
+### 3.3 Polar
+
+Status: docelowo po Strava/Garmin, ale potencjalnie łatwa integracja.
+
+Charakter:
+- oficjalne Polar AccessLink API,
+- OAuth2,
+- dostęp do danych z Polar Flow,
+- dostępne przykłady implementacji.
+
+Decyzja:
+- dodać po stabilizacji Strava/Garmin,
+- traktować jako oficjalne i względnie bezpieczne źródło danych.
+
+Źródła:
+- https://www.polar.com/accesslink-api/
+- https://github.com/polarofficial/accesslink-example-python
+
+### 3.4 Suunto
+
+Status: docelowo po Strava/Garmin, średnia trudność.
+
+Charakter:
+- oficjalne Suunto Cloud API,
+- OAuth / konfiguracja aplikacji,
+- wymagany dostęp przez Suunto API Zone / partner program,
+- możliwość pobierania danych treningowych po akceptacji.
+
+Decyzja:
+- nie blokuje MVP,
+- zaplanować po Polarze lub równolegle, jeśli formalności będą proste.
+
+Źródła:
+- https://apizone.suunto.com/
+- https://apizone.suunto.com/how-to-start
+- https://apizone.suunto.com/apis
+
+### 3.5 Apple Watch / Apple Health
+
+Status: nie jako bezpośrednia integracja backendowa.
+
+Charakter:
+- Apple HealthKit działa lokalnie na iPhonie / Apple Watch,
+- brak prostego odpowiednika Garmin Connect jako publicznej chmury do podłączenia backendem,
+- backend MarcinCoach nie może po prostu zalogować użytkownika do Apple Health i pobrać danych.
+
+Możliwe ścieżki:
+- użytkownik eksportuje dane ręcznie,
+- użytkownik używa aplikacji trzeciej do eksportu FIT/TCX,
+- w przyszłości można rozważyć własną aplikację iOS z HealthKit, ale to osobny produkt i osobny koszt.
+
+Decyzja:
+- użytkownicy Apple Watch na start trafiają do ścieżki „wgraj pliki FIT/TCX/GPX” albo przez zewnętrzną synchronizację do Stravy,
+- nie obiecywać bezpośredniego podłączenia Apple Watch w MVP.
+
+Źródło:
+- https://developer.apple.com/documentation/healthkit
+
+## 4. Kolejność wdrożenia integracji
+
+### MVP — obowiązkowo
+
+1. Upload plików FIT/TCX/GPX
+2. Strava OAuth2
+3. Garmin przez python-garminconnect
+
+### Kolejny etap
+
+4. Polar AccessLink
+5. Suunto Cloud API
+
+### Poza MVP
+
+6. Apple Health / Apple Watch — tylko przez import plików lub późniejszą aplikację iOS.
+
+## 5. Wpływ na onboarding
+
+Pierwszy ekran onboardingu powinien pytać:
+
+„Skąd mamy pobrać Twoje treningi?”
+
+Opcje:
+- Połącz Stravę
+- Połącz Garmina
+- Połącz Polar
+- Połącz Suunto
+- Wgraj pliki FIT/TCX/GPX
+- Nie mam danych — wpiszę minimum ręcznie
+
+Dopiero potem system pyta o:
+- cel użytkownika jako tekst,
+- datę startu, jeśli istnieje,
+- aktualny ból/kontuzję,
+- liczbę dni treningowych tygodniowo,
+- dni niedostępne.
+
+## 6. Zasada dla backendu
+
+Backend ma sam wyciągać z danych treningowych:
+- częstotliwość treningów,
+- średni kilometraż,
+- najdłuższy trening,
+- tempa easy,
+- tempa szybkich odcinków,
+- HR avg / max,
+- drift HR,
+- rozkład intensywności,
+- tolerancję obciążenia,
+- wstępne strefy robocze.
+
+Strefy tlenowe / robocze nie powinny być wymagane ręcznie od użytkownika, jeśli system ma wystarczające dane z TCX/FIT/API.
+
+Jeżeli danych jest za mało, backend nie udaje pewności. Zwraca niski confidence score i planuje ostrożniej.
+
+## 7. Minimalna próbka danych
+
+Dla pierwszego sensownego profilu:
+- minimum: 6 treningów,
+- lepiej: 10+ treningów,
+- optymalnie: zakres czasowy, np. ostatnie 60–90 dni, z limitem liczby aktywności.
+
+Nie wystarczy pobrać „ostatnich 10 treningów” bez kontekstu, bo u jednego użytkownika to mogą być 2 tygodnie, a u innego 3 miesiące.
+
+Rekomendacja:
+- pobierać aktywności z ostatnich 90 dni,
+- przetworzyć maksymalnie np. 40–60 ostatnich aktywności biegowych,
+- wymagać minimum 6 aktywności do profilu startowego,
+- jeśli jest mniej, użyć ankiety minimalnej i oznaczyć niski poziom pewności.
+
+## 8. Notatka implementacyjna
+
+Integracje muszą mieć osobny SyncLog:
+- źródło danych,
+- status synchronizacji,
+- liczba pobranych aktywności,
+- zakres dat,
+- błędy autoryzacji,
+- błędy parsowania,
+- data ostatniej synchronizacji.
+
+Dla Garmin przez python-garminconnect od początku logować kategorię ryzyka: `unofficial_connector`.
+

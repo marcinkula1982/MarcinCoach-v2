@@ -5,9 +5,10 @@ alwaysApply: true
 
 # Frontend Deploy Standard
 
-- Treat `post-receive` as the primary deploy path for frontend.
-- Never rely on committing `dist/` artifacts for production publish.
-- For `coach.host89998.iqhs.pl`, standard flow is: `git push` -> hook checkout -> `npm ci` -> `npm run build` -> copy `dist/*` to `public_html`.
-- If deploy fails, verify hook content first, then inspect `~/.iq-git/deploy.log`.
-- For production build configuration, ensure `/.env.production` provides valid `VITE_API_BASE_URL` (never `localhost`).
-- Use manual `scp dist/*` only as emergency fallback, and keep it documented as non-standard path.
+- Never build the frontend on IQHost. The Git hook environment does not have `npm`.
+- Do not commit `dist/` artifacts for production publish.
+- For `coach.host89998.iqhs.pl`, standard flow is local `npm run build`, then `.\deploy-front.ps1`.
+- `deploy-front.ps1` sends local `dist/*` to `/home/host89998/domains/coach.host89998.iqhs.pl/public_html/` through SCP.
+- The server-side `post-receive` hook is only for backend checkout/deploy; it must not run `npm ci` or `npm run build`.
+- If the frontend looks stale in production, first verify that the local `dist/*` was copied to `public_html/`.
+- For production build configuration, ensure `/.env.production` provides `VITE_API_BASE_URL=https://api.coach.host89998.iqhs.pl/api`.
