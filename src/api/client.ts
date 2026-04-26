@@ -8,6 +8,27 @@ export const AUTH_LOGOUT_EVENT = 'marcincoach-auth-logout'
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || '/api'
 axios.defaults.baseURL = apiBaseUrl
 
+const LEGACY_SESSION_PREFIX = 'tcx'
+const LEGACY_SESSION_TOKEN_KEY = [LEGACY_SESSION_PREFIX, 'session', 'token'].join('-')
+const LEGACY_SESSION_USERNAME_KEY = [LEGACY_SESSION_PREFIX, 'username'].join('-')
+
+function migrateLegacySession() {
+  const legacyToken = localStorage.getItem(LEGACY_SESSION_TOKEN_KEY)
+  const legacyUsername = localStorage.getItem(LEGACY_SESSION_USERNAME_KEY)
+
+  if (!localStorage.getItem(SESSION_TOKEN_KEY) && legacyToken) {
+    localStorage.setItem(SESSION_TOKEN_KEY, legacyToken)
+  }
+  if (!localStorage.getItem(SESSION_USERNAME_KEY) && legacyUsername) {
+    localStorage.setItem(SESSION_USERNAME_KEY, legacyUsername)
+  }
+
+  localStorage.removeItem(LEGACY_SESSION_TOKEN_KEY)
+  localStorage.removeItem(LEGACY_SESSION_USERNAME_KEY)
+}
+
+migrateLegacySession()
+
 export function getStoredSessionToken() {
   return localStorage.getItem(SESSION_TOKEN_KEY)
 }
@@ -40,6 +61,8 @@ export function setSessionHeaders(token: string, username: string) {
   axios.defaults.headers.common['x-username'] = username
   localStorage.setItem(SESSION_TOKEN_KEY, token)
   localStorage.setItem(SESSION_USERNAME_KEY, username)
+  localStorage.removeItem(LEGACY_SESSION_TOKEN_KEY)
+  localStorage.removeItem(LEGACY_SESSION_USERNAME_KEY)
 }
 
 export function clearSessionHeaders() {
@@ -47,6 +70,8 @@ export function clearSessionHeaders() {
   delete axios.defaults.headers.common['x-username']
   localStorage.removeItem(SESSION_TOKEN_KEY)
   localStorage.removeItem(SESSION_USERNAME_KEY)
+  localStorage.removeItem(LEGACY_SESSION_TOKEN_KEY)
+  localStorage.removeItem(LEGACY_SESSION_USERNAME_KEY)
 }
 
 axios.interceptors.response.use(
