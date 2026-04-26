@@ -12,6 +12,7 @@ import {
   getWorkouts,
   getWorkout,
   deleteWorkout,
+  deleteAllWorkouts,
   uploadTcxFile,
   updateWorkoutMeta,
   type WorkoutListItem,
@@ -489,6 +490,15 @@ const App = () => {
     }
   }
 
+  const handleDeleteAllWorkouts = async () => {
+    try {
+      await deleteAllWorkouts()
+      setWorkouts([])
+    } catch (err) {
+      console.error('Failed to delete all workouts', err)
+    }
+  }
+
   // ---------- JSX ----------
   return (
     <div className="bg-slate-950 min-h-screen text-white">
@@ -863,6 +873,7 @@ const App = () => {
                 loggedInUser={loggedInUser}
                 onLoadWorkout={loadTrainingFromDb}
                 onDeleteWorkout={handleDeleteWorkout}
+                onDeleteAllWorkouts={handleDeleteAllWorkouts}
               />
             )}
               </>

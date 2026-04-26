@@ -52,6 +52,7 @@ Route::get('/workouts/analytics/summary', [WorkoutsController::class, 'analytics
 Route::get('/workouts/analytics/summary-v2', [WorkoutsController::class, 'analyticsSummaryV2']);
 Route::post('/workouts/upload', [WorkoutsController::class, 'upload']);
 Route::post('/workouts/import', [WorkoutsController::class, 'import']);
+Route::delete('/workouts', [WorkoutsController::class, 'destroyAll']);
 Route::get('/workouts/{id}', [WorkoutsController::class, 'show']);
 Route::delete('/workouts/{id}', [WorkoutsController::class, 'destroy']);
 Route::patch('/workouts/{id}/meta', [WorkoutsController::class, 'updateMeta']);

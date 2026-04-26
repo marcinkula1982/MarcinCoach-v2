@@ -82,6 +82,13 @@ export async function updateWorkoutMeta(id: number, workoutMeta: WorkoutMeta): P
   })
 }
 
+export async function deleteAllWorkouts(): Promise<{ deleted: number }> {
+  const res = await client.delete<{ deleted: number }>('/workouts', {
+    headers: buildAuthHeaders(),
+  })
+  return res.data
+}
+
 export async function fetchWeeklyPlan(days = 28): Promise<WeeklyPlan> {
   const res = await client.get<WeeklyPlan>('/weekly-plan', {
     params: { days },
@@ -89,4 +96,3 @@ export async function fetchWeeklyPlan(days = 28): Promise<WeeklyPlan> {
   })
   return res.data
 }
-

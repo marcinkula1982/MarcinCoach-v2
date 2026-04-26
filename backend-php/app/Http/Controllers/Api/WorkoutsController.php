@@ -548,6 +548,13 @@ class WorkoutsController extends Controller
         return response()->json([], 204);
     }
 
+    public function destroyAll(Request $request): JsonResponse
+    {
+        $userId = $this->authUserId($request);
+        $deleted = Workout::query()->where('user_id', $userId)->delete();
+        return response()->json(['deleted' => $deleted]);
+    }
+
     public function updateMeta(Request $request, int $id): JsonResponse
     {
         $validated = $request->validate([
