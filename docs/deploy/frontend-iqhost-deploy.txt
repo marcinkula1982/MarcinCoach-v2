@@ -1,0 +1,173 @@
+# MarcinCoach v2 — deploy frontendu na IQHost
+
+## Status
+
+Aktualny, działający workflow deployu frontendu został potwierdzony 2026-04-26.
+
+Frontend React/Vite działa jako statyczny build wrzucany na IQHost do:
+
+```text
+/home/host89998/domains/coach.host89998.iqhs.pl/public_html/
+```
+
+Frontend jest dostępny pod:
+
+```text
+https://coach.host89998.iqhs.pl
+```
+
+Backend / API Laravel działa osobno pod:
+
+```text
+https://api.coach.host89998.iqhs.pl/api
+```
+
+## Kluczowa decyzja
+
+Nie budujemy frontendu na IQHost.
+
+IQHost nie ma dostępnego `npm` w środowisku hooka Git:
+
+```text
+hooks/post-receive: line 18: npm: command not found
+```
+
+Dlatego hook serwerowy nie może wykonywać:
+
+```bash
+npm ci
+npm run build
+```
+
+Frontend należy budować lokalnie, a na serwer wysyłać wyłącznie gotowe pliki z katalogu `dist/`.
+
+## Poprawny workflow deployu frontu
+
+Z katalogu lokalnego repo:
+
+```powershell
+npm run build
+scp -r .\dist\* host89998@h3.iqhs.eu:/home/host89998/domains/coach.host89998.iqhs.pl/public_html/
+ssh host89998@h3.iqhs.eu "chmod 755 /home/host89998/domains/coach.host89998.iqhs.pl/public_html/assets && chmod 644 /home/host89998/domains/coach.host89998.iqhs.pl/public_html/assets/* && chmod 644 /home/host89998/domains/coach.host89998.iqhs.pl/public_html/index.html"
+```
+
+## Skrypt lokalny
+
+W repo powinien istnieć skrypt:
+
+```text
+deploy-front.ps1
+```
+
+Zawartość:
+
+```powershell
+$ErrorActionPreference = "Stop"
+
+$RemoteUser = "host89998"
+$RemoteHost = "h3.iqhs.eu"
+$RemotePublicHtml = "/home/host89998/domains/coach.host89998.iqhs.pl/public_html"
+
+Write-Host "1/4 Build frontendu..." -ForegroundColor Cyan
+npm run build
+
+Write-Host "2/4 Wysyłanie dist/* na IQHost..." -ForegroundColor Cyan
+scp -r .\dist\* "${RemoteUser}@${RemoteHost}:${RemotePublicHtml}/"
+
+Write-Host "3/4 Ustawianie praw plików..." -ForegroundColor Cyan
+ssh "${RemoteUser}@${RemoteHost}" "chmod 755 ${RemotePublicHtml}/assets && chmod 644 ${RemotePublicHtml}/assets/* && chmod 644 ${RemotePublicHtml}/index.html"
+
+Write-Host "4/4 Sprawdzenie dostępności plików..." -ForegroundColor Cyan
+curl.exe -I "https://coach.host89998.iqhs.pl/"
+curl.exe -I "https://coach.host89998.iqhs.pl/assets/$(Get-ChildItem .\dist\assets\*.js | Select-Object -First 1 | Split-Path -Leaf)"
+
+Write-Host "Deploy frontendu zakończony." -ForegroundColor Green
+```
+
+Uruchamianie:
+
+```powershell
+.\deploy-front.ps1
+```
+
+## Potwierdzony wynik z 2026-04-26
+
+Skrypt `deploy-front.ps1` wykonał pełny proces:
+
+```text
+npm run build      -> OK
+scp dist/*         -> OK
+chmod              -> OK
+/                  -> HTTP 200
+/assets/*.js       -> HTTP 200
+```
+
+Przykładowe pliki po buildzie:
+
+```text
+dist/index.html
+dist/assets/index-DrxYN1Up.css
+dist/assets/index-C5SCNzIK.js
+```
+
+Po wysłaniu na serwer pliki były dostępne pod HTTPS.
+
+## Czego nie robić
+
+Nie wracać do budowania frontendu przez hook Git na IQHost.
+
+Nie diagnozować tego jako problem:
+
+- API,
+- CORS,
+- onboardingu,
+- React state,
+- Laravel healthcheck,
+- `/me/profile`.
+
+Te elementy były sprawdzone i działały.
+
+## Co było realnym problemem
+
+Problem polegał na tym, że front nie trafiał aktualny do:
+
+```text
+/home/host89998/domains/coach.host89998.iqhs.pl/public_html/
+```
+
+bo hook serwerowy próbował wykonać build React/Vite na IQHost, ale środowisko hooka nie miało `npm`.
+
+## Stan API podczas diagnozy
+
+Potwierdzone:
+
+```text
+https://api.coach.host89998.iqhs.pl/api/health -> 200 OK
+POST /api/auth/login -> działa
+GET /api/me/profile -> działa
+CORS wpuszcza https://coach.host89998.iqhs.pl
+```
+
+## Zalecenie dla hooka Git na IQHost
+
+Hook `post-receive` nie powinien budować frontu.
+
+Może robić wyłącznie checkout repo do katalogu roboczego, np.:
+
+```text
+/home/host89998/domains/coach.host89998.iqhs.pl/app-laravel
+```
+
+Frontend deployować osobno przez:
+
+```powershell
+.\deploy-front.ps1
+```
+
+## Obowiązująca zasada
+
+Frontend React/Vite zostaje.
+
+Build frontu odbywa się lokalnie.
+
+IQHost serwuje tylko gotowe pliki statyczne z `public_html`.
