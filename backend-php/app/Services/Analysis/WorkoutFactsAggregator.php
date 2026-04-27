@@ -172,7 +172,7 @@ class WorkoutFactsAggregator
     {
         $max = null;
         foreach ($facts as $f) {
-            if (!$this->isRunish($f->sportKind)) {
+            if (! $this->isRunish($f->sportKind)) {
                 continue;
             }
             if ($f->distanceMeters !== null && ($max === null || $f->distanceMeters > $max)) {
@@ -190,7 +190,7 @@ class WorkoutFactsAggregator
     {
         $max = null;
         foreach ($facts as $f) {
-            if (!$this->isRunish($f->sportKind)) {
+            if (! $this->isRunish($f->sportKind)) {
                 continue;
             }
             if ($f->durationSec !== null && ($max === null || $f->durationSec > $max)) {
@@ -209,7 +209,7 @@ class WorkoutFactsAggregator
         $totalDistance = 0.0;
         $totalSec = 0;
         foreach ($facts as $f) {
-            if (!$this->isRunish($f->sportKind)) {
+            if (! $this->isRunish($f->sportKind)) {
                 continue;
             }
             if ($f->distanceMeters === null || $f->distanceMeters <= 0) {
@@ -337,7 +337,7 @@ class WorkoutFactsAggregator
             $weekStart = $at->startOfWeek()->format('Y-m-d');
             $weeksWithWorkout[$weekStart] = true;
         }
-        if (!$hasAny) {
+        if (! $hasAny) {
             return null;
         }
 

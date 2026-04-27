@@ -49,9 +49,11 @@ class ProfileController extends Controller
 
             // M1 minimum typed onboarding sections
             'races' => ['sometimes', 'nullable', 'array'],
+            'races.*.name' => ['nullable', 'string', 'max:160'],
             'races.*.date' => ['required_with:races', 'date', 'before:+5 years'],
             'races.*.distanceKm' => ['required_with:races', 'numeric', 'min:0.1', 'max:200'],
             'races.*.priority' => ['nullable', 'in:A,B,C'],
+            'races.*.targetTime' => ['nullable', 'string', 'max:16'],
 
             'availability' => ['sometimes', 'nullable', 'array'],
             'availability.runningDays' => ['sometimes', 'array'],
@@ -78,6 +80,14 @@ class ProfileController extends Controller
             'hrZones.z4.max' => ['nullable', 'integer', 'min:0', 'max:260'],
             'hrZones.z5.min' => ['nullable', 'integer', 'min:0', 'max:260'],
             'hrZones.z5.max' => ['nullable', 'integer', 'min:0', 'max:260'],
+
+            'paceZones' => ['sometimes', 'nullable', 'array'],
+            'paceZones.status' => ['nullable', 'in:known,derived,estimated,missing'],
+            'paceZones.z1SecPerKm' => ['nullable', 'numeric', 'min:60', 'max:1200'],
+            'paceZones.z2SecPerKm' => ['nullable', 'numeric', 'min:60', 'max:1200'],
+            'paceZones.z3SecPerKm' => ['nullable', 'numeric', 'min:60', 'max:1200'],
+            'paceZones.z4SecPerKm' => ['nullable', 'numeric', 'min:60', 'max:1200'],
+            'paceZones.z5SecPerKm' => ['nullable', 'numeric', 'min:60', 'max:1200'],
         ]);
 
         // Cross-field HR zones validation
@@ -99,6 +109,11 @@ class ProfileController extends Controller
         }
         if (array_key_exists('constraints', $validated)) {
             $profile->constraints = $validated['constraints'];
+        }
+        if (array_key_exists('paceZones', $validated)) {
+            $profile->constraints = json_encode($this->mergeConstraints($profile->constraints, [
+                'paceZones' => $this->normalizePaceZones($validated['paceZones']),
+            ]), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         }
         if (array_key_exists('races', $validated)) {
             $profile->races_json = $validated['races'];
@@ -289,6 +304,44 @@ class ProfileController extends Controller
     /**
      * @return array<string,mixed>
      */
+    private function decodeConstraints(?string $raw): array
+    {
+        if (!is_string($raw) || trim($raw) === '') {
+            return [];
+        }
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * @param array<string,mixed> $patch
+     * @return array<string,mixed>
+     */
+    private function mergeConstraints(?string $raw, array $patch): array
+    {
+        return array_replace_recursive($this->decodeConstraints($raw), $patch);
+    }
+
+    /**
+     * @param array<string,mixed>|null $raw
+     * @return array<string,mixed>
+     */
+    private function normalizePaceZones(?array $raw): array
+    {
+        $raw ??= [];
+        return [
+            'status' => (string) ($raw['status'] ?? 'estimated'),
+            'z1SecPerKm' => isset($raw['z1SecPerKm']) && is_numeric($raw['z1SecPerKm']) ? (float) $raw['z1SecPerKm'] : null,
+            'z2SecPerKm' => isset($raw['z2SecPerKm']) && is_numeric($raw['z2SecPerKm']) ? (float) $raw['z2SecPerKm'] : null,
+            'z3SecPerKm' => isset($raw['z3SecPerKm']) && is_numeric($raw['z3SecPerKm']) ? (float) $raw['z3SecPerKm'] : null,
+            'z4SecPerKm' => isset($raw['z4SecPerKm']) && is_numeric($raw['z4SecPerKm']) ? (float) $raw['z4SecPerKm'] : null,
+            'z5SecPerKm' => isset($raw['z5SecPerKm']) && is_numeric($raw['z5SecPerKm']) ? (float) $raw['z5SecPerKm'] : null,
+        ];
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
     private function profileToScoreArray(UserProfile $profile): array
     {
         return [
@@ -320,12 +373,17 @@ class ProfileController extends Controller
 
         $primaryRace = null;
         if ($profile->primary_race_date !== null) {
+            $selectedRace = $this->selectPrimaryRace(is_array($profile->races_json) ? $profile->races_json : []);
             $primaryRace = [
+                'name' => is_array($selectedRace) ? ($selectedRace['name'] ?? null) : null,
                 'date' => $profile->primary_race_date->toDateString(),
                 'distanceKm' => $profile->primary_race_distance_km !== null ? (float) $profile->primary_race_distance_km : null,
                 'priority' => $profile->primary_race_priority,
+                'targetTime' => is_array($selectedRace) ? ($selectedRace['targetTime'] ?? null) : null,
             ];
         }
+
+        $constraints = $this->decodeConstraints($profile->constraints);
 
         return [
             'id' => $profile->id,
@@ -347,6 +405,7 @@ class ProfileController extends Controller
                 'z5' => ['min' => $profile->hr_z5_min, 'max' => $profile->hr_z5_max],
             ],
             // M1 beyond minimum additions (additive — no existing keys changed)
+            'paceZones' => $constraints['paceZones'] ?? null,
             'primaryRace' => $primaryRace,
             'quality' => [
                 'score' => $scoreData['score'],

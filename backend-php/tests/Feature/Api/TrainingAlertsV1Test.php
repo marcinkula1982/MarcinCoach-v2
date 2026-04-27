@@ -67,7 +67,7 @@ class TrainingAlertsV1Test extends TestCase
 
         $this->assertNotNull($alert);
         $this->assertSame('CRITICAL', $alert->severity);
-        
+
         $payload = json_decode($alert->payload_json, true);
         $this->assertSame(3600, $payload['expectedDurationSec']);
         $this->assertSame(7200, $payload['actualDurationSec']);
@@ -117,7 +117,7 @@ class TrainingAlertsV1Test extends TestCase
 
         $this->assertNotNull($alert);
         $this->assertSame('WARNING', $alert->severity);
-        
+
         $payload = json_decode($alert->payload_json, true);
         $this->assertSame(3600, $payload['expectedDurationSec']);
         $this->assertSame(1800, $payload['actualDurationSec']);
@@ -184,7 +184,7 @@ class TrainingAlertsV1Test extends TestCase
 
         $this->assertNotNull($alert);
         $this->assertSame('CRITICAL', $alert->severity);
-        
+
         $payload = json_decode($alert->payload_json, true);
         $this->assertSame(100, $payload['expectedHrZoneMin']);
         $this->assertSame(150, $payload['expectedHrZoneMax']);
@@ -223,7 +223,7 @@ class TrainingAlertsV1Test extends TestCase
 
         $this->assertNotNull($alert);
         $this->assertSame('INFO', $alert->severity);
-        
+
         $payload = json_decode($alert->payload_json, true);
         $this->assertSame('missing_hr', $payload['reason']);
     }
@@ -274,73 +274,80 @@ class TrainingAlertsV1Test extends TestCase
 
     public function test_load_spike_generates_warning_alert(): void
     {
-        // Previous week baseline (low load)
-        Workout::create([
-            'user_id' => 1,
-            'action' => 'save',
-            'kind' => 'training',
-            'summary' => [
-                'startTimeIso' => '2025-01-01T10:00:00Z',
-                'durationSec' => 1800,
-                'distanceM' => 5000,
-                'intensity' => 30,
-            ],
-            'source' => 'manual',
-            'dedupe_key' => 'test-load-spike-prev',
-        ]);
+        Carbon::setTestNow(Carbon::parse('2025-01-12T12:00:00Z'));
 
-        // Current week workout with much higher load
-        $workout = Workout::create([
-            'user_id' => 1,
-            'action' => 'save',
-            'kind' => 'training',
-            'summary' => [
-                'startTimeIso' => '2025-01-12T10:00:00Z',
-                'durationSec' => 5400,
-                'distanceM' => 15000,
-                'intensity' => 120,
-            ],
-            'source' => 'manual',
-            'dedupe_key' => 'test-load-spike-current',
-        ]);
+        try {
+            // Previous week baseline (low load)
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => [
+                    'startTimeIso' => '2025-01-01T10:00:00Z',
+                    'durationSec' => 1800,
+                    'distanceM' => 5000,
+                    'intensity' => 30,
+                ],
+                'source' => 'manual',
+                'dedupe_key' => 'test-load-spike-prev',
+            ]);
 
-        // Add compliance and signals records so only LOAD_SPIKE is safety-specific here.
-        DB::table('plan_compliance_v1')->insert([
-            'workout_id' => $workout->id,
-            'expected_duration_sec' => 5400,
-            'actual_duration_sec' => 5400,
-            'delta_duration_sec' => 0,
-            'duration_ratio' => 1.0,
-            'status' => 'OK',
-            'flag_overshoot_duration' => false,
-            'flag_undershoot_duration' => false,
-            'generated_at' => now(),
-        ]);
-        DB::table('training_signals_v2')->insert([
-            'workout_id' => $workout->id,
-            'hr_available' => 1,
-            'hr_avg_bpm' => 150,
-            'hr_max_bpm' => 180,
-            'hr_z1_sec' => 0,
-            'hr_z2_sec' => 0,
-            'hr_z3_sec' => 0,
-            'hr_z4_sec' => 0,
-            'hr_z5_sec' => 0,
-            'generated_at' => now(),
-        ]);
+            // Current week workout with much higher load
+            $workout = Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => [
+                    'startTimeIso' => '2025-01-12T10:00:00Z',
+                    'durationSec' => 5400,
+                    'distanceM' => 15000,
+                    'intensity' => 1,
+                ],
+                'source' => 'manual',
+                'dedupe_key' => 'test-load-spike-current',
+            ]);
 
-        $service = app(TrainingAlertsV1Service::class);
-        $service->upsertForWorkout($workout->id);
+            // Add compliance and signals records so only LOAD_SPIKE is safety-specific here.
+            DB::table('plan_compliance_v1')->insert([
+                'workout_id' => $workout->id,
+                'expected_duration_sec' => 5400,
+                'actual_duration_sec' => 5400,
+                'delta_duration_sec' => 0,
+                'duration_ratio' => 1.0,
+                'status' => 'OK',
+                'flag_overshoot_duration' => false,
+                'flag_undershoot_duration' => false,
+                'generated_at' => now(),
+            ]);
+            DB::table('training_signals_v2')->insert([
+                'workout_id' => $workout->id,
+                'hr_available' => 1,
+                'hr_avg_bpm' => 150,
+                'hr_max_bpm' => 180,
+                'hr_z1_sec' => 0,
+                'hr_z2_sec' => 0,
+                'hr_z3_sec' => 0,
+                'hr_z4_sec' => 0,
+                'hr_z5_sec' => 0,
+                'generated_at' => now(),
+            ]);
 
-        $alert = DB::table('training_alerts_v1')
-            ->where('workout_id', $workout->id)
-            ->where('code', 'LOAD_SPIKE')
-            ->first();
+            $service = app(TrainingAlertsV1Service::class);
+            $service->upsertForWorkout($workout->id);
 
-        $this->assertNotNull($alert);
-        $this->assertSame('WARNING', $alert->severity);
-        $payload = json_decode($alert->payload_json, true);
-        $this->assertGreaterThan(1.3, $payload['rampRatio']);
+            $alert = DB::table('training_alerts_v1')
+                ->where('workout_id', $workout->id)
+                ->where('code', 'LOAD_SPIKE')
+                ->first();
+
+            $this->assertNotNull($alert);
+            $this->assertSame('WARNING', $alert->severity);
+            $payload = json_decode($alert->payload_json, true);
+            $this->assertGreaterThan(1.3, $payload['rampRatio']);
+            $this->assertSame('user_training_analysis', $payload['source']);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_plan_missing_generates_info_alert(): void
@@ -374,7 +381,7 @@ class TrainingAlertsV1Test extends TestCase
 
         $this->assertNotNull($alert);
         $this->assertSame('INFO', $alert->severity);
-        
+
         $payload = json_decode($alert->payload_json, true);
         $this->assertSame('no_plan_or_no_match', $payload['reason']);
     }
@@ -635,9 +642,9 @@ class TrainingAlertsV1Test extends TestCase
             'expectedDurationSec' => 3600,
             'expectedDistanceM' => 10000,
         ];
-        
+
         $snapshotJson = json_encode(['items' => [$plannedWorkout]]);
-        
+
         DB::table('plan_snapshots')->insert([
             'user_id' => 1,
             'snapshot_json' => $snapshotJson,
@@ -686,7 +693,7 @@ class TrainingAlertsV1Test extends TestCase
 
         $this->assertNotNull($overshootAlert, 'DURATION_MAJOR_OVERSHOOT alert should exist');
         $this->assertSame('CRITICAL', $overshootAlert->severity);
-        
+
         $payload = json_decode($overshootAlert->payload_json, true);
         $this->assertSame(3600, $payload['expectedDurationSec']);
         $this->assertSame(7592, $payload['actualDurationSec']);
@@ -740,9 +747,9 @@ class TrainingAlertsV1Test extends TestCase
             'expectedDurationSec' => 3600,
             'expectedDistanceM' => 10000,
         ];
-        
+
         $snapshotJson = json_encode(['items' => [$plannedWorkout]]);
-        
+
         DB::table('plan_snapshots')->insert([
             'user_id' => 1,
             'snapshot_json' => $snapshotJson,
@@ -1075,4 +1082,3 @@ class TrainingAlertsV1Test extends TestCase
         $this->assertGreaterThanOrEqual(2, (int) ($payload['streak'] ?? 0));
     }
 }
-

@@ -25,6 +25,10 @@ Zasada:
 | 2026-04-26 | Frontend | Usunieto stara widoczna tozsamosc toolkitowa i stare prefiksy kluczy sesji z aktywnego kodu | Aktywny grep dla dawnych nazw produktu i dawnych kluczy sesji zwraca pusto. |
 | 2026-04-26 | Backend integracje | Naprawiono `GarminConnectorService.php` i dopuszczono connect Garmina bez body, gdy credentials sa po stronie connectora/env | `php artisan test --filter=IntegrationsParityTest` -> 3 passed; pelny suite -> 260 passed. |
 | 2026-04-26 | Garmin workout export | Dodano wysylke zaplanowanych treningow z weekly plan do Garmin Connect i przycisk `Wyslij do urzadzenia` w UI | Live smoke IQHost: `POST /v1/garmin/workouts` -> `scheduled`; test `MarcinCoach TEST 2026-04-26`, `workoutId=1548384239`, potwierdzone na koncie Garmin. |
+| 2026-04-27 | Provider-neutral analytics F4 | Dodano `GET /api/me/training-analysis` z cache per user/window/version i snapshotami w `training_analysis_snapshots` | `php artisan test tests\Feature\Api\TrainingAnalysisEndpointTest.php` -> 2 passed; `php artisan test` -> 291 passed. |
+| 2026-04-27 | Provider-neutral analytics F5 | Dodano fact-based `GET /api/me/onboarding-summary` oraz panel podsumowania po onboardingu oparty na `training-analysis` | `php artisan test tests\Feature\Api\OnboardingSummaryEndpointTest.php tests\Feature\Api\TrainingAnalysisEndpointTest.php` -> 4 passed; `php artisan test` -> 293 passed; `npm run build` -> OK. |
+| 2026-04-27 | Provider-neutral analytics F6 | Przepieto `TrainingContextService` i weekly plan na `UserTrainingAnalysis`; stary `TrainingSignalsService` zostal jako wypelniacz pol kompatybilnosci/adaptacji M4 | Focused analytics/plan/contract suite -> 69 passed; `php artisan test` -> 296 passed, 1426 assertions. |
+| 2026-04-27 | Provider-neutral analytics F7 | Przepieto alert `LOAD_SPIKE` i feedback-v2 load risk na `UserTrainingAnalysis`; `/api/training-signals` oznaczone jako kompatybilnosc legacy | Focused alerts/feedback/plan suite -> 60 passed; `php artisan test` -> 297 passed, 1434 assertions. |
 
 ## Decyzja o starej ankiecie
 
@@ -127,28 +131,22 @@ Wszystkie pozostale dokumenty `.md` / `.txt` z poprzedniego katalogu `docs/` ora
 
 ## Aktualna kolejnosc dalszych prac
 
-1. Fundament provider-neutral analytics:
-   - F1: kontrakty DTO + pusty `UserTrainingAnalysisService`,
-   - F2: `WorkoutFactsExtractor` z istniejacych `Workout` + raw TCX,
-   - F3: agregaty: load 7d/28d, ACWR, regularnosc, status stref HR,
-   - F4: endpoint `GET /api/me/training-analysis` + cache,
-   - F5: onboardingowa laurka oparta tylko na faktach.
-2. Smoke produkcji core flow:
+1. Smoke produkcji core flow:
    - register/login/profile,
    - import/upload treningu,
    - training signals/context/adjustments,
    - weekly plan,
    - onboarding skip i normalny zapis profilu.
-3. M3/M4 hardening UX:
+2. M3/M4 hardening UX:
    - ekspozycja `blockContext`,
    - widoczne alerty i decision trace,
    - scenariusze reczne: powrot po przerwie, load spike, taper, chroniczne niedowykonanie.
-4. M2 deeper data:
+3. M2 deeper data:
    - FIT/GPX,
    - moving time,
    - cadence, power, elevation,
    - pace-zones per user.
-5. M5/M6:
+4. M5/M6:
    - produkcyjne credentials i smoke Strava,
    - Garmin: utrzymac connector MVP, dodac monitoring/rate-limit/MFA handling i stabilizacje uploadu zaplanowanych treningow,
    - Polar/Suunto,
@@ -158,7 +156,7 @@ Wszystkie pozostale dokumenty `.md` / `.txt` z poprzedniego katalogu `docs/` ora
 
 | Check | Wynik |
 |---|---|
-| Lokalny backend test suite | `php artisan test` -> `260 passed, 1240 assertions` |
+| Lokalny backend test suite | `php artisan test` -> `297 passed, 1434 assertions` |
 | Garmin connector stub smoke | FastAPI `TestClient` -> `connect/start`, `sync`, `status` HTTP 200 |
 | Garmin connector live smoke IQHost | `connect/start` -> HTTP 200; `sync` ostatnich 30 dni -> 9 aktywnosci; `status` -> `connected=true`; download TCX jednej aktywnosci -> HTTP 200, 464313 B; `POST /v1/garmin/workouts` -> `scheduled`, `workoutId=1548384239`, kalendarz `2026-04-26`; `GARMIN_MFA_CODE` nie jest trzymany po logowaniu |
 | Frontend build | `npm run build` -> OK |

@@ -46,7 +46,8 @@ class FeedbackSignalsMapper
         }
 
         $weeklyLoadContribution = (float) ($feedback['metrics']['weeklyLoadContribution'] ?? 0);
-        if ($weeklyLoadContribution > 50) {
+        $spikeLoad = (bool) ($feedback['metrics']['spikeLoad'] ?? $feedback['loadImpact']['spikeLoad'] ?? false);
+        if ($spikeLoad || $weeklyLoadContribution > 50) {
             $loadImpact = 'high';
         } elseif ($weeklyLoadContribution > 25) {
             $loadImpact = 'medium';
@@ -55,10 +56,10 @@ class FeedbackSignalsMapper
         }
 
         $warnings = [];
-        if ($loadImpact === 'high' || $weeklyLoadContribution > 50) {
+        if ($loadImpact === 'high' || $weeklyLoadContribution > 50 || $spikeLoad) {
             $warnings['overloadRisk'] = true;
         }
-        if (!$hrStable && $character === 'easy') {
+        if (! $hrStable && $character === 'easy') {
             $warnings['hrInstability'] = true;
         }
         if ($economyFlag === 'poor' && $character === 'easy') {

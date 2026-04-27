@@ -38,6 +38,11 @@ class WorkoutSummaryBuilder
         ];
 
         if (!empty($parsed)) {
+            foreach (['movingTimeSec', 'elapsedTimeSec', 'hrSampleCount'] as $key) {
+                if (isset($parsed[$key]) && is_numeric($parsed[$key])) {
+                    $base[$key] = (int) $parsed[$key];
+                }
+            }
             if (isset($parsed['sport']) && is_string($parsed['sport']) && $parsed['sport'] !== '') {
                 $base['sport'] = $parsed['sport'];
             }
@@ -51,6 +56,19 @@ class WorkoutSummaryBuilder
             }
             if (isset($parsed['avgPaceSecPerKm']) && is_numeric($parsed['avgPaceSecPerKm'])) {
                 $base['avgPaceSecPerKm'] = (int) $parsed['avgPaceSecPerKm'];
+            }
+            foreach (['elevationGainMeters', 'elevationLossMeters'] as $key) {
+                if (isset($parsed[$key]) && is_numeric($parsed[$key])) {
+                    $base[$key] = round((float) $parsed[$key], 2);
+                }
+            }
+            foreach (['cadence', 'power', 'paceZones', 'dataAvailability'] as $key) {
+                if (isset($parsed[$key]) && is_array($parsed[$key])) {
+                    $base[$key] = $parsed[$key];
+                }
+            }
+            if (isset($parsed['fileType']) && is_string($parsed['fileType']) && $parsed['fileType'] !== '') {
+                $base['fileType'] = $parsed['fileType'];
             }
             if (isset($parsed['intensityBuckets']) && is_array($parsed['intensityBuckets'])) {
                 $buckets = $parsed['intensityBuckets'];

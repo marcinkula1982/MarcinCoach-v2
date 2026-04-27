@@ -7,11 +7,13 @@ use App\Services\TrainingSignalsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+/**
+ * @deprecated F7: kept for the public compatibility endpoint.
+ * New backend consumers should use /api/me/training-analysis.
+ */
 class TrainingSignalsController extends Controller
 {
-    public function __construct(private readonly TrainingSignalsService $trainingSignalsService)
-    {
-    }
+    public function __construct(private readonly TrainingSignalsService $trainingSignalsService) {}
 
     public function index(Request $request): JsonResponse
     {

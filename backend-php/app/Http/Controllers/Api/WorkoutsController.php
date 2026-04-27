@@ -4,16 +4,18 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Workout;
-use App\Models\WorkoutRawTcx;
 use App\Models\WorkoutImportEvent;
+use App\Models\WorkoutRawTcx;
+use App\Services\FitParsingService;
+use App\Services\GpxParsingService;
 use App\Services\PlanComplianceService;
-use App\Support\WorkoutSourceContract;
-use App\Support\WorkoutSummaryBuilder;
 use App\Services\PlanComplianceV2Service;
 use App\Services\TcxParsingService;
 use App\Services\TrainingAlertsV1Service;
 use App\Services\TrainingSignalsService;
 use App\Services\TrainingSignalsV2Service;
+use App\Support\WorkoutSourceContract;
+use App\Support\WorkoutSummaryBuilder;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -124,6 +126,7 @@ class WorkoutsController extends Controller
             ->get(['id', 'summary', 'workout_meta', 'created_at']);
 
         $result = $rows->map(fn (Workout $w) => $this->buildAnalyticsRow($w))->filter()->values();
+
         return response()->json($result)->header('Cache-Control', 'private, no-cache, must-revalidate');
     }
 
@@ -175,6 +178,7 @@ class WorkoutsController extends Controller
             $avgPaceSecPerKm = $pacedDistanceKm > 0
                 ? (int) round($pacedSeconds / $pacedDistanceKm)
                 : null;
+
             return [
                 'zones' => [
                     'z1Min' => round($zones['z1Min'], 2),
@@ -208,6 +212,7 @@ class WorkoutsController extends Controller
         $byWeek = $rows
             ->groupBy(function (array $row) {
                 $dt = Carbon::parse((string) $row['workoutDt'])->utc();
+
                 return $dt->copy()->startOfWeek(Carbon::MONDAY)->format('Y-m-d');
             })
             ->map(function ($weekRows, string $weekStart) use ($aggregateGroup) {
@@ -243,25 +248,31 @@ class WorkoutsController extends Controller
 
         /** @var \Illuminate\Http\UploadedFile $file */
         $file = $validated['file'];
-        $rawTcxXml = $file->getContent();
-        if (!is_string($rawTcxXml) || trim($rawTcxXml) === '') {
+        $rawContent = $file->getContent();
+        if (! is_string($rawContent) || trim($rawContent) === '') {
             return response()->json(['message' => 'Brak pliku'], 422);
         }
 
         try {
-            $parsed = $this->parseTcxXml($rawTcxXml);
+            [$fileType, $parsed] = $this->parseWorkoutFile(
+                $rawContent,
+                strtolower((string) $file->getClientOriginalExtension()),
+                (string) $file->getClientOriginalName(),
+                $this->authUserId($request),
+            );
         } catch (\InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
         $importRequest = new Request([
-            'source' => 'tcx',
+            'source' => $fileType,
             'sourceActivityId' => null,
             'startTimeIso' => $parsed['startTimeIso'],
             'durationSec' => $parsed['durationSec'],
             'distanceM' => $parsed['distanceM'],
-            'rawTcxXml' => $rawTcxXml,
+            'rawTcxXml' => $fileType === 'tcx' ? $rawContent : null,
         ]);
+        $importRequest->attributes->set('parsedWorkoutBlob', $parsed);
         $importRequest->headers->set('x-username', (string) $request->header('x-username', ''));
         $importRequest->headers->set('x-session-token', (string) $request->header('x-session-token', ''));
 
@@ -271,7 +282,7 @@ class WorkoutsController extends Controller
     public function import(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'source' => ['required', Rule::in(['garmin', 'tcx', 'manual'])],
+            'source' => ['required', Rule::in(['garmin', 'tcx', 'gpx', 'fit', 'manual'])],
             'sourceActivityId' => ['nullable', 'string'],
             'startTimeIso' => ['required', 'date'],
             'durationSec' => ['required', 'integer', 'min:1'],
@@ -284,16 +295,17 @@ class WorkoutsController extends Controller
         $rawSource = $validated['source'];
         $source = WorkoutSourceContract::normalize($rawSource);
         $sourceActivityId = WorkoutSourceContract::normalizeActivityId($validated['sourceActivityId'] ?? null);
-        
+
         // Parse TCX XML if the incoming source was 'tcx' and rawTcxXml is provided.
         $startTimeIso = $validated['startTimeIso'];
         $durationSec = $validated['durationSec'];
         $distanceM = $validated['distanceM'];
 
         $userId = $this->authUserId($request);
-        $parsedBlob = null;
+        $attrParsed = $request->attributes->get('parsedWorkoutBlob');
+        $parsedBlob = is_array($attrParsed) ? $attrParsed : null;
 
-        if ($rawSource === 'tcx' && !empty($validated['rawTcxXml'])) {
+        if ($rawSource === 'tcx' && ! empty($validated['rawTcxXml'])) {
             try {
                 $parsedBlob = $this->parseTcxXml($validated['rawTcxXml'], $userId);
                 $startTimeIso = $parsedBlob['startTimeIso'];
@@ -308,7 +320,7 @@ class WorkoutsController extends Controller
 
         // Calculate tcx_hash if rawTcxXml is provided
         $tcxHash = null;
-        if (!empty($validated['rawTcxXml'])) {
+        if (! empty($validated['rawTcxXml'])) {
             $tcxHash = hash('sha256', $validated['rawTcxXml']);
         }
 
@@ -325,7 +337,7 @@ class WorkoutsController extends Controller
                 if ($existing) {
                     // UPSERT: Update existing workout if incoming source was 'tcx' and rawTcxXml is provided.
                     // Use $rawSource (the original boundary value) because $source is already normalized.
-                    if ($rawSource === 'tcx' && !empty($validated['rawTcxXml'])) {
+                    if ($rawSource === 'tcx' && ! empty($validated['rawTcxXml'])) {
                         // Generate dedupe_key with new values
                         $dedupeKey = $this->generateDedupeKey($source, $sourceActivityId, $startTimeIso, $durationSec, $distanceM);
 
@@ -336,19 +348,19 @@ class WorkoutsController extends Controller
                             $distanceM,
                             parsed: is_array($parsedBlob) ? $parsedBlob : [],
                         );
-                        
+
                         // Update workout
                         $existing->summary = $summary;
                         $existing->dedupe_key = $dedupeKey;
                         $existing->touch(); // Update updated_at timestamp
                         $existing->save();
-                        
+
                         // Update or create workout_raw_tcx
                         WorkoutRawTcx::updateOrCreate(
                             ['workout_id' => $existing->id],
                             ['xml' => $validated['rawTcxXml'], 'created_at' => now()]
                         );
-                        
+
                         // Log UPDATED event
                         WorkoutImportEvent::create([
                             'workout_id' => $existing->id,
@@ -358,34 +370,33 @@ class WorkoutsController extends Controller
                             'status' => 'UPDATED',
                             'imported_at' => now(),
                         ]);
-                        
+
                         // Generate TrainingSignals v1
-                        $trainingSignalsService = new TrainingSignalsService();
+                        $trainingSignalsService = new TrainingSignalsService;
                         $trainingSignalsService->upsertForWorkout($existing->id);
-                        
-                        // Generate TrainingSignals v2 (only for TCX with rawTcxXml)
-                        $trainingSignalsV2Service = new TrainingSignalsV2Service();
+
+                        // Generate TrainingSignals v2 / Compliance v2 only for TCX with raw XML.
+                        $trainingSignalsV2Service = new TrainingSignalsV2Service;
                         $trainingSignalsV2Service->upsertForWorkout($existing->id);
-                        
-                        // Generate PlanCompliance v2 (only for TCX with rawTcxXml)
-                        $planComplianceV2Service = new PlanComplianceV2Service();
+
+                        $planComplianceV2Service = new PlanComplianceV2Service;
                         $planComplianceV2Service->upsertForWorkout($existing->id);
-                        
+
                         // Generate PlanCompliance v1
-                        $planComplianceService = new PlanComplianceService();
+                        $planComplianceService = new PlanComplianceService;
                         $planComplianceService->upsertForWorkout($existing->id);
-                        
+
                         // Generate TrainingAlerts v1
-                        $trainingAlertsV1Service = new TrainingAlertsV1Service();
+                        $trainingAlertsV1Service = app(TrainingAlertsV1Service::class);
                         $trainingAlertsV1Service->upsertForWorkout($existing->id);
-                        
+
                         return response()->json([
                             'id' => $existing->id,
                             'created' => false,
                             'updated' => true,
                         ], 200);
                     }
-                    
+
                     // For non-tcx sources, just return existing workout (DEDUPED)
                     // Log DEDUPED event
                     WorkoutImportEvent::create([
@@ -396,7 +407,7 @@ class WorkoutsController extends Controller
                         'status' => 'DEDUPED',
                         'imported_at' => now(),
                     ]);
-                    
+
                     return response()->json([
                         'id' => $existing->id,
                         'created' => false,
@@ -426,8 +437,9 @@ class WorkoutsController extends Controller
                 'dedupe_key' => $dedupeKey,
             ]);
 
-            // Save raw TCX XML if provided
-            if (!empty($validated['rawTcxXml'])) {
+            // Save raw TCX XML if provided. FIT/GPX summaries are persisted in
+            // workouts.summary for MVP; a generic raw-file table can follow later.
+            if (! empty($validated['rawTcxXml'])) {
                 WorkoutRawTcx::create([
                     'workout_id' => $workout->id,
                     'xml' => $validated['rawTcxXml'],
@@ -446,25 +458,25 @@ class WorkoutsController extends Controller
             ]);
 
             // Generate TrainingSignals v1
-            $trainingSignalsService = new TrainingSignalsService();
+            $trainingSignalsService = new TrainingSignalsService;
             $trainingSignalsService->upsertForWorkout($workout->id);
 
             // Generate TrainingSignals v2 (only if rawTcxXml was provided)
-            if (!empty($validated['rawTcxXml'])) {
-                $trainingSignalsV2Service = new TrainingSignalsV2Service();
+            if (! empty($validated['rawTcxXml'])) {
+                $trainingSignalsV2Service = new TrainingSignalsV2Service;
                 $trainingSignalsV2Service->upsertForWorkout($workout->id);
-                
+
                 // Generate PlanCompliance v2 (only if rawTcxXml was provided)
-                $planComplianceV2Service = new PlanComplianceV2Service();
+                $planComplianceV2Service = new PlanComplianceV2Service;
                 $planComplianceV2Service->upsertForWorkout($workout->id);
             }
 
             // Generate PlanCompliance v1
-            $planComplianceService = new PlanComplianceService();
+            $planComplianceService = new PlanComplianceService;
             $planComplianceService->upsertForWorkout($workout->id);
 
             // Generate TrainingAlerts v1
-            $trainingAlertsV1Service = new TrainingAlertsV1Service();
+            $trainingAlertsV1Service = app(TrainingAlertsV1Service::class);
             $trainingAlertsV1Service->upsertForWorkout($workout->id);
 
             return response()->json([
@@ -479,7 +491,7 @@ class WorkoutsController extends Controller
         $userId = $this->authUserId($request);
         $workout = Workout::with('rawTcx')->where('id', $id)->where('user_id', $userId)->first();
 
-        if (!$workout) {
+        if (! $workout) {
             return response()->json([
                 'error' => 'Workout not found',
             ], 404);
@@ -540,11 +552,12 @@ class WorkoutsController extends Controller
     {
         $userId = $this->authUserId($request);
         $workout = Workout::query()->where('id', $id)->where('user_id', $userId)->first();
-        if (!$workout) {
+        if (! $workout) {
             return response()->json(['error' => 'Workout not found'], 404);
         }
 
         $workout->delete();
+
         return response()->json([], 204);
     }
 
@@ -552,6 +565,7 @@ class WorkoutsController extends Controller
     {
         $userId = $this->authUserId($request);
         $deleted = Workout::query()->where('user_id', $userId)->delete();
+
         return response()->json(['deleted' => $deleted]);
     }
 
@@ -567,7 +581,7 @@ class WorkoutsController extends Controller
 
         $userId = $this->authUserId($request);
         $workout = Workout::where('id', $id)->where('user_id', $userId)->first();
-        if (!$workout) {
+        if (! $workout) {
             return response()->json([
                 'error' => 'Workout not found',
             ], 404);
@@ -587,7 +601,7 @@ class WorkoutsController extends Controller
     {
         $userId = $this->authUserId($request);
         $workout = Workout::where('id', $id)->where('user_id', $userId)->first();
-        if (!$workout) {
+        if (! $workout) {
             return response()->json([
                 'message' => 'workout not found',
             ], 404);
@@ -598,7 +612,7 @@ class WorkoutsController extends Controller
             ->where('workout_id', $id)
             ->first();
 
-        if (!$signals) {
+        if (! $signals) {
             return response()->json([
                 'message' => 'signals not generated',
             ], 404);
@@ -627,7 +641,7 @@ class WorkoutsController extends Controller
     {
         $userId = $this->authUserId($request);
         $workout = Workout::where('id', $id)->where('user_id', $userId)->first();
-        if (!$workout) {
+        if (! $workout) {
             return response()->json([
                 'message' => 'workout not found',
             ], 404);
@@ -638,7 +652,7 @@ class WorkoutsController extends Controller
             ->where('workout_id', $id)
             ->first();
 
-        if (!$compliance) {
+        if (! $compliance) {
             return response()->json([
                 'message' => 'compliance not generated',
             ], 404);
@@ -668,7 +682,7 @@ class WorkoutsController extends Controller
     {
         $userId = $this->authUserId($request);
         $workout = Workout::where('id', $id)->where('user_id', $userId)->first();
-        if (!$workout) {
+        if (! $workout) {
             return response()->json([
                 'message' => 'workout not found',
             ], 404);
@@ -679,7 +693,7 @@ class WorkoutsController extends Controller
             ->where('workout_id', $id)
             ->first();
 
-        if (!$compliance) {
+        if (! $compliance) {
             return response()->json([
                 'message' => 'compliance not generated',
             ], 404);
@@ -711,7 +725,7 @@ class WorkoutsController extends Controller
     {
         $userId = $this->authUserId($request);
         $workout = Workout::where('id', $id)->where('user_id', $userId)->first();
-        if (!$workout) {
+        if (! $workout) {
             return response()->json([
                 'message' => 'workout not found',
             ], 404);
@@ -748,7 +762,35 @@ class WorkoutsController extends Controller
     private function parseTcxXml(string $xml, ?int $userId = null): array
     {
         $hrZones = $userId !== null ? $this->loadHrZones($userId) : null;
+
         return app(TcxParsingService::class)->parse($xml, $hrZones);
+    }
+
+    /**
+     * @return array{0:string,1:array<string,mixed>}
+     */
+    private function parseWorkoutFile(string $content, string $extension, string $fileName, ?int $userId = null): array
+    {
+        $ext = strtolower(trim($extension));
+        if ($ext === '') {
+            $lowerName = strtolower($fileName);
+            if (str_ends_with($lowerName, '.gpx')) {
+                $ext = 'gpx';
+            } elseif (str_ends_with($lowerName, '.fit')) {
+                $ext = 'fit';
+            } else {
+                $ext = 'tcx';
+            }
+        }
+
+        if ($ext === 'gpx') {
+            return ['gpx', app(GpxParsingService::class)->parse($content)];
+        }
+        if ($ext === 'fit') {
+            return ['fit', app(FitParsingService::class)->parse($content)];
+        }
+
+        return ['tcx', $this->parseTcxXml($content, $userId)];
     }
 
     /**
@@ -784,18 +826,19 @@ class WorkoutsController extends Controller
             'hr_z4_min', 'hr_z4_max',
             'hr_z5_min', 'hr_z5_max',
         ]);
-        if (!$profile) {
+        if (! $profile) {
             return null;
         }
         $zones = [];
         for ($i = 1; $i <= 5; $i++) {
             $min = $profile->{"hr_z{$i}_min"} ?? null;
             $max = $profile->{"hr_z{$i}_max"} ?? null;
-            if (!is_numeric($min) || !is_numeric($max)) {
+            if (! is_numeric($min) || ! is_numeric($max)) {
                 return null;
             }
             $zones["z{$i}"] = ['min' => (int) $min, 'max' => (int) $max];
         }
+
         return $zones;
     }
 
@@ -810,7 +853,7 @@ class WorkoutsController extends Controller
         $distanceM = $summary['trimmed']['distanceM'] ?? $summary['original']['distanceM'] ?? null;
         $durationSec = $summary['trimmed']['durationSec'] ?? $summary['original']['durationSec'] ?? null;
 
-        if (!is_numeric($distanceM) || !is_numeric($durationSec)) {
+        if (! is_numeric($distanceM) || ! is_numeric($durationSec)) {
             return null;
         }
 
@@ -823,7 +866,7 @@ class WorkoutsController extends Controller
             $type = in_array($explicitSport, ['run', 'bike', 'swim', 'other'], true) ? $explicitSport : 'other';
         } else {
             // Legacy fallback: best-effort string match (used for pre-M2-beyond summaries).
-            $sportGuess = strtolower((string) (($summary['kind'] ?? '') . ' ' . ($summary['sport'] ?? '')));
+            $sportGuess = strtolower((string) (($summary['kind'] ?? '').' '.($summary['sport'] ?? '')));
             $type = str_contains($sportGuess, 'run') || str_contains($sportGuess, 'bieg') ? 'run' : 'other';
         }
         $avgPaceSecPerKm = isset($summary['avgPaceSecPerKm']) && is_numeric($summary['avgPaceSecPerKm'])
@@ -847,4 +890,3 @@ class WorkoutsController extends Controller
         ];
     }
 }
-

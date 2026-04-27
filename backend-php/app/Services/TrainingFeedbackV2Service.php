@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
-use App\Models\Workout;
 use App\Models\TrainingFeedbackV2;
+use App\Models\Workout;
+use App\Services\Analysis\UserTrainingAnalysisService;
+use App\Services\Analysis\WorkoutFactsExtractor;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -16,6 +18,11 @@ use Illuminate\Support\Facades\DB;
  */
 class TrainingFeedbackV2Service
 {
+    public function __construct(
+        private readonly ?UserTrainingAnalysisService $analysisService = null,
+        private readonly ?WorkoutFactsExtractor $factsExtractor = null,
+    ) {}
+
     /**
      * @return array{id:int,feedback:array<string,mixed>,createdAt:string}|null
      */
@@ -25,7 +32,7 @@ class TrainingFeedbackV2Service
             ->where('workout_id', $workoutId)
             ->where('user_id', $userId)
             ->first();
-        if (!$record) {
+        if (! $record) {
             return null;
         }
 
@@ -52,26 +59,19 @@ class TrainingFeedbackV2Service
             ->where('id', $workoutId)
             ->where('user_id', $userId)
             ->first();
-        if (!$workout) {
+        if (! $workout) {
             return null;
         }
 
+        $facts = ($this->factsExtractor ?? app(WorkoutFactsExtractor::class))->extract($workout);
+        $analysisFacts = $this->analysisFactsForUser($userId);
+
         $summary = is_array($workout->summary) ? $workout->summary : [];
-        $durationSec = (float) (
-            $summary['trimmed']['durationSec']
-            ?? $summary['original']['durationSec']
-            ?? $summary['durationSec']
-            ?? 0
-        );
-        $distanceM = (float) (
-            $summary['trimmed']['distanceM']
-            ?? $summary['original']['distanceM']
-            ?? $summary['distanceM']
-            ?? 0
-        );
-        $distanceKm = $distanceM > 0 ? ($distanceM / 1000) : 0.0;
-        $paceSecPerKm = $distanceKm > 0 ? ($durationSec / $distanceKm) : 0.0;
-        $weeklyLoad = is_numeric($summary['intensity'] ?? null) ? (float) $summary['intensity'] : 0.0;
+        $durationSec = (float) ($facts->durationSec ?? 0);
+        $weeklyLoadContribution = $durationSec > 0 ? round($durationSec / 60.0, 2) : 0.0;
+        $analysisLoad7d = $this->numberOrNull($analysisFacts['load7d'] ?? null);
+        $analysisAcwr = $this->numberOrNull($analysisFacts['acwr'] ?? null);
+        $analysisSpikeLoad = (bool) ($analysisFacts['spikeLoad'] ?? false);
 
         $intensity = [];
         if (is_array($summary['intensityBuckets'] ?? null)) {
@@ -109,19 +109,25 @@ class TrainingFeedbackV2Service
                 'variance' => (float) round((1 - $paceEquality) * 100, 2),
             ],
             'loadImpact' => [
-                'weeklyLoadContribution' => $weeklyLoad,
+                'weeklyLoadContribution' => $weeklyLoadContribution,
+                'analysisLoad7d' => $analysisLoad7d,
+                'acwr' => $analysisAcwr,
+                'spikeLoad' => $analysisSpikeLoad,
                 'intensityScore' => (float) round($intensityScore, 2),
             ],
             'coachSignals' => [
                 'character' => $character,
                 'hrStable' => $hrStable,
                 'economyGood' => $paceEquality > 0.8,
-                'loadHeavy' => $weeklyLoad > 50,
+                'loadHeavy' => $weeklyLoadContribution > 50 || $analysisSpikeLoad,
             ],
             'metrics' => [
                 'hrDrift' => $hrDrift,
                 'paceEquality' => $paceEquality,
-                'weeklyLoadContribution' => $weeklyLoad,
+                'weeklyLoadContribution' => $weeklyLoadContribution,
+                'analysisLoad7d' => $analysisLoad7d,
+                'acwr' => $analysisAcwr,
+                'spikeLoad' => $analysisSpikeLoad,
             ],
             'workoutId' => $workoutId,
         ];
@@ -137,6 +143,161 @@ class TrainingFeedbackV2Service
         );
 
         return $feedback;
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    public function getProductFeedbackForWorkout(int $workoutId, int $userId, bool $generateIfMissing = false): ?array
+    {
+        $record = $this->getFeedbackForWorkout($workoutId, $userId);
+        if ($record === null && $generateIfMissing) {
+            $this->generateFeedback($workoutId, $userId);
+            $record = $this->getFeedbackForWorkout($workoutId, $userId);
+        }
+        if ($record === null) {
+            return null;
+        }
+
+        $workout = Workout::query()
+            ->where('id', $workoutId)
+            ->where('user_id', $userId)
+            ->first();
+        if (!$workout) {
+            return null;
+        }
+
+        return $this->buildProductFeedback((int) $record['id'], $record['feedback'], $record['createdAt'], $workout);
+    }
+
+    /**
+     * @param array<string,mixed> $feedback
+     * @return array<string,mixed>
+     */
+    private function buildProductFeedback(int $feedbackId, array $feedback, string $createdAt, Workout $workout): array
+    {
+        $summary = is_array($workout->summary) ? $workout->summary : [];
+        $meta = is_array($workout->workout_meta) ? $workout->workout_meta : [];
+        $durationSec = (int) ($summary['movingTimeSec'] ?? $summary['durationSec'] ?? $summary['trimmed']['durationSec'] ?? 0);
+        $distanceM = (float) ($summary['distanceM'] ?? $summary['trimmed']['distanceM'] ?? 0);
+        $pace = is_numeric($summary['avgPaceSecPerKm'] ?? null)
+            ? (int) $summary['avgPaceSecPerKm']
+            : ($distanceM > 0 && $durationSec > 0 ? (int) round($durationSec / ($distanceM / 1000.0)) : null);
+
+        $compliance = $this->loadCompliance($workout->id);
+        $signals = FeedbackSignalsMapper::mapFeedbackToSignals($feedback);
+        $deviations = [];
+
+        if (($compliance['durationStatus'] ?? null) === 'OK') {
+            $praise[] = 'Dobra robota: czas treningu byl zgodny z zalozeniem.';
+        } elseif (($compliance['durationStatus'] ?? null) === 'MINOR_DEVIATION') {
+            $deviations[] = 'Czas treningu lekko odbiegal od planu.';
+        } elseif (($compliance['durationStatus'] ?? null) === 'MAJOR_DEVIATION') {
+            $deviations[] = 'Czas treningu mocno odbiegal od planu.';
+        }
+
+        $praise = [];
+        $planCompliance = (string) ($meta['planCompliance'] ?? 'unknown');
+        if ($planCompliance === 'planned') {
+            $praise[] = 'Plus za trzymanie sie planu i wykonanie zaplanowanej jednostki.';
+        } elseif ($planCompliance === 'modified') {
+            $praise[] = 'Dobrze, ze trening zostal dopasowany zamiast nadrabiany na sile.';
+        } elseif ($planCompliance === 'unplanned') {
+            $praise[] = 'Spontaniczny ruch tez buduje baze, o ile nie rozbija regeneracji.';
+        }
+
+        if (($feedback['coachSignals']['hrStable'] ?? false) === true) {
+            $praise[] = 'Tetno bylo stabilne wzgledem charakteru wysilku.';
+        } else {
+            $deviations[] = 'Tetno wygladalo mniej stabilnie - mozliwy dryf, zmeczenie albo warunki dnia.';
+        }
+        if (($feedback['coachSignals']['economyGood'] ?? false) === true) {
+            $praise[] = 'Tempo bylo rowne, co jest dobrym sygnalem kontroli.';
+        } else {
+            $deviations[] = 'Tempo bylo zmienne; warto sprawdzic trase, wiatr, przewyzszenia albo RPE.';
+        }
+        if (($compliance['easyBecameZ5'] ?? false) === true) {
+            $deviations[] = 'Jednostka easy weszla w Z5 - to wazne odchylenie od zalozen.';
+        } elseif (($compliance['hrStatus'] ?? null) === 'OK') {
+            $praise[] = 'Intensywnosc tetna miescila sie w zalozeniach.';
+        } elseif (in_array(($compliance['hrStatus'] ?? null), ['MINOR_DEVIATION', 'MAJOR_DEVIATION'], true)) {
+            $deviations[] = 'Rozklad tetna odbiegal od oczekiwanej strefy.';
+        }
+
+        if (($signals['warnings']['overloadRisk'] ?? false) === true) {
+            $planImpact = 'lagodzimy kolejne dni i pilnujemy ryzyka przeciazenia';
+        } elseif (($signals['warnings']['hrInstability'] ?? false) === true) {
+            $planImpact = 'kolejny akcent powinien byc ostrozniejszy, jesli objawy sie powtorza';
+        } elseif (($signals['warnings']['economyDrop'] ?? false) === true) {
+            $planImpact = 'dodamy wiecej kontroli tempa / techniki zamiast dokladac obciazenie';
+        } else {
+            $planImpact = 'bez mocnej korekty planu; kontynuujemy zalozony rytm';
+        }
+
+        $confidence = ($compliance['durationStatus'] ?? null) !== null || ($compliance['hrStatus'] ?? null) !== null
+            ? 'high'
+            : ($planCompliance !== 'unknown' ? 'medium' : 'low');
+
+        return [
+            'feedbackId' => $feedbackId,
+            'workoutId' => (int) $workout->id,
+            'generatedAtIso' => $createdAt,
+            'summary' => [
+                'character' => $feedback['character'] ?? 'easy',
+                'distanceKm' => $distanceM > 0 ? round($distanceM / 1000.0, 2) : null,
+                'movingTimeSec' => $durationSec > 0 ? $durationSec : null,
+                'avgPaceSecPerKm' => $pace,
+                'planCompliance' => $planCompliance,
+                'durationStatus' => $compliance['durationStatus'] ?? null,
+                'hrStatus' => $compliance['hrStatus'] ?? null,
+            ],
+            'praise' => array_values(array_unique($praise)),
+            'deviations' => array_values(array_unique($deviations)),
+            'conclusions' => [
+                $this->conclusionFromSignals($signals),
+            ],
+            'planImpact' => [
+                'label' => $planImpact,
+                'warnings' => $signals['warnings'] ?? [],
+            ],
+            'confidence' => $confidence,
+            'metrics' => $feedback['metrics'] ?? [],
+        ];
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function loadCompliance(int $workoutId): array
+    {
+        $v1 = DB::table('plan_compliance_v1')->where('workout_id', $workoutId)->first();
+        $v2 = DB::table('plan_compliance_v2')->where('workout_id', $workoutId)->first();
+
+        return [
+            'durationStatus' => $v1?->status,
+            'durationRatio' => $v1?->duration_ratio,
+            'hrStatus' => $v2?->status,
+            'highIntensityRatio' => $v2?->high_intensity_ratio,
+            'easyBecameZ5' => $v2 !== null ? (bool) ($v2->flag_easy_became_z5 ?? false) : false,
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $signals
+     */
+    private function conclusionFromSignals(array $signals): string
+    {
+        if (($signals['warnings']['overloadRisk'] ?? false) === true) {
+            return 'Wniosek: obciazenie z tej jednostki podbija ryzyko, wiec kolejny trening powinien byc spokojny.';
+        }
+        if (($signals['warnings']['hrInstability'] ?? false) === true) {
+            return 'Wniosek: reakcja tetna sugeruje ostroznosc przed kolejnym akcentem.';
+        }
+        if (($signals['warnings']['economyDrop'] ?? false) === true) {
+            return 'Wniosek: warto popracowac nad rownym tempem i ekonomia, bez dokladania intensywnosci.';
+        }
+
+        return 'Wniosek: trening wyglada spojnie z obecnym rytmem, plan moze isc dalej bez duzej korekty.';
     }
 
     /**
@@ -183,6 +344,7 @@ class TrainingFeedbackV2Service
                     return FeedbackSignalsMapper::mapFeedbackToSignals($fb);
                 }
             }
+
             return null;
         }
 
@@ -192,7 +354,7 @@ class TrainingFeedbackV2Service
     private function resolveWorkoutDt(TrainingFeedbackV2 $record): int
     {
         $workout = $record->workout;
-        if (!$workout) {
+        if (! $workout) {
             return 0;
         }
         $summary = is_array($workout->summary) ? $workout->summary : [];
@@ -207,11 +369,12 @@ class TrainingFeedbackV2Service
                 // fallback below
             }
         }
+
         return $workout->created_at ? $workout->created_at->getTimestamp() * 1000 : 0;
     }
 
     /**
-     * @param array{z1Sec:float,z2Sec:float,z3Sec:float,z4Sec:float,z5Sec:float} $intensity
+     * @param  array{z1Sec:float,z2Sec:float,z3Sec:float,z4Sec:float,z5Sec:float}  $intensity
      */
     private function determineCharacter(array $intensity, float $durationSec): string
     {
@@ -255,7 +418,7 @@ class TrainingFeedbackV2Service
             $data = $raw;
         } elseif (is_string($raw) && $raw !== '') {
             $data = json_decode($raw, true);
-            if (!is_array($data)) {
+            if (! is_array($data)) {
                 return null;
             }
         } else {
@@ -264,20 +427,21 @@ class TrainingFeedbackV2Service
 
         // normalize coachSignals
         $coachSignals = $data['coachSignals'] ?? null;
-        $needsCompute = !is_array($coachSignals)
+        $needsCompute = ! is_array($coachSignals)
             || array_key_exists('fatigueRisk', $coachSignals)
             || array_key_exists('readiness', $coachSignals)
             || array_key_exists('trainingRole', $coachSignals)
-            || !array_key_exists('hrStable', $coachSignals)
-            || !array_key_exists('economyGood', $coachSignals)
-            || !array_key_exists('loadHeavy', $coachSignals);
+            || ! array_key_exists('hrStable', $coachSignals)
+            || ! array_key_exists('economyGood', $coachSignals)
+            || ! array_key_exists('loadHeavy', $coachSignals);
 
         if ($needsCompute) {
             $drift = $data['hrStability']['drift'] ?? null;
             $artefacts = (bool) ($data['hrStability']['artefacts'] ?? false);
-            $hrStable = ($drift === null || abs((float) $drift) <= 2) && !$artefacts;
+            $hrStable = ($drift === null || abs((float) $drift) <= 2) && ! $artefacts;
             $economyGood = ((float) ($data['economy']['paceEquality'] ?? 0)) > 0.8;
-            $loadHeavy = ((float) ($data['loadImpact']['weeklyLoadContribution'] ?? 0)) > 50;
+            $spikeLoad = (bool) ($data['loadImpact']['spikeLoad'] ?? $data['metrics']['spikeLoad'] ?? false);
+            $loadHeavy = ((float) ($data['loadImpact']['weeklyLoadContribution'] ?? 0)) > 50 || $spikeLoad;
 
             $data['coachSignals'] = [
                 'character' => $data['character'] ?? 'easy',
@@ -287,11 +451,14 @@ class TrainingFeedbackV2Service
             ];
         }
 
-        if (!isset($data['metrics']) || !is_array($data['metrics'])) {
+        if (! isset($data['metrics']) || ! is_array($data['metrics'])) {
             $data['metrics'] = [
                 'hrDrift' => $data['hrStability']['drift'] ?? null,
                 'paceEquality' => $data['economy']['paceEquality'] ?? 0,
                 'weeklyLoadContribution' => $data['loadImpact']['weeklyLoadContribution'] ?? 0,
+                'analysisLoad7d' => $data['loadImpact']['analysisLoad7d'] ?? null,
+                'acwr' => $data['loadImpact']['acwr'] ?? null,
+                'spikeLoad' => (bool) ($data['loadImpact']['spikeLoad'] ?? false),
             ];
         }
 
@@ -299,5 +466,25 @@ class TrainingFeedbackV2Service
         unset($data['coachConclusion'], $data['generatedAtIso']);
 
         return $data;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function analysisFactsForUser(int $userId): array
+    {
+        try {
+            $service = $this->analysisService ?? app(UserTrainingAnalysisService::class);
+            $analysis = $service->analyze($userId, 28)->toArray();
+
+            return is_array($analysis['facts'] ?? null) ? $analysis['facts'] : [];
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    private function numberOrNull(mixed $value): ?float
+    {
+        return is_numeric($value) ? (float) $value : null;
     }
 }

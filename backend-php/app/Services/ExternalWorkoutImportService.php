@@ -13,11 +13,10 @@ class ExternalWorkoutImportService
         private readonly ?TrainingSignalsService $trainingSignalsService = null,
         private readonly ?PlanComplianceService $planComplianceService = null,
         private readonly ?TrainingAlertsV1Service $trainingAlertsV1Service = null,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<int,array<string,mixed>> $activities
+     * @param  array<int,array<string,mixed>>  $activities
      * @return array{fetched:int,imported:int,deduped:int,failed:int}
      */
     public function importActivities(int $userId, string $provider, array $activities): array
@@ -38,6 +37,7 @@ class ExternalWorkoutImportService
             $distanceM = (int) ($activity['distanceM'] ?? 0);
             if ($sourceActivityId === null || $startTimeIso === '' || $durationSec <= 0 || $distanceM < 0) {
                 $failed++;
+
                 continue;
             }
 
@@ -57,6 +57,7 @@ class ExternalWorkoutImportService
                     'status' => 'DEDUPED',
                     'imported_at' => now(),
                 ]);
+
                 continue;
             }
 
@@ -99,9 +100,9 @@ class ExternalWorkoutImportService
     private function runSignalPipelines(int $workoutId): void
     {
         try {
-            ($this->trainingSignalsService ?? new TrainingSignalsService())->upsertForWorkout($workoutId);
-            ($this->planComplianceService ?? new PlanComplianceService())->upsertForWorkout($workoutId);
-            ($this->trainingAlertsV1Service ?? new TrainingAlertsV1Service())->upsertForWorkout($workoutId);
+            ($this->trainingSignalsService ?? new TrainingSignalsService)->upsertForWorkout($workoutId);
+            ($this->planComplianceService ?? new PlanComplianceService)->upsertForWorkout($workoutId);
+            ($this->trainingAlertsV1Service ?? app(TrainingAlertsV1Service::class))->upsertForWorkout($workoutId);
         } catch (\Throwable $e) {
             // Pipelines must not break import; log and continue so the import metric stays accurate.
             \Log::warning('ExternalWorkoutImportService signal pipeline failed', [

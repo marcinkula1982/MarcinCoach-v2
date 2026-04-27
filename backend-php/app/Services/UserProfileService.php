@@ -48,6 +48,7 @@ class UserProfileService
             'availability' => ['runningDays' => ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], 'maxSessionMin' => null],
             'health' => ['hasCurrentPain' => false],
             'equipment' => ['hasHrSensor' => false],
+            'paceZones' => null,
             'quality' => [
                 'score' => 0,
                 'hasPrimaryRace' => false,
@@ -79,6 +80,7 @@ class UserProfileService
         // constraints JSON may carry shoes + hrZones
         $shoes = $defaults['shoes'];
         $hrZones = $defaults['hrZones'];
+        $paceZones = null;
         if (is_string($profile->constraints) && $profile->constraints !== '') {
             $parsed = json_decode($profile->constraints, true);
             if (is_array($parsed)) {
@@ -89,6 +91,9 @@ class UserProfileService
                 }
                 if (isset($parsed['hrZones']) && is_array($parsed['hrZones'])) {
                     $hrZones = $this->parseHrZonesOrDefault($parsed['hrZones'], $defaults['hrZones']);
+                }
+                if (isset($parsed['paceZones']) && is_array($parsed['paceZones'])) {
+                    $paceZones = $parsed['paceZones'];
                 }
             }
         }
@@ -101,10 +106,13 @@ class UserProfileService
         // primaryRace from projection columns
         $primaryRace = null;
         if ($profile->primary_race_date !== null) {
+            $selectedRace = $this->selectPrimaryRace(is_array($profile->races_json) ? $profile->races_json : []);
             $primaryRace = [
+                'name' => is_array($selectedRace) ? ($selectedRace['name'] ?? null) : null,
                 'date' => $profile->primary_race_date->toDateString(),
                 'distanceKm' => $profile->primary_race_distance_km !== null ? (float) $profile->primary_race_distance_km : null,
                 'priority' => $profile->primary_race_priority,
+                'targetTime' => is_array($selectedRace) ? ($selectedRace['targetTime'] ?? null) : null,
             ];
         }
 
@@ -149,8 +157,48 @@ class UserProfileService
             'availability' => $availability,
             'health' => $health,
             'equipment' => $equipment,
+            'paceZones' => $paceZones,
             'quality' => $quality,
         ];
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $races
+     * @return array<string,mixed>|null
+     */
+    private function selectPrimaryRace(array $races): ?array
+    {
+        $today = now()->startOfDay();
+        $priorityRank = ['A' => 1, 'B' => 2, 'C' => 3];
+        $candidates = [];
+        foreach ($races as $race) {
+            if (!is_array($race) || !isset($race['date'])) {
+                continue;
+            }
+            try {
+                $dt = \Carbon\Carbon::parse((string) $race['date'])->startOfDay();
+            } catch (\Throwable) {
+                continue;
+            }
+            if ($dt->lessThan($today)) {
+                continue;
+            }
+            $candidates[] = [
+                'race' => $race,
+                'dt' => $dt,
+                'rank' => $priorityRank[$race['priority'] ?? ''] ?? 99,
+            ];
+        }
+        if (empty($candidates)) {
+            return null;
+        }
+        usort($candidates, function (array $a, array $b): int {
+            if ($a['rank'] !== $b['rank']) {
+                return $a['rank'] <=> $b['rank'];
+            }
+            return $a['dt']->getTimestamp() <=> $b['dt']->getTimestamp();
+        });
+        return $candidates[0]['race'];
     }
 
     /**

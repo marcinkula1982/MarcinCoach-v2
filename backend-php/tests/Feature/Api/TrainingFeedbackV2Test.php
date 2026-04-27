@@ -4,6 +4,7 @@ namespace Tests\Feature\Api;
 
 use App\Models\User;
 use App\Models\Workout;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -58,5 +59,77 @@ class TrainingFeedbackV2Test extends TestCase
         $question->assertOk();
         $question->assertJsonStructure(['answer']);
         $question->assertHeader('x-ai-cache', 'miss');
+    }
+
+    public function test_feedback_v2_uses_training_analysis_for_load_risk(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-27T10:00:00Z'));
+
+        try {
+            foreach ([22, 15, 8] as $daysAgo) {
+                Workout::create([
+                    'user_id' => 1,
+                    'action' => 'save',
+                    'kind' => 'training',
+                    'summary' => [
+                        'startTimeIso' => Carbon::now()->subDays($daysAgo)->toIso8601String(),
+                        'durationSec' => 300,
+                        'distanceM' => 1000,
+                        'sport' => 'run',
+                        'intensity' => 999,
+                    ],
+                    'source' => 'manual',
+                    'dedupe_key' => "feedback-v2-analysis-base-{$daysAgo}",
+                ]);
+            }
+
+            for ($i = 4; $i >= 2; $i--) {
+                Workout::create([
+                    'user_id' => 1,
+                    'action' => 'save',
+                    'kind' => 'training',
+                    'summary' => [
+                        'startTimeIso' => Carbon::now()->subDays($i)->toIso8601String(),
+                        'durationSec' => 1200,
+                        'distanceM' => 3000,
+                        'sport' => 'run',
+                        'intensity' => 1,
+                    ],
+                    'source' => 'manual',
+                    'dedupe_key' => "feedback-v2-analysis-current-{$i}",
+                ]);
+            }
+
+            $workout = Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => [
+                    'startTimeIso' => Carbon::now()->subDay()->toIso8601String(),
+                    'durationSec' => 1200,
+                    'distanceM' => 3000,
+                    'sport' => 'run',
+                    'intensity' => 1,
+                    'paceEquality' => 0.82,
+                    'hrDrift' => 1.0,
+                ],
+                'source' => 'manual',
+                'source_activity_id' => 'feedback-v2-analysis-risk',
+                'dedupe_key' => 'manual:feedback-v2-analysis-risk',
+            ]);
+
+            $generate = $this->postJson("/api/training-feedback-v2/{$workout->id}/generate");
+            $generate->assertOk();
+            $generate->assertJsonPath('metrics.weeklyLoadContribution', 20);
+            $generate->assertJsonPath('metrics.spikeLoad', true);
+            $generate->assertJsonPath('coachSignals.loadHeavy', true);
+
+            $signals = $this->getJson("/api/training-feedback-v2/signals/{$workout->id}");
+            $signals->assertOk();
+            $signals->assertJsonPath('loadImpact', 'high');
+            $signals->assertJsonPath('warnings.overloadRisk', true);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 }

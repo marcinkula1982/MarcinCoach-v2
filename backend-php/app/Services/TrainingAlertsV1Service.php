@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\Workout;
+use App\Services\Analysis\UserTrainingAnalysisService;
+use App\Services\Analysis\WorkoutFactsAggregator;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -27,13 +29,13 @@ class TrainingAlertsV1Service
 {
     public function __construct(
         private readonly ?PlanMemoryService $planMemoryService = null,
-    ) {
-    }
+        private readonly ?UserTrainingAnalysisService $analysisService = null,
+    ) {}
 
     public function upsertForWorkout(int $workoutId): void
     {
         $workout = Workout::find($workoutId);
-        if (!$workout) {
+        if (! $workout) {
             return;
         }
 
@@ -52,7 +54,7 @@ class TrainingAlertsV1Service
         $activeAlerts = [];
 
         // LOAD_SPIKE (WARNING, safety)
-        $loadSpike = $this->calculateLoadSpikeForWorkout($workout);
+        $loadSpike = $this->resolveLoadSpikeForWorkout($workout);
         if ($loadSpike['isSpike']) {
             $activeAlerts[] = [
                 'code' => 'LOAD_SPIKE',
@@ -64,7 +66,9 @@ class TrainingAlertsV1Service
                     'current7dLoad' => $loadSpike['current7dLoad'],
                     'previous7dLoad' => $loadSpike['previous7dLoad'],
                     'rampRatio' => $loadSpike['rampRatio'],
-                    'thresholdRatio' => 1.3,
+                    'thresholdRatio' => $loadSpike['thresholdRatio'],
+                    'source' => $loadSpike['source'],
+                    'analysisComputedAt' => $loadSpike['analysisComputedAt'] ?? null,
                 ]),
             ];
         }
@@ -92,7 +96,7 @@ class TrainingAlertsV1Service
             ];
         }
 
-        if (!$complianceV1 || $complianceV1->status === 'UNKNOWN') {
+        if (! $complianceV1 || $complianceV1->status === 'UNKNOWN') {
             $activeAlerts[] = [
                 'code' => 'PLAN_MISSING',
                 'severity' => 'INFO',
@@ -159,7 +163,7 @@ class TrainingAlertsV1Service
             ];
         }
 
-        if (!$signalsV2 || ($signalsV2->hr_available ?? 0) == 0) {
+        if (! $signalsV2 || ($signalsV2->hr_available ?? 0) == 0) {
             $activeAlerts[] = [
                 'code' => 'HR_DATA_MISSING',
                 'severity' => 'INFO',
@@ -178,7 +182,7 @@ class TrainingAlertsV1Service
             ->toArray();
 
         $codesToDelete = array_diff($existingAlerts, $activeCodes);
-        if (!empty($codesToDelete)) {
+        if (! empty($codesToDelete)) {
             DB::table('training_alerts_v1')
                 ->where('workout_id', $workoutId)
                 ->whereIn('code', $codesToDelete)
@@ -213,7 +217,7 @@ class TrainingAlertsV1Service
             ->where('user_id', $userId)
             ->where('week_start_date', $weekStartDate)
             ->first();
-        if (!$week) {
+        if (! $week) {
             return;
         }
         $weekId = (int) $week->id;
@@ -298,6 +302,7 @@ class TrainingAlertsV1Service
             $qc = (int) ($w['actual_quality_count'] ?? 0);
             if ($qc >= 3) {
                 $densityStreak++;
+
                 continue;
             }
             break;
@@ -321,9 +326,10 @@ class TrainingAlertsV1Service
             foreach ($recentWeeks as $w) {
                 if (($w['block_type'] ?? null) === $currentBlock) {
                     $blockWeeks[] = $w;
+
                     continue;
                 }
-                if (!empty($blockWeeks)) {
+                if (! empty($blockWeeks)) {
                     break;
                 }
             }
@@ -374,7 +380,7 @@ class TrainingAlertsV1Service
             ->toArray();
 
         $codesToDelete = array_diff($existingWeeklyAlerts, $activeCodes);
-        if (!empty($codesToDelete)) {
+        if (! empty($codesToDelete)) {
             DB::table('training_alerts_v1')
                 ->where('week_id', $weekId)
                 ->whereNull('workout_id')
@@ -422,7 +428,40 @@ class TrainingAlertsV1Service
     }
 
     /**
-     * @return array{isSpike:bool,current7dLoad:float,previous7dLoad:float,rampRatio:float|null}
+     * @return array{isSpike:bool,current7dLoad:float,previous7dLoad:float,rampRatio:float|null,thresholdRatio:float,source:string,analysisComputedAt:string|null}
+     */
+    private function resolveLoadSpikeForWorkout(Workout $workout): array
+    {
+        try {
+            $service = $this->analysisService ?? app(UserTrainingAnalysisService::class);
+            $analysis = $service->analyze((int) $workout->user_id, 28)->toArray();
+            $facts = is_array($analysis['facts'] ?? null) ? $analysis['facts'] : [];
+            $codes = $this->codes($analysis['planImplications'] ?? []);
+
+            $load7d = $this->numberOrZero($facts['load7d'] ?? null);
+            $load28d = $this->numberOrZero($facts['load28d'] ?? null);
+            $acwr = is_numeric($facts['acwr'] ?? null) ? (float) $facts['acwr'] : null;
+            $baseline7d = $load28d > 0 ? round($load28d / 4.0, 2) : 0.0;
+            $isSpike = (bool) ($facts['spikeLoad'] ?? false) || in_array('load_spike', $codes, true);
+
+            return [
+                'isSpike' => $isSpike,
+                'current7dLoad' => round($load7d, 2),
+                'previous7dLoad' => $baseline7d,
+                'rampRatio' => $acwr !== null ? round($acwr, 3) : null,
+                'thresholdRatio' => WorkoutFactsAggregator::SPIKE_ACWR_THRESHOLD,
+                'source' => 'user_training_analysis',
+                'analysisComputedAt' => is_string($analysis['computedAt'] ?? null) ? $analysis['computedAt'] : null,
+            ];
+        } catch (\Throwable) {
+            return $this->calculateLoadSpikeForWorkout($workout);
+        }
+    }
+
+    /**
+     * @deprecated F7 keeps this only as a best-effort fallback for legacy import paths.
+     *
+     * @return array{isSpike:bool,current7dLoad:float,previous7dLoad:float,rampRatio:float|null,thresholdRatio:float,source:string,analysisComputedAt:null}
      */
     private function calculateLoadSpikeForWorkout(Workout $workout): array
     {
@@ -452,6 +491,7 @@ class TrainingAlertsV1Service
 
             if ($rowDt->greaterThan($currentFrom) && $rowDt->lessThanOrEqualTo($workoutDt)) {
                 $current7dLoad += $load;
+
                 continue;
             }
 
@@ -470,6 +510,9 @@ class TrainingAlertsV1Service
             'current7dLoad' => round($current7dLoad, 2),
             'previous7dLoad' => round($previous7dLoad, 2),
             'rampRatio' => $rampRatio !== null ? round($rampRatio, 3) : null,
+            'thresholdRatio' => 1.3,
+            'source' => 'legacy_training_signals',
+            'analysisComputedAt' => null,
         ];
     }
 
@@ -502,29 +545,54 @@ class TrainingAlertsV1Service
         return 0.0;
     }
 
+    private function numberOrZero(mixed $value): float
+    {
+        return is_numeric($value) ? (float) $value : 0.0;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function codes(mixed $items): array
+    {
+        if (! is_array($items)) {
+            return [];
+        }
+
+        $codes = [];
+        foreach ($items as $item) {
+            if (! is_array($item) || ! is_string($item['code'] ?? null)) {
+                continue;
+            }
+            $codes[] = $item['code'];
+        }
+
+        return $codes;
+    }
+
     private function hasMissedKeyWorkout(int $userId, Workout $anchorWorkout): bool
     {
         $snapshot = DB::table('plan_snapshots')
             ->where('user_id', $userId)
             ->orderByDesc('created_at')
             ->first(['snapshot_json']);
-        if (!$snapshot) {
+        if (! $snapshot) {
             return false;
         }
 
         $decoded = json_decode((string) $snapshot->snapshot_json, true);
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             return false;
         }
         $items = $decoded['items'] ?? $decoded;
-        if (!is_array($items) || !array_is_list($items)) {
+        if (! is_array($items) || ! array_is_list($items)) {
             return false;
         }
 
         $anchorSummary = is_array($anchorWorkout->summary) ? $anchorWorkout->summary : [];
         $anchorDt = $this->resolveWorkoutDt($anchorSummary, $anchorWorkout->created_at);
         foreach ($items as $item) {
-            if (!is_array($item) || !isset($item['startTimeIso'])) {
+            if (! is_array($item) || ! isset($item['startTimeIso'])) {
                 continue;
             }
             try {
@@ -543,10 +611,11 @@ class TrainingAlertsV1Service
                 ->contains(function (Workout $workout) use ($plannedDt): bool {
                     $summary = is_array($workout->summary) ? $workout->summary : [];
                     $dt = $this->resolveWorkoutDt($summary, $workout->created_at);
+
                     return abs($dt->diffInSeconds($plannedDt)) <= (12 * 60 * 60);
                 });
 
-            if (!$matched) {
+            if (! $matched) {
                 return true;
             }
         }

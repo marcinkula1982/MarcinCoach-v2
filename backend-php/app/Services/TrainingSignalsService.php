@@ -8,6 +8,11 @@ use Illuminate\Support\Facades\DB;
 
 class TrainingSignalsService
 {
+    /**
+     * @deprecated F7: new planning, alerts and feedback-v2 paths should use
+     * UserTrainingAnalysisService. This method remains for the public
+     * /training-signals compatibility endpoint and v1 backfills.
+     */
     public function getSignalsForUser(int $userId, int $days = 28): array
     {
         $workouts = Workout::query()
@@ -81,7 +86,7 @@ class TrainingSignalsService
         $postRaceWeek = false;
         if (is_array($lastWorkout)) {
             $isRaceKind = strtolower((string) ($lastWorkout['kind'] ?? '')) === 'race';
-            $hasRaceMeta = is_array($lastWorkout['raceMeta'] ?? null) && !empty($lastWorkout['raceMeta']);
+            $hasRaceMeta = is_array($lastWorkout['raceMeta'] ?? null) && ! empty($lastWorkout['raceMeta']);
             $postRaceWeek = $isRaceKind || $hasRaceMeta;
         }
 
@@ -104,8 +109,8 @@ class TrainingSignalsService
         foreach ($filtered as $row) {
             $sport = $row['sport'] ?? null;
             $isRun = $sport === 'run';
-            $legacyEligible = !$hasSportTagged && $sport === null;
-            if (!$isRun && !$legacyEligible) {
+            $legacyEligible = ! $hasSportTagged && $sport === null;
+            if (! $isRun && ! $legacyEligible) {
                 continue;
             }
             if ($longRunRow === null || $row['distanceKm'] > $longRunRow['distanceKm']) {
@@ -150,7 +155,7 @@ class TrainingSignalsService
     public function upsertForWorkout(int $workoutId): void
     {
         $workout = Workout::find($workoutId);
-        if (!$workout) {
+        if (! $workout) {
             return;
         }
 
@@ -215,7 +220,7 @@ class TrainingSignalsService
      *   2) Numeric intensity score (legacy / seeded test data).
      *   3) Duration/60 proxy (last-resort fallback).
      *
-     * @param array{z1Sec:float,z2Sec:float,z3Sec:float,z4Sec:float,z5Sec:float,totalSec:float}|null $buckets
+     * @param  array{z1Sec:float,z2Sec:float,z3Sec:float,z4Sec:float,z5Sec:float,totalSec:float}|null  $buckets
      */
     private function extractLoadValue(array $summary, ?array $buckets = null): float
     {
@@ -227,6 +232,7 @@ class TrainingSignalsService
                 + $buckets['z3Sec'] * 3
                 + $buckets['z4Sec'] * 4
                 + $buckets['z5Sec'] * 5;
+
             return round($weighted / 60.0, 2);
         }
 
@@ -249,11 +255,11 @@ class TrainingSignalsService
     private function extractBuckets(array $summary): array
     {
         $bucketsRaw = $summary['intensityBuckets'] ?? null;
-        if (!is_array($bucketsRaw) && isset($summary['intensity']) && is_array($summary['intensity'])) {
+        if (! is_array($bucketsRaw) && isset($summary['intensity']) && is_array($summary['intensity'])) {
             $bucketsRaw = $summary['intensity'];
         }
 
-        if (!is_array($bucketsRaw)) {
+        if (! is_array($bucketsRaw)) {
             return $this->emptyBuckets();
         }
 
@@ -293,8 +299,8 @@ class TrainingSignalsService
     }
 
     /**
-     * @param array{z1Sec:float,z2Sec:float,z3Sec:float,z4Sec:float,z5Sec:float,totalSec:float} $a
-     * @param array{z1Sec:float,z2Sec:float,z3Sec:float,z4Sec:float,z5Sec:float,totalSec:float} $b
+     * @param  array{z1Sec:float,z2Sec:float,z3Sec:float,z4Sec:float,z5Sec:float,totalSec:float}  $a
+     * @param  array{z1Sec:float,z2Sec:float,z3Sec:float,z4Sec:float,z5Sec:float,totalSec:float}  $b
      * @return array{z1Sec:float,z2Sec:float,z3Sec:float,z4Sec:float,z5Sec:float,totalSec:float}
      */
     private function addBuckets(array $a, array $b): array
@@ -315,7 +321,7 @@ class TrainingSignalsService
     }
 
     /**
-     * @param array<string,mixed>|null $lastWorkout
+     * @param  array<string,mixed>|null  $lastWorkout
      * @return array{missedKeyWorkout:bool,harderThanPlanned:bool,easierThanPlannedStreak:int,controlStartRecent:bool}
      */
     private function buildAdaptationSignals(int $userId, array $filteredRows, Carbon $windowEnd, ?array $lastWorkout): array
@@ -387,21 +393,21 @@ class TrainingSignalsService
             ->where('user_id', $userId)
             ->orderByDesc('created_at')
             ->first(['snapshot_json']);
-        if (!$snapshot) {
+        if (! $snapshot) {
             return false;
         }
 
         $decoded = json_decode((string) $snapshot->snapshot_json, true);
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             return false;
         }
         $items = $decoded['items'] ?? $decoded;
-        if (!is_array($items) || !array_is_list($items)) {
+        if (! is_array($items) || ! array_is_list($items)) {
             return false;
         }
 
         foreach ($items as $item) {
-            if (!is_array($item) || !isset($item['startTimeIso'])) {
+            if (! is_array($item) || ! isset($item['startTimeIso'])) {
                 continue;
             }
             try {
@@ -419,10 +425,11 @@ class TrainingSignalsService
                 ->contains(function (Workout $workout) use ($plannedDt): bool {
                     $summary = is_array($workout->summary) ? $workout->summary : [];
                     $dt = $this->getWorkoutDt($summary, $workout->created_at);
+
                     return abs($dt->diffInSeconds($plannedDt)) <= (12 * 60 * 60);
                 });
 
-            if (!$matched) {
+            if (! $matched) {
                 return true;
             }
         }
@@ -430,5 +437,3 @@ class TrainingSignalsService
         return false;
     }
 }
-
-

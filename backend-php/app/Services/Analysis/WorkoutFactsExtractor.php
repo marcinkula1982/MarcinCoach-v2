@@ -76,6 +76,14 @@ class WorkoutFactsExtractor
             ],
             computedAt: now()->utc()->toIso8601String(),
             extractorVersion: self::EXTRACTOR_VERSION,
+            elapsedTimeSec: $this->intOrNull($summary['elapsedTimeSec'] ?? null),
+            avgCadenceSpm: $this->intOrNull($summary['cadence']['avgSpm'] ?? null),
+            maxCadenceSpm: $this->intOrNull($summary['cadence']['maxSpm'] ?? null),
+            avgPowerWatts: $this->intOrNull($summary['power']['avgWatts'] ?? null),
+            maxPowerWatts: $this->intOrNull($summary['power']['maxWatts'] ?? null),
+            elevationLossMeters: $this->floatOrNull($summary['elevationLossMeters'] ?? null),
+            paceZones: is_array($summary['paceZones'] ?? null) ? $summary['paceZones'] : [],
+            dataAvailability: $this->resolveDataAvailability($summary, $rawTcxId),
         );
     }
 
@@ -211,6 +219,24 @@ class WorkoutFactsExtractor
         }
 
         return isset($summary['elevation']) && is_array($summary['elevation']) && ! empty($summary['elevation']);
+    }
+
+    /**
+     * @param  array<string,mixed>  $summary
+     * @return array<string,bool>
+     */
+    private function resolveDataAvailability(array $summary, ?string $rawTcxId): array
+    {
+        $raw = is_array($summary['dataAvailability'] ?? null) ? $summary['dataAvailability'] : [];
+
+        return [
+            'gps' => array_key_exists('gps', $raw) ? (bool) $raw['gps'] : $rawTcxId !== null,
+            'hr' => array_key_exists('hr', $raw) ? (bool) $raw['hr'] : isset($summary['hr']),
+            'cadence' => array_key_exists('cadence', $raw) ? (bool) $raw['cadence'] : $this->resolveHasCadence($summary),
+            'power' => array_key_exists('power', $raw) ? (bool) $raw['power'] : $this->resolveHasPower($summary),
+            'elevation' => array_key_exists('elevation', $raw) ? (bool) $raw['elevation'] : $this->resolveHasElevation($summary),
+            'movingTime' => array_key_exists('movingTime', $raw) ? (bool) $raw['movingTime'] : isset($summary['movingTimeSec']),
+        ];
     }
 
     /**

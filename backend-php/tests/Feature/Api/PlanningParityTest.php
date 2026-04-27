@@ -5,8 +5,8 @@ namespace Tests\Feature\Api;
 use App\Models\User;
 use App\Models\Workout;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class PlanningParityTest extends TestCase
@@ -69,7 +69,39 @@ class PlanningParityTest extends TestCase
         $this->assertContains('surface_constraint', $plan->json('appliedAdjustmentsCodes'));
     }
 
-    public function test_weekly_plan_uses_total_workouts_from_php_training_signals_contract(): void
+    public function test_training_context_uses_user_training_analysis_load_contract(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-27T10:00:00Z'));
+
+        try {
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => [
+                    'startTimeIso' => '2026-04-25T10:00:00Z',
+                    'durationSec' => 3600,
+                    'distanceM' => 10000,
+                    'sport' => 'run',
+                    'intensity' => 999,
+                ],
+                'source' => 'manual',
+                'dedupe_key' => 'planning-analysis-load-contract',
+            ]);
+
+            $ctx = $this->getJson('/api/training-context?days=28');
+            $ctx->assertOk();
+
+            $this->assertSame(60.0, (float) $ctx->json('signals.weeklyLoad'));
+            $this->assertSame(60.0, (float) $ctx->json('signals.rolling4wLoad'));
+            $this->assertSame(1, (int) $ctx->json('signals.totalWorkouts'));
+            $this->assertSame(10.0, (float) $ctx->json('signals.longRun.distanceKm'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_weekly_plan_uses_total_workouts_from_user_training_analysis_contract(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-04-21T12:00:00Z'));
 
@@ -78,7 +110,7 @@ class PlanningParityTest extends TestCase
                 'user_id' => 1,
                 'action' => 'save',
                 'kind' => 'training',
-                'summary' => ['startTimeIso' => '2026-04-18T10:00:00Z', 'durationSec' => 1800, 'distanceM' => 5000, 'intensity' => 20],
+                'summary' => ['startTimeIso' => '2026-03-30T10:00:00Z', 'durationSec' => 1800, 'distanceM' => 5000, 'intensity' => 20],
                 'source' => 'manual',
                 'dedupe_key' => 'planning-contract-freeze-1',
             ]);
@@ -86,7 +118,7 @@ class PlanningParityTest extends TestCase
                 'user_id' => 1,
                 'action' => 'save',
                 'kind' => 'training',
-                'summary' => ['startTimeIso' => '2026-04-19T10:00:00Z', 'durationSec' => 2000, 'distanceM' => 5500, 'intensity' => 25],
+                'summary' => ['startTimeIso' => '2026-04-06T10:00:00Z', 'durationSec' => 1800, 'distanceM' => 5000, 'intensity' => 20],
                 'source' => 'manual',
                 'dedupe_key' => 'planning-contract-freeze-2',
             ]);
@@ -94,9 +126,17 @@ class PlanningParityTest extends TestCase
                 'user_id' => 1,
                 'action' => 'save',
                 'kind' => 'training',
-                'summary' => ['startTimeIso' => '2026-04-20T10:00:00Z', 'durationSec' => 2100, 'distanceM' => 5600, 'intensity' => 30],
+                'summary' => ['startTimeIso' => '2026-04-13T10:00:00Z', 'durationSec' => 1800, 'distanceM' => 5000, 'intensity' => 20],
                 'source' => 'manual',
                 'dedupe_key' => 'planning-contract-freeze-3',
+            ]);
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => ['startTimeIso' => '2026-04-20T10:00:00Z', 'durationSec' => 1800, 'distanceM' => 5000, 'intensity' => 20],
+                'source' => 'manual',
+                'dedupe_key' => 'planning-contract-freeze-4',
             ]);
 
             $plan = $this->getJson('/api/weekly-plan?days=28');

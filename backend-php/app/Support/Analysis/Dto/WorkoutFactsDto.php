@@ -32,6 +32,14 @@ readonly class WorkoutFactsDto
         public array $rawProviderRefs,
         public string $computedAt,
         public string $extractorVersion,
+        public ?int $elapsedTimeSec = null,
+        public ?int $avgCadenceSpm = null,
+        public ?int $maxCadenceSpm = null,
+        public ?int $avgPowerWatts = null,
+        public ?int $maxPowerWatts = null,
+        public ?float $elevationLossMeters = null,
+        public array $paceZones = [],
+        public array $dataAvailability = [],
     ) {}
 
     /**
@@ -89,6 +97,14 @@ readonly class WorkoutFactsDto
             'rawProviderRefs' => $this->rawProviderRefs,
             'computedAt' => $this->computedAt,
             'extractorVersion' => $this->extractorVersion,
+            'elapsedTimeSec' => $this->elapsedTimeSec,
+            'avgCadenceSpm' => $this->avgCadenceSpm,
+            'maxCadenceSpm' => $this->maxCadenceSpm,
+            'avgPowerWatts' => $this->avgPowerWatts,
+            'maxPowerWatts' => $this->maxPowerWatts,
+            'elevationLossMeters' => $this->elevationLossMeters,
+            'paceZones' => $this->paceZones,
+            'dataAvailability' => $this->dataAvailability,
         ];
     }
 }

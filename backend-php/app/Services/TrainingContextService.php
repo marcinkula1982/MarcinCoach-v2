@@ -2,6 +2,9 @@
 
 namespace App\Services;
 
+use App\Services\Analysis\UserTrainingAnalysisContextAdapter;
+use App\Services\Analysis\UserTrainingAnalysisService;
+
 /**
  * Port of backend/src/training-context/training-context.service.ts.
  * Composes TrainingSignals + UserProfileConstraints into TrainingContext.
@@ -11,10 +14,11 @@ class TrainingContextService
     public function __construct(
         private readonly TrainingSignalsService $signalsService,
         private readonly UserProfileService $profileService,
+        private readonly UserTrainingAnalysisService $analysisService,
+        private readonly UserTrainingAnalysisContextAdapter $analysisAdapter,
         private readonly ?BlockPeriodizationService $blockService = null,
         private readonly ?PlanMemoryService $planMemoryService = null,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array{
@@ -27,7 +31,14 @@ class TrainingContextService
      */
     public function getContextForUser(int $userId, int $days = 28): array
     {
-        $signals = $this->signalsService->getSignalsForUser($userId, $days);
+        $legacySignals = $this->signalsService->getSignalsForUser($userId, $days);
+        try {
+            $analysis = $this->analysisService->analyze($userId, $days)->toArray();
+            $signals = $this->analysisAdapter->toSignals($analysis, $legacySignals);
+        } catch (\Throwable) {
+            $signals = $legacySignals;
+        }
+
         $profile = $this->profileService->getConstraintsForUser($userId);
 
         $blockContext = null;

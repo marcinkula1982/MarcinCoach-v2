@@ -1,14 +1,17 @@
 <?php
 
-use App\Http\Controllers\Api\TrainingAdjustmentsController;
-use App\Http\Controllers\Api\TrainingFeedbackV2Controller;
 use App\Http\Controllers\Api\AiInsightsController;
 use App\Http\Controllers\Api\AiPlanController;
 use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\IntegrationsController;
+use App\Http\Controllers\Api\OnboardingSummaryController;
+use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\RollingPlanController;
+use App\Http\Controllers\Api\TrainingAdjustmentsController;
+use App\Http\Controllers\Api\TrainingAnalysisController;
 use App\Http\Controllers\Api\TrainingContextController;
 use App\Http\Controllers\Api\TrainingFeedbackController;
+use App\Http\Controllers\Api\TrainingFeedbackV2Controller;
 use App\Http\Controllers\Api\TrainingSignalsController;
 use App\Http\Controllers\Api\WeeklyPlanController;
 use App\Http\Controllers\Api\WorkoutsController;
@@ -31,11 +34,14 @@ Route::get('/integrations/garmin/status', [IntegrationsController::class, 'garmi
 Route::get('/me', [MeController::class, 'index']);
 Route::get('/me/profile', [ProfileController::class, 'show']);
 Route::put('/me/profile', [ProfileController::class, 'update']);
+Route::get('/me/training-analysis', [TrainingAnalysisController::class, 'index']);
+Route::get('/me/onboarding-summary', [OnboardingSummaryController::class, 'show']);
 Route::get('/training-feedback', [TrainingFeedbackController::class, 'index']);
 Route::get('/training-signals', [TrainingSignalsController::class, 'index']);
 Route::get('/training-context', [TrainingContextController::class, 'index']);
 Route::get('/training-adjustments', [TrainingAdjustmentsController::class, 'index']);
 Route::get('/weekly-plan', [WeeklyPlanController::class, 'index']);
+Route::get('/rolling-plan', [RollingPlanController::class, 'index']);
 Route::get('/ai/insights', [AiInsightsController::class, 'index']);
 Route::get('/ai/plan', [AiPlanController::class, 'show']);
 Route::post('/ai/plan', [AiPlanController::class, 'generate']);
@@ -57,6 +63,8 @@ Route::delete('/workouts', [WorkoutsController::class, 'destroyAll']);
 Route::get('/workouts/{id}', [WorkoutsController::class, 'show']);
 Route::delete('/workouts/{id}', [WorkoutsController::class, 'destroy']);
 Route::patch('/workouts/{id}/meta', [WorkoutsController::class, 'updateMeta']);
+Route::get('/workouts/{id}/feedback', [WorkoutsController::class, 'feedback']);
+Route::post('/workouts/{id}/feedback/generate', [WorkoutsController::class, 'generateFeedback']);
 Route::get('/workouts/{id}/signals', [WorkoutsController::class, 'signals']);
 Route::get('/workouts/{id}/compliance', [WorkoutsController::class, 'compliance']);
 Route::get('/workouts/{id}/compliance-v2', [WorkoutsController::class, 'complianceV2']);

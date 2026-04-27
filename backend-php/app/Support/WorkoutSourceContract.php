@@ -27,6 +27,8 @@ class WorkoutSourceContract
         'manual'        => self::MANUAL_UPLOAD,
         'manual_upload' => self::MANUAL_UPLOAD,
         'tcx'           => self::MANUAL_UPLOAD,
+        'gpx'           => self::MANUAL_UPLOAD,
+        'fit'           => self::MANUAL_UPLOAD,
         'garmin'        => self::GARMIN,
         'strava'        => self::STRAVA,
     ];

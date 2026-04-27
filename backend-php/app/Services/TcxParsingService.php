@@ -12,11 +12,17 @@ class TcxParsingService
      * Contract (used by the import pipeline and the analytics layer):
      *   - startTimeIso      : ISO-8601 Z (from Activity/Id)
      *   - durationSec       : int, sum of Lap/TotalTimeSeconds
+     *   - movingTimeSec     : int, best-effort moving time from trackpoints
+     *   - elapsedTimeSec    : int, elapsed time from trackpoints/laps
      *   - distanceM         : int, sum of Lap/DistanceMeters (missing laps contribute 0)
      *   - sport             : 'run' | 'bike' | 'swim' | 'other'
      *   - hr                : ['avgBpm' => ?int, 'maxBpm' => ?int]
      *   - avgPaceSecPerKm   : ?int (only for run, distance > 0)
      *   - intensityBuckets  : ['z1Sec','z2Sec','z3Sec','z4Sec','z5Sec','totalSec']
+     *   - cadence           : ['avgSpm' => ?int, 'maxSpm' => ?int]
+     *   - power             : ['avgWatts' => ?int, 'maxWatts' => ?int]
+     *   - elevationGainMeters / elevationLossMeters
+     *   - paceZones / dataAvailability
      *   - laps              : int
      *
      * Throws \InvalidArgumentException for hard-invalid TCX:
@@ -35,8 +41,11 @@ class TcxParsingService
      *     startTimeIso:string,
      *     durationSec:int,
      *     distanceM:int,
+     *     elapsedTimeSec:int,
+     *     movingTimeSec:int,
      *     sport:string,
      *     hr:array{avgBpm:?int,maxBpm:?int},
+     *     hrSampleCount:int,
      *     avgPaceSecPerKm:?int,
      *     intensityBuckets:array{z1Sec:int,z2Sec:int,z3Sec:int,z4Sec:int,z5Sec:int,totalSec:int},
      *     laps:int
@@ -90,6 +99,11 @@ class TcxParsingService
 
         $trackpoints = $this->extractTrackpoints($xpath, requireHr: false);
         $hrStats = $this->computeHrStats($trackpoints);
+        $cadenceStats = $this->computeStats($trackpoints, 'cadence', 'avgSpm', 'maxSpm');
+        $powerStats = $this->computeStats($trackpoints, 'power', 'avgWatts', 'maxWatts');
+        $elevation = $this->computeElevation($trackpoints);
+        $movingTimeSec = $this->computeMovingTime($trackpoints, $durationSec);
+        $elapsedTimeSec = $this->computeElapsedTime($trackpoints, $durationSec);
 
         $avgPaceSecPerKm = null;
         if ($sport === 'run' && $distanceM > 0 && $durationSec > 0) {
@@ -107,12 +121,29 @@ class TcxParsingService
         return [
             'startTimeIso' => $startTimeIso,
             'durationSec' => $durationSec,
+            'elapsedTimeSec' => $elapsedTimeSec,
+            'movingTimeSec' => $movingTimeSec,
             'distanceM' => $distanceM,
             'sport' => $sport,
             'hr' => $hrStats,
+            'hrSampleCount' => $hrStats['sampleCount'],
             'avgPaceSecPerKm' => $avgPaceSecPerKm,
             'intensityBuckets' => $buckets,
+            'elevationGainMeters' => $elevation['gain'],
+            'elevationLossMeters' => $elevation['loss'],
+            'cadence' => $cadenceStats,
+            'power' => $powerStats,
+            'paceZones' => $buckets + ['status' => $avgPaceSecPerKm === null ? 'missing' : 'estimated'],
+            'dataAvailability' => [
+                'gps' => $this->hasDistanceTrackpoints($trackpoints),
+                'hr' => $hrStats['sampleCount'] > 0,
+                'cadence' => $cadenceStats['avgSpm'] !== null,
+                'power' => $powerStats['avgWatts'] !== null,
+                'elevation' => $elevation['gain'] > 0 || $elevation['loss'] > 0,
+                'movingTime' => $movingTimeSec > 0,
+            ],
             'laps' => $lapCount,
+            'fileType' => 'tcx',
         ];
     }
 
@@ -183,7 +214,7 @@ class TcxParsingService
     }
 
     /**
-     * @return array<int,array{time:Carbon,hr:?int}>
+     * @return array<int,array{time:Carbon,hr:?int,distanceM:?float,altitudeM:?float,cadence:?int,power:?int}>
      */
     private function extractTrackpoints(\DOMXPath $xpath, bool $requireHr): array
     {
@@ -217,7 +248,38 @@ class TcxParsingService
                 continue;
             }
 
-            $points[] = ['time' => $time, 'hr' => $hr];
+            $distance = null;
+            $distanceNodes = $xpath->query('./tcx:DistanceMeters', $tp);
+            if ($distanceNodes->length > 0 && is_numeric(trim($distanceNodes->item(0)->textContent))) {
+                $distance = (float) trim($distanceNodes->item(0)->textContent);
+            }
+
+            $altitude = null;
+            $altitudeNodes = $xpath->query('./tcx:AltitudeMeters', $tp);
+            if ($altitudeNodes->length > 0 && is_numeric(trim($altitudeNodes->item(0)->textContent))) {
+                $altitude = (float) trim($altitudeNodes->item(0)->textContent);
+            }
+
+            $cadence = null;
+            $cadenceNodes = $xpath->query('./tcx:Cadence', $tp);
+            if ($cadenceNodes->length > 0 && is_numeric(trim($cadenceNodes->item(0)->textContent))) {
+                $cadence = (int) trim($cadenceNodes->item(0)->textContent);
+            }
+
+            $power = null;
+            $powerNodes = $xpath->query('.//*[local-name()="Watts" or local-name()="PowerInWatts"]', $tp);
+            if ($powerNodes->length > 0 && is_numeric(trim($powerNodes->item(0)->textContent))) {
+                $power = (int) trim($powerNodes->item(0)->textContent);
+            }
+
+            $points[] = [
+                'time' => $time,
+                'hr' => $hr,
+                'distanceM' => $distance,
+                'altitudeM' => $altitude,
+                'cadence' => $cadence !== null && $cadence > 0 ? $cadence : null,
+                'power' => $power !== null && $power > 0 ? $power : null,
+            ];
         }
 
         usort($points, fn (array $a, array $b) => $a['time']->timestamp <=> $b['time']->timestamp);
@@ -225,8 +287,8 @@ class TcxParsingService
     }
 
     /**
-     * @param array<int,array{time:Carbon,hr:?int}> $tps
-     * @return array{avgBpm:?int,maxBpm:?int}
+     * @param array<int,array{time:Carbon,hr:?int,distanceM:?float,altitudeM:?float,cadence:?int,power:?int}> $tps
+     * @return array{avgBpm:?int,maxBpm:?int,sampleCount:int}
      */
     private function computeHrStats(array $tps): array
     {
@@ -237,12 +299,105 @@ class TcxParsingService
             }
         }
         if (empty($hrs)) {
-            return ['avgBpm' => null, 'maxBpm' => null];
+            return ['avgBpm' => null, 'maxBpm' => null, 'sampleCount' => 0];
         }
         return [
             'avgBpm' => (int) round(array_sum($hrs) / count($hrs)),
             'maxBpm' => max($hrs),
+            'sampleCount' => count($hrs),
         ];
+    }
+
+    /**
+     * @param array<int,array{time:Carbon,hr:?int,distanceM:?float,altitudeM:?float,cadence:?int,power:?int}> $tps
+     * @return array<string,int|null>
+     */
+    private function computeStats(array $tps, string $key, string $avgKey, string $maxKey): array
+    {
+        $values = [];
+        foreach ($tps as $tp) {
+            if (isset($tp[$key]) && is_numeric($tp[$key]) && (float) $tp[$key] > 0) {
+                $values[] = (int) $tp[$key];
+            }
+        }
+        if (empty($values)) {
+            return [$avgKey => null, $maxKey => null];
+        }
+        return [$avgKey => (int) round(array_sum($values) / count($values)), $maxKey => max($values)];
+    }
+
+    /**
+     * @param array<int,array{time:Carbon,hr:?int,distanceM:?float,altitudeM:?float,cadence:?int,power:?int}> $tps
+     * @return array{gain:float,loss:float}
+     */
+    private function computeElevation(array $tps): array
+    {
+        $gain = 0.0;
+        $loss = 0.0;
+        for ($i = 1; $i < count($tps); $i++) {
+            if ($tps[$i - 1]['altitudeM'] === null || $tps[$i]['altitudeM'] === null) {
+                continue;
+            }
+            $delta = (float) $tps[$i]['altitudeM'] - (float) $tps[$i - 1]['altitudeM'];
+            if ($delta > 0) {
+                $gain += $delta;
+            } elseif ($delta < 0) {
+                $loss += abs($delta);
+            }
+        }
+        return ['gain' => round($gain, 2), 'loss' => round($loss, 2)];
+    }
+
+    /**
+     * @param array<int,array{time:Carbon,hr:?int,distanceM:?float,altitudeM:?float,cadence:?int,power:?int}> $tps
+     */
+    private function computeMovingTime(array $tps, int $fallbackDurationSec): int
+    {
+        if (count($tps) < 2) {
+            return $fallbackDurationSec;
+        }
+        $moving = 0;
+        for ($i = 1; $i < count($tps); $i++) {
+            $dt = (int) abs($tps[$i]['time']->diffInSeconds($tps[$i - 1]['time']));
+            if ($dt <= 0) {
+                continue;
+            }
+            $prevDistance = $tps[$i - 1]['distanceM'];
+            $curDistance = $tps[$i]['distanceM'];
+            if ($prevDistance === null || $curDistance === null) {
+                $moving += $dt;
+                continue;
+            }
+            $delta = max(0.0, (float) $curDistance - (float) $prevDistance);
+            if ($delta / $dt >= 0.5) {
+                $moving += $dt;
+            }
+        }
+        return $moving > 0 ? $moving : $fallbackDurationSec;
+    }
+
+    /**
+     * @param array<int,array{time:Carbon,hr:?int,distanceM:?float,altitudeM:?float,cadence:?int,power:?int}> $tps
+     */
+    private function computeElapsedTime(array $tps, int $fallbackDurationSec): int
+    {
+        if (count($tps) < 2) {
+            return $fallbackDurationSec;
+        }
+        return max(1, (int) abs($tps[0]['time']->diffInSeconds($tps[count($tps) - 1]['time'])));
+    }
+
+    /**
+     * @param array<int,array{time:Carbon,hr:?int,distanceM:?float,altitudeM:?float,cadence:?int,power:?int}> $tps
+     */
+    private function hasDistanceTrackpoints(array $tps): bool
+    {
+        foreach ($tps as $tp) {
+            if ($tp['distanceM'] !== null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -253,7 +408,7 @@ class TcxParsingService
      *
      * The resulting array is always well-formed (all six keys present, non-negative ints).
      *
-     * @param array<int,array{time:Carbon,hr:?int}> $tps
+     * @param array<int,array{time:Carbon,hr:?int,distanceM:?float,altitudeM:?float,cadence:?int,power:?int}> $tps
      * @param array<string,array{min:int,max:int}>|null $hrZones
      * @return array{z1Sec:int,z2Sec:int,z3Sec:int,z4Sec:int,z5Sec:int,totalSec:int}
      */

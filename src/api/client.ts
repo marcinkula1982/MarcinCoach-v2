@@ -85,6 +85,8 @@ axios.interceptors.response.use(
       error?.config?.url?.includes('weekly-plan') ||
       error?.config?.url?.includes('workouts') ||
       error?.config?.url?.includes('training-signals') ||
+      error?.config?.url?.includes('training-analysis') ||
+      error?.config?.url?.includes('onboarding-summary') ||
       error?.config?.url?.includes('ai/plan') ||
       error?.config?.url?.includes('summary') ||
       error?.config?.url?.includes('me/profile')

@@ -19,6 +19,8 @@ class AppServiceProvider extends ServiceProvider
             return new \App\Services\TrainingContextService(
                 $app->make(\App\Services\TrainingSignalsService::class),
                 $app->make(\App\Services\UserProfileService::class),
+                $app->make(\App\Services\Analysis\UserTrainingAnalysisService::class),
+                $app->make(\App\Services\Analysis\UserTrainingAnalysisContextAdapter::class),
                 $app->make(\App\Services\BlockPeriodizationService::class),
                 $app->make(\App\Services\PlanMemoryService::class),
             );
@@ -35,6 +37,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(\App\Services\TrainingAlertsV1Service::class, function ($app) {
             return new \App\Services\TrainingAlertsV1Service(
                 $app->make(\App\Services\PlanMemoryService::class),
+                $app->make(\App\Services\Analysis\UserTrainingAnalysisService::class),
             );
         });
     }

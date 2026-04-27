@@ -32,6 +32,7 @@ import WeeklyPlanSection from './components/WeeklyPlanSection'
 import AiPlanSection from './components/AiPlanSection'
 import Onboarding from './components/Onboarding'
 import GarminSection from './components/GarminSection'
+import OnboardingSummaryCard from './components/OnboardingSummaryCard'
 
 // ---------- Format helpers ----------
 const formatSeconds = (value: number) => {
@@ -333,6 +334,7 @@ const App = () => {
 
   const handleOnboardingCompleted = useCallback(() => {
     setOnboardingCompleted(true)
+    setAuthRefreshToken((prev) => prev + 1)
     void loadWorkouts()
   }, [loadWorkouts])
 
@@ -615,6 +617,8 @@ const App = () => {
               </div>
               <FilePicker onChange={handleFile} disabled={isParsing} />
             </header>
+
+            <OnboardingSummaryCard refreshToken={authRefreshToken} />
 
             <AnalyticsSummary refreshToken={authRefreshToken} />
 
