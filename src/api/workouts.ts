@@ -1,6 +1,10 @@
 import type { WorkoutSummary } from '../types'
 import type { WorkoutMeta } from '../types/workoutMeta'
-import type { WeeklyPlan } from '../types/weekly-plan'
+import type {
+  CrossTrainingPromptPreference,
+  PlannedCrossTrainingActivity,
+  WeeklyPlan,
+} from '../types/weekly-plan'
 import client, { buildAuthHeaders } from './client'
 
 export type WorkoutListItem = {
@@ -84,5 +88,32 @@ export async function fetchWeeklyPlan(days = 28): Promise<WeeklyPlan> {
     params: { days },
     headers: buildAuthHeaders(),
   })
+  return res.data
+}
+
+export async function fetchRollingPlan(days = 14): Promise<WeeklyPlan> {
+  const res = await client.get<WeeklyPlan>('/rolling-plan', {
+    params: { days },
+    headers: buildAuthHeaders(),
+  })
+  return res.data
+}
+
+export async function generateRollingPlan(
+  days = 14,
+  plannedActivities: PlannedCrossTrainingActivity[] = [],
+  crossTrainingPromptPreference?: CrossTrainingPromptPreference,
+): Promise<WeeklyPlan> {
+  const res = await client.post<WeeklyPlan>(
+    '/rolling-plan',
+    {
+      days,
+      plannedActivities,
+      ...(crossTrainingPromptPreference ? { crossTrainingPromptPreference } : {}),
+    },
+    {
+      headers: buildAuthHeaders(),
+    },
+  )
   return res.data
 }

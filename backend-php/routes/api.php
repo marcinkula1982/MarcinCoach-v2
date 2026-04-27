@@ -42,6 +42,7 @@ Route::get('/training-context', [TrainingContextController::class, 'index']);
 Route::get('/training-adjustments', [TrainingAdjustmentsController::class, 'index']);
 Route::get('/weekly-plan', [WeeklyPlanController::class, 'index']);
 Route::get('/rolling-plan', [RollingPlanController::class, 'index']);
+Route::post('/rolling-plan', [RollingPlanController::class, 'store']);
 Route::get('/ai/insights', [AiInsightsController::class, 'index']);
 Route::get('/ai/plan', [AiPlanController::class, 'show']);
 Route::post('/ai/plan', [AiPlanController::class, 'generate']);

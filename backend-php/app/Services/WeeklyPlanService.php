@@ -30,10 +30,16 @@ class WeeklyPlanService
         $hasFatigue = (bool) ($context['signals']['flags']['fatigue'] ?? false);
         $weeklyLoad = (float) ($context['signals']['weeklyLoad'] ?? 0.0);
         $rolling4wLoad = (float) ($context['signals']['rolling4wLoad'] ?? 0.0);
+        $crossTrainingFatigueLoad = (float) ($context['signals']['crossTrainingFatigueLoad'] ?? 0.0);
+        $overallFatigueLoad = (float) ($context['signals']['overallFatigueLoad'] ?? ($weeklyLoad + $crossTrainingFatigueLoad));
         // PHP TrainingSignals contract freeze: use totalWorkouts (not legacy volume.sessions).
         $sessionsCount = (int) ($context['signals']['totalWorkouts'] ?? 0);
         $canQuality = ($sessionsCount >= 3) && !$hasFatigue;
         $loadScale = $this->resolveLoadScale($weeklyLoad, $rolling4wLoad, $blockContext);
+
+        if ($overallFatigueLoad > $weeklyLoad && $overallFatigueLoad >= max(120.0, $weeklyLoad * 1.35) && $loadScale > 0.90) {
+            $loadScale = 0.90;
+        }
 
         // loadSpike cap — niezależnie od bloku, ogranicz do 0.85
         $loadSpike = (bool) ($context['signals']['flags']['loadSpike'] ?? false);
@@ -303,6 +309,7 @@ class WeeklyPlanService
         }
 
         $sessions = $this->enforceQualityDensityGuard($sessions, $longRunDay);
+        $sessions = (new TrainingSessionBlocksService())->withBlocks($sessions);
         $totalDuration = array_reduce($sessions, fn ($acc, $s) => $acc + (int) ($s['durationMin'] ?? 0), 0);
         $qualityCount = count(array_filter($sessions, fn ($s) => $this->isQualityLike($s)));
 
@@ -319,6 +326,8 @@ class WeeklyPlanService
                 'signals' => [
                     'weeklyLoad' => $weeklyLoad,
                     'rolling4wLoad' => $rolling4wLoad,
+                    'crossTrainingFatigueLoad' => $crossTrainingFatigueLoad,
+                    'overallFatigueLoad' => $overallFatigueLoad,
                     'sessionsCount' => $sessionsCount,
                     'hasFatigue' => $hasFatigue,
                     'canQuality' => $canQuality,
@@ -346,6 +355,8 @@ class WeeklyPlanService
             'sessions' => $sessions,
             'summary' => [
                 'totalDurationMin' => $totalDuration,
+                'crossTrainingDurationMin' => 0,
+                'overallFatigueLoadMin' => round($overallFatigueLoad, 2),
                 'qualitySessions' => $qualityCount,
                 'longRunDay' => $longRunDay,
             ],

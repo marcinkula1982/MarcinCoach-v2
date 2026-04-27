@@ -69,6 +69,171 @@ class PlanningParityTest extends TestCase
         $this->assertContains('surface_constraint', $plan->json('appliedAdjustmentsCodes'));
     }
 
+    public function test_rolling_plan_endpoint_returns_fourteen_day_window(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-21T12:00:00Z'));
+
+        try {
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => [
+                    'startTimeIso' => '2026-04-20T10:00:00Z',
+                    'durationSec' => 2000,
+                    'distanceM' => 5500,
+                    'sport' => 'run',
+                    'intensity' => 25,
+                ],
+                'source' => 'manual',
+                'dedupe_key' => 'rolling-plan-window-test',
+            ]);
+
+            $plan = $this->getJson('/api/rolling-plan?days=14');
+            $plan->assertOk();
+            $plan->assertJsonStructure([
+                'generatedAtIso',
+                'windowDays',
+                'horizonEndIso',
+                'sessions',
+                'weeks',
+                'summary',
+                'decisionTrace',
+                'nextSession',
+            ]);
+
+            $this->assertSame(14, (int) $plan->json('windowDays'));
+            $this->assertCount(14, $plan->json('sessions'));
+            $this->assertCount(2, $plan->json('weeks'));
+            $this->assertSame(14, (int) $plan->json('summary.days'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_rolling_plan_with_hard_lower_body_strength_guards_quality(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-21T12:00:00Z'));
+
+        try {
+            $this->seedRecentRunningBase();
+
+            $plan = $this->postJson('/api/rolling-plan', [
+                'days' => 14,
+                'plannedActivities' => [[
+                    'dateIso' => '2026-04-21',
+                    'sportKind' => 'strength',
+                    'sportSubtype' => 'lower_body',
+                    'durationMin' => 180,
+                    'intensity' => 'hard',
+                ]],
+            ]);
+
+            $plan->assertOk();
+            $sessions = $plan->json('sessions');
+            $qualityDates = array_values(array_filter($sessions, function ($session) {
+                return in_array($session['dateIso'] ?? null, ['2026-04-21', '2026-04-22'], true)
+                    && in_array($session['type'] ?? null, ['quality', 'threshold', 'intervals', 'fartlek', 'tempo'], true);
+            }));
+            $crossSessions = array_values(array_filter($sessions, fn ($session) => ($session['type'] ?? null) === 'cross_training'));
+
+            $this->assertSame([], $qualityDates);
+            $this->assertCount(1, $crossSessions);
+            $this->assertSame('strength', $crossSessions[0]['sportKind']);
+            $this->assertSame('lower_body', $crossSessions[0]['sportSubtype']);
+            $this->assertSame('high', $crossSessions[0]['activityImpact']['collisionLevel']);
+            $this->assertContains('cross_training_collision_guard', $plan->json('appliedAdjustmentsCodes'));
+            $this->assertSame(180, (int) $plan->json('summary.crossTrainingDurationMin'));
+            $this->assertSame(14, (int) $plan->json('summary.days'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_easy_bike_does_not_remove_quality_or_long_run(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-21T12:00:00Z'));
+
+        try {
+            $this->seedRecentRunningBase();
+
+            $plan = $this->postJson('/api/rolling-plan', [
+                'days' => 14,
+                'plannedActivities' => [[
+                    'dateIso' => '2026-04-20',
+                    'sportKind' => 'bike',
+                    'durationMin' => 30,
+                    'intensity' => 'easy',
+                ]],
+            ]);
+
+            $plan->assertOk();
+            $sessions = $plan->json('sessions');
+            $qualityCount = count(array_filter($sessions, fn ($session) => in_array($session['type'] ?? null, ['quality', 'threshold', 'intervals', 'fartlek', 'tempo'], true)));
+            $longCount = count(array_filter($sessions, fn ($session) => ($session['type'] ?? null) === 'long'));
+
+            $this->assertGreaterThanOrEqual(1, $qualityCount);
+            $this->assertGreaterThanOrEqual(1, $longCount);
+            $this->assertNotContains('cross_training_collision_guard', $plan->json('appliedAdjustmentsCodes'));
+            $this->assertSame(30, (int) $plan->json('summary.crossTrainingDurationMin'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_hard_bike_on_quality_day_softens_quality(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-21T12:00:00Z'));
+
+        try {
+            $this->seedRecentRunningBase();
+
+            $plan = $this->postJson('/api/rolling-plan', [
+                'days' => 14,
+                'plannedActivities' => [[
+                    'dateIso' => '2026-04-21',
+                    'sportKind' => 'bike',
+                    'durationMin' => 90,
+                    'intensity' => 'hard',
+                ]],
+            ]);
+
+            $plan->assertOk();
+            $sessions = $plan->json('sessions');
+            $sameDayQuality = array_values(array_filter($sessions, fn ($session) => ($session['dateIso'] ?? null) === '2026-04-21'
+                && in_array($session['type'] ?? null, ['quality', 'threshold', 'intervals', 'fartlek', 'tempo'], true)));
+
+            $this->assertSame([], $sameDayQuality);
+            $this->assertContains('cross_training_collision_guard', $plan->json('appliedAdjustmentsCodes'));
+            $this->assertSame(90, (int) $plan->json('summary.crossTrainingDurationMin'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_post_rolling_plan_saves_cross_training_prompt_preference(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-21T12:00:00Z'));
+
+        try {
+            $this->seedRecentRunningBase();
+
+            $post = $this->postJson('/api/rolling-plan', [
+                'days' => 14,
+                'plannedActivities' => [],
+                'crossTrainingPromptPreference' => 'do_not_ask',
+            ]);
+            $post->assertOk();
+            $post->assertJsonPath('crossTraining.promptPreference', 'do_not_ask');
+
+            $get = $this->getJson('/api/rolling-plan?days=14');
+            $get->assertOk();
+            $get->assertJsonPath('crossTraining.promptPreference', 'do_not_ask');
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_training_context_uses_user_training_analysis_load_contract(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-04-27T10:00:00Z'));
@@ -98,6 +263,35 @@ class PlanningParityTest extends TestCase
             $this->assertSame(10.0, (float) $ctx->json('signals.longRun.distanceKm'));
         } finally {
             Carbon::setTestNow();
+        }
+    }
+
+    private function seedRecentRunningBase(): void
+    {
+        $rows = [
+            ['2026-04-08T10:00:00Z', 3600, 10000, 'cross-plan-base-1'],
+            ['2026-04-10T10:00:00Z', 3600, 10000, 'cross-plan-base-2'],
+            ['2026-04-12T10:00:00Z', 3600, 10000, 'cross-plan-base-3'],
+            ['2026-04-16T10:00:00Z', 1800, 5000, 'cross-plan-base-4'],
+            ['2026-04-18T10:00:00Z', 1800, 5000, 'cross-plan-base-5'],
+            ['2026-04-20T10:00:00Z', 1800, 5000, 'cross-plan-base-6'],
+        ];
+
+        foreach ($rows as [$startTimeIso, $durationSec, $distanceM, $dedupeKey]) {
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => [
+                    'startTimeIso' => $startTimeIso,
+                    'durationSec' => $durationSec,
+                    'distanceM' => $distanceM,
+                    'sport' => 'run',
+                    'intensity' => 20,
+                ],
+                'source' => 'manual',
+                'dedupe_key' => $dedupeKey,
+            ]);
         }
     }
 

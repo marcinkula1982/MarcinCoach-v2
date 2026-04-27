@@ -43,7 +43,7 @@ class PlanImplicationsResolver
         $count28d = (int) ($facts['workoutCount28d'] ?? 0);
         $lastDaysAgo = $facts['lastWorkoutWasDaysAgo'];
         $spike = (bool) ($facts['spikeLoad'] ?? false);
-        $acwr = $facts['acwr'] ?? null;
+        $acwr = is_numeric($facts['acwrOverall'] ?? null) ? $facts['acwrOverall'] : ($facts['acwr'] ?? null);
         $consistency = $facts['consistencyScore'] ?? null;
 
         // 1) brak danych w ogole
@@ -178,6 +178,7 @@ class PlanImplicationsResolver
         $paceConfidence = $this->confidenceForNumeric($facts['avgPaceSecPerKm'] ?? null, $count28d);
         $hrConfidence = $this->confidenceForNumeric($facts['avgHrBpm'] ?? null, $count28d);
         $loadConfidence = $this->confidenceForNumeric($facts['load7d'] ?? null, $count28d);
+        $overallLoadConfidence = $this->confidenceForNumeric($facts['overallFatigue7d'] ?? null, $count28d);
         $consistencyConfidence = $this->confidenceForNumeric($facts['consistencyScore'] ?? null, $count28d);
 
         $hrZoneConfidence = match ($hrZones->status) {
@@ -193,6 +194,8 @@ class PlanImplicationsResolver
                 'avgPaceSecPerKm' => $paceConfidence->value,
                 'avgHrBpm' => $hrConfidence->value,
                 'load7d' => $loadConfidence->value,
+                'runningLoad7d' => $loadConfidence->value,
+                'overallFatigue7d' => $overallLoadConfidence->value,
                 'hrZones' => $hrZoneConfidence->value,
                 'consistencyScore' => $consistencyConfidence->value,
             ],

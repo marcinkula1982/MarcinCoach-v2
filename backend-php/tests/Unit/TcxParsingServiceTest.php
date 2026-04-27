@@ -66,9 +66,16 @@ XML;
 
     public function test_sport_mapping_falls_back_to_other_for_unknown_sport(): void
     {
-        $xml = $this->runTcx('Hiking', '2026-04-20T10:00:00Z', 4000, 3600);
+        $xml = $this->runTcx('Yoga', '2026-04-20T10:00:00Z', 4000, 3600);
         $parsed = $this->parser->parse($xml);
         $this->assertSame('other', $parsed['sport']);
+    }
+
+    public function test_maps_hiking_to_walk_hike(): void
+    {
+        $xml = $this->runTcx('Hiking', '2026-04-20T10:00:00Z', 4000, 3600);
+        $parsed = $this->parser->parse($xml);
+        $this->assertSame('walk_hike', $parsed['sport']);
     }
 
     public function test_relaxes_missing_distance_meters(): void
@@ -146,6 +153,48 @@ XML;
 
         $this->assertSame(140, $parsed['hr']['avgBpm']);
         $this->assertSame(160, $parsed['hr']['maxBpm']);
+    }
+
+    public function test_computes_deeper_trackpoint_metrics(): void
+    {
+        $tps = <<<XML
+<Trackpoint>
+  <Time>2026-04-20T10:00:00Z</Time>
+  <DistanceMeters>0</DistanceMeters>
+  <AltitudeMeters>100</AltitudeMeters>
+  <Cadence>80</Cadence>
+  <Extensions><TPX xmlns="http://www.garmin.com/xmlschemas/ActivityExtension/v2"><Watts>200</Watts></TPX></Extensions>
+</Trackpoint>
+<Trackpoint>
+  <Time>2026-04-20T10:01:00Z</Time>
+  <DistanceMeters>200</DistanceMeters>
+  <AltitudeMeters>112</AltitudeMeters>
+  <Cadence>82</Cadence>
+  <Extensions><TPX xmlns="http://www.garmin.com/xmlschemas/ActivityExtension/v2"><Watts>220</Watts></TPX></Extensions>
+</Trackpoint>
+<Trackpoint>
+  <Time>2026-04-20T10:02:00Z</Time>
+  <DistanceMeters>400</DistanceMeters>
+  <AltitudeMeters>106</AltitudeMeters>
+  <Cadence>84</Cadence>
+  <Extensions><TPX xmlns="http://www.garmin.com/xmlschemas/ActivityExtension/v2"><Watts>240</Watts></TPX></Extensions>
+</Trackpoint>
+XML;
+        $xml = $this->runTcx('Running', '2026-04-20T10:00:00Z', 400, 120, $tps);
+        $parsed = $this->parser->parse($xml);
+
+        $this->assertSame(120, $parsed['elapsedTimeSec']);
+        $this->assertSame(120, $parsed['movingTimeSec']);
+        $this->assertSame(82, $parsed['cadence']['avgSpm']);
+        $this->assertSame(84, $parsed['cadence']['maxSpm']);
+        $this->assertSame(220, $parsed['power']['avgWatts']);
+        $this->assertSame(240, $parsed['power']['maxWatts']);
+        $this->assertSame(12.0, $parsed['elevationGainMeters']);
+        $this->assertSame(6.0, $parsed['elevationLossMeters']);
+        $this->assertTrue($parsed['dataAvailability']['cadence']);
+        $this->assertTrue($parsed['dataAvailability']['power']);
+        $this->assertTrue($parsed['dataAvailability']['elevation']);
+        $this->assertSame('estimated', $parsed['paceZones']['status']);
     }
 
     public function test_computes_hr_time_in_zone_when_zones_provided(): void

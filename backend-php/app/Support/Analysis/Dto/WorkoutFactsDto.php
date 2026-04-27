@@ -40,6 +40,8 @@ readonly class WorkoutFactsDto
         public ?float $elevationLossMeters = null,
         public array $paceZones = [],
         public array $dataAvailability = [],
+        public ?string $sportSubtype = null,
+        public array $activityImpact = [],
     ) {}
 
     /**
@@ -105,6 +107,8 @@ readonly class WorkoutFactsDto
             'elevationLossMeters' => $this->elevationLossMeters,
             'paceZones' => $this->paceZones,
             'dataAvailability' => $this->dataAvailability,
+            'sportSubtype' => $this->sportSubtype,
+            'activityImpact' => $this->activityImpact,
         ];
     }
 }

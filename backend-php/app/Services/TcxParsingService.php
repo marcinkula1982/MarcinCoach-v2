@@ -210,6 +210,12 @@ class TcxParsingService
         if (str_contains($lower, 'swim')) {
             return 'swim';
         }
+        if (str_contains($lower, 'walk') || str_contains($lower, 'hik')) {
+            return 'walk_hike';
+        }
+        if (str_contains($lower, 'strength') || str_contains($lower, 'gym') || str_contains($lower, 'weight')) {
+            return 'strength';
+        }
         return 'other';
     }
 

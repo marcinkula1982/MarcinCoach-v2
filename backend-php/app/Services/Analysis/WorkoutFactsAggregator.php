@@ -40,6 +40,17 @@ class WorkoutFactsAggregator
         $last = end($sorted);
         $lastAt = $this->parseStarted($last->startedAt);
 
+        $runningLoad7d = $this->impactLoadMinutesWithinDays($sorted, $now, 7, 'runningLoadMin');
+        $runningLoad28d = $this->impactLoadMinutesWithinDays($sorted, $now, 28, 'runningLoadMin');
+        $crossTrainingFatigue7d = $this->impactLoadMinutesWithinDays($sorted, $now, 7, 'crossTrainingFatigueMin');
+        $crossTrainingFatigue28d = $this->impactLoadMinutesWithinDays($sorted, $now, 28, 'crossTrainingFatigueMin');
+        $overallFatigue7d = $this->impactLoadMinutesWithinDays($sorted, $now, 7, 'overallFatigueMin');
+        $overallFatigue28d = $this->impactLoadMinutesWithinDays($sorted, $now, 28, 'overallFatigueMin');
+        $acwrRunning = $this->acwrForLoad($runningLoad7d, $runningLoad28d);
+        $acwrOverall = $this->acwrForLoad($overallFatigue7d, $overallFatigue28d);
+        $runningLoadSpike = $this->isSpikeByAcwr($acwrRunning);
+        $overallFatigueSpike = $this->isSpikeByAcwr($acwrOverall);
+
         return [
             'workoutCount' => $count,
             'workoutCount7d' => $this->countWithinDays($sorted, $now, 7),
@@ -53,10 +64,21 @@ class WorkoutFactsAggregator
             'avgPaceSecPerKm' => $this->weightedAvgPace($sorted),
             'avgHrBpm' => $this->avgHr($sorted),
             'maxHrObservedBpm' => $this->maxHrObserved($sorted),
-            'load7d' => $this->loadMinutesWithinDays($sorted, $now, 7),
-            'load28d' => $this->loadMinutesWithinDays($sorted, $now, 28),
-            'acwr' => $this->acwr($sorted, $now),
-            'spikeLoad' => $this->isSpikeLoad($sorted, $now),
+            // Backward-compatible names now mean running load, not all activity minutes.
+            'load7d' => $runningLoad7d,
+            'load28d' => $runningLoad28d,
+            'acwr' => $acwrRunning,
+            'spikeLoad' => $runningLoadSpike || $overallFatigueSpike,
+            'runningLoad7d' => $runningLoad7d,
+            'runningLoad28d' => $runningLoad28d,
+            'crossTrainingFatigue7d' => $crossTrainingFatigue7d,
+            'crossTrainingFatigue28d' => $crossTrainingFatigue28d,
+            'overallFatigue7d' => $overallFatigue7d,
+            'overallFatigue28d' => $overallFatigue28d,
+            'acwrRunning' => $acwrRunning,
+            'acwrOverall' => $acwrOverall,
+            'runningLoadSpike' => $runningLoadSpike,
+            'overallFatigueSpike' => $overallFatigueSpike,
             'consistencyScore' => $this->consistencyScore($sorted, $now),
             'longestGapDays' => $this->longestGapDays($sorted, $now),
             'gaps' => $this->gaps($sorted),
@@ -85,6 +107,16 @@ class WorkoutFactsAggregator
             'load28d' => null,
             'acwr' => null,
             'spikeLoad' => false,
+            'runningLoad7d' => null,
+            'runningLoad28d' => null,
+            'crossTrainingFatigue7d' => null,
+            'crossTrainingFatigue28d' => null,
+            'overallFatigue7d' => null,
+            'overallFatigue28d' => null,
+            'acwrRunning' => null,
+            'acwrOverall' => null,
+            'runningLoadSpike' => false,
+            'overallFatigueSpike' => false,
             'consistencyScore' => null,
             'longestGapDays' => null,
             'gaps' => [],
@@ -263,12 +295,9 @@ class WorkoutFactsAggregator
     }
 
     /**
-     * Load = suma minut treningowych w oknie. Prosta metryka, do rozszerzenia
-     * w F3+ o wagi intensywnosci, gdy strefy sa pewne.
-     *
      * @param  list<WorkoutFactsDto>  $facts
      */
-    private function loadMinutesWithinDays(array $facts, CarbonImmutable $now, int $days): ?float
+    private function impactLoadMinutesWithinDays(array $facts, CarbonImmutable $now, int $days, string $key): ?float
     {
         $threshold = $now->subDays($days);
         $sum = 0.0;
@@ -278,8 +307,9 @@ class WorkoutFactsAggregator
             if ($at === null || $at->lessThan($threshold)) {
                 continue;
             }
-            if ($f->durationSec !== null && $f->durationSec > 0) {
-                $sum += $f->durationSec / 60.0;
+            $impact = $this->activityImpact($f);
+            if (isset($impact[$key]) && is_numeric($impact[$key])) {
+                $sum += (float) $impact[$key];
                 $hasAny = true;
             }
         }
@@ -287,15 +317,8 @@ class WorkoutFactsAggregator
         return $hasAny ? round($sum, 2) : null;
     }
 
-    /**
-     * ACWR = load_7d / (load_28d / 4). 4 = liczba tygodni w oknie 28d.
-     *
-     * @param  list<WorkoutFactsDto>  $facts
-     */
-    private function acwr(array $facts, CarbonImmutable $now): ?float
+    private function acwrForLoad(?float $load7, ?float $load28): ?float
     {
-        $load7 = $this->loadMinutesWithinDays($facts, $now, 7);
-        $load28 = $this->loadMinutesWithinDays($facts, $now, 28);
         if ($load7 === null || $load28 === null || $load28 <= 0) {
             return null;
         }
@@ -307,14 +330,27 @@ class WorkoutFactsAggregator
         return round($load7 / $chronic, 2);
     }
 
-    /**
-     * @param  list<WorkoutFactsDto>  $facts
-     */
-    private function isSpikeLoad(array $facts, CarbonImmutable $now): bool
+    private function isSpikeByAcwr(?float $acwr): bool
     {
-        $acwr = $this->acwr($facts, $now);
-
         return $acwr !== null && $acwr > self::SPIKE_ACWR_THRESHOLD;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function activityImpact(WorkoutFactsDto $fact): array
+    {
+        if (isset($fact->activityImpact['runningLoadMin'], $fact->activityImpact['overallFatigueMin'])) {
+            return $fact->activityImpact;
+        }
+
+        return (new ActivityImpactService())->impact(
+            $fact->sportKind,
+            $fact->sportSubtype,
+            $fact->durationSec,
+            $fact->elevationGainMeters,
+            $fact->perceivedEffort,
+        );
     }
 
     /**

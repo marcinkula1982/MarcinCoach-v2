@@ -190,7 +190,7 @@ class WorkoutFactsExtractorTest extends TestCase
                 'startTimeIso' => '2026-04-25T17:00:00Z',
                 'durationSec' => 3600,
                 'distanceM' => 30000,
-                'sport' => 'swim',
+                'sport' => 'yoga',
             ],
             'source' => 'garmin',
             'dedupe_key' => 'f2-other-sport',
@@ -201,6 +201,32 @@ class WorkoutFactsExtractorTest extends TestCase
         $this->assertSame('other', $facts['sportKind']);
         // pace tylko dla biegow / chodu, nie dla swim/bike
         $this->assertNull($facts['avgPaceSecPerKm']);
+    }
+
+    public function test_activity_type_and_subtype_feed_activity_impact(): void
+    {
+        $workout = Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2026-04-25T17:00:00Z',
+                'durationSec' => 3 * 60 * 60,
+                'distanceM' => 0,
+                'activityType' => 'Strength Training',
+                'sportSubtype' => 'legs',
+                'crossTrainingIntensity' => 'hard',
+            ],
+            'source' => 'garmin',
+            'dedupe_key' => 'f2-cross-strength',
+        ]);
+
+        $facts = (new WorkoutFactsExtractor)->extract($workout)->toArray();
+
+        $this->assertSame('strength', $facts['sportKind']);
+        $this->assertSame('lower_body', $facts['sportSubtype']);
+        $this->assertSame(187.2, $facts['activityImpact']['crossTrainingFatigueMin']);
+        $this->assertSame('high', $facts['activityImpact']['collisionLevel']);
     }
 
     public function test_perceived_effort_from_meta_is_clamped_to_valid_range(): void

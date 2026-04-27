@@ -77,11 +77,17 @@ class IntegrationsController extends Controller
         }
         $rows = is_array($res->json()) ? $res->json() : [];
         $activities = array_values(array_map(function ($a) {
+            $activityType = (string) ($a['sport_type'] ?? $a['type'] ?? '');
+
             return [
                 'sourceActivityId' => (string) ($a['id'] ?? ''),
                 'startTimeIso' => (string) ($a['start_date'] ?? ''),
                 'durationSec' => (int) ($a['elapsed_time'] ?? 0),
                 'distanceM' => (int) round((float) ($a['distance'] ?? 0)),
+                'activityType' => $activityType,
+                'sport' => $activityType,
+                'averageHr' => isset($a['average_heartrate']) ? (float) $a['average_heartrate'] : null,
+                'maxHr' => isset($a['max_heartrate']) ? (float) $a['max_heartrate'] : null,
             ];
         }, $rows));
 

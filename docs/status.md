@@ -1,6 +1,6 @@
 # MarcinCoach v2 - status projektu
 
-Data raportu: 2026-04-26  
+Data raportu: 2026-04-27
 Status dokumentu: aktywne zrodlo prawdy dla wykonanego zakresu, technologii i walidacji.
 
 Ten dokument konsoliduje aktualny stan projektu po migracji na Laravel/PHP. Starsze dokumenty z `docs/` oraz dawne raporty z root repo zostaly przeniesione do `docs/archive/` i nie sa aktualna instrukcja pracy.
@@ -29,6 +29,12 @@ Zasada:
 | 2026-04-27 | Provider-neutral analytics F5 | Dodano fact-based `GET /api/me/onboarding-summary` oraz panel podsumowania po onboardingu oparty na `training-analysis` | `php artisan test tests\Feature\Api\OnboardingSummaryEndpointTest.php tests\Feature\Api\TrainingAnalysisEndpointTest.php` -> 4 passed; `php artisan test` -> 293 passed; `npm run build` -> OK. |
 | 2026-04-27 | Provider-neutral analytics F6 | Przepieto `TrainingContextService` i weekly plan na `UserTrainingAnalysis`; stary `TrainingSignalsService` zostal jako wypelniacz pol kompatybilnosci/adaptacji M4 | Focused analytics/plan/contract suite -> 69 passed; `php artisan test` -> 296 passed, 1426 assertions. |
 | 2026-04-27 | Provider-neutral analytics F7 | Przepieto alert `LOAD_SPIKE` i feedback-v2 load risk na `UserTrainingAnalysis`; `/api/training-signals` oznaczone jako kompatybilnosc legacy | Focused alerts/feedback/plan suite -> 60 passed; `php artisan test` -> 297 passed, 1434 assertions. |
+| 2026-04-27 | MVP 14-dniowy coach | Dodano backendowy `GET /api/rolling-plan?days=14`, oparty o dwa tygodnie planu, feedback signals, adjustments i plan memory | `php artisan test tests\Feature\Api\PlanningParityTest.php --filter=rolling_plan` -> 1 passed; pelny suite -> 301 passed. |
+| 2026-04-27 | Feedback po treningu | Podpieto `GET /api/workouts/{id}/feedback` i `POST /api/workouts/{id}/feedback/generate`; feedback jest deterministyczny i zwraca praise, deviations, conclusions oraz planImpact | `php artisan test tests\Feature\Api\WorkoutsTest.php --filter=workout_feedback` -> 1 passed; pelny suite -> 301 passed. |
+| 2026-04-27 | M2 deeper workout data | Rozszerzono import/summary o TCX/GPX/FIT parsing path oraz pola: moving/elapsed time, cadence, power, elevation, paceZones, dataAvailability; GPX i TCX maja testy regresyjne | `php artisan test tests\Feature\Api\WorkoutsTest.php --filter=gpx_upload` -> 1 passed; `php artisan test tests\Unit\TcxParsingServiceTest.php --filter=deeper_trackpoint_metrics` -> 1 passed; pelny suite -> 301 passed. |
+| 2026-04-27 | Profil startow i tempa | Profil przyjmuje `races[].name`, `races[].targetTime`, `races[].priority` oraz `paceZones`; `UserProfileService` wystawia `primaryRace` z nazwa i targetTime | `php artisan test tests\Feature\Api\AuthAndProfileTest.php tests\Unit\UserProfileServiceTest.php` w pelnym suite -> OK. |
+| 2026-04-27 | Cross-training w rolling planie | Dodano deterministyczny model aktywnosci niebiegowych: normalizacja sport/subtype, `activityImpact`, osobne `runningLoad`/`crossTrainingFatigue`/`overallFatigue`, `POST /api/rolling-plan`, guardy kolizji i modal frontendowy przed odswiezeniem planu | `php artisan test` -> 310 passed, 1529 assertions; `npm run build` -> OK; focused cross-training suite -> 47 passed. |
+| 2026-04-27 | Szczegoly treningu w planie | Kazda sesja biegowa w weekplan/rolling plan dostaje `blocks`: rozgrzewka, czesc glowna i schlodzenie/mobilizacja; frontend ma rozwijany podglad szczegolow treningu | `php artisan test` -> 312 passed, 1568 assertions; focused planner/contract suite -> 48 passed; `npm run build` -> OK. |
 
 ## Decyzja o starej ankiecie
 
@@ -57,8 +63,9 @@ Aktualny onboarding:
 | M2 - quality data beyond minimum | WYKONANE | `TcxParsingService`, `WorkoutSummaryBuilder`, `TrainingSignalsService`, testy TCX i workouts parity | TCX wzbogacony o sport, HR, pace, intensity buckets; FIT/GPX jeszcze poza zakresem. |
 | M3 - weekly planning enhancement | WYKONANE | `WeeklyPlanService`, `BlockPeriodizationService`, `PlanMemoryService`, `ContractFreezeTest`, `PlanningParityTest` | Plan ma `blockContext`, role tygodnia, struktury sesji i zapis `training_weeks`. |
 | M4 - deeper adaptation / alerting | WYKONANE | `TrainingAdjustmentsService`, `TrainingAlertsV1Service`, testy unit/feature alertow i adjustmentow | Adaptacje maja typy, confidence i reguly trendowe; publiczny kontrakt ukrywa pola debugowe. |
+| MVP 14-dniowy coach | CZESCIOWO | `RollingPlanController`, `/api/workouts/{id}/feedback`, `WeeklyPlanSection`, focused tests i pelny backend suite | Rolling plan 14 dni jest glownym widokiem frontendu, obsluguje planowane cross-trainingi i pokazuje bloki treningu; brakuje jeszcze pelnego UX feedbacku po treningu. |
 | M3/M4 hardening UX | CZESCIOWO | backend gotowy, ale UX nie pokazuje jeszcze pelnego trace decyzji | Do dopracowania: ekspozycja blokow, alertow, uzasadnien i scenariusze manual smoke. |
-| M2 deeper data | PLANOWANE | brak FIT/GPX/cadence/power/elevation/pace-zones w aktualnym MVP | Kolejny pakiet po hardeningu M3/M4. |
+| M2 deeper data | CZESCIOWO | `TcxParsingService`, `GpxParsingService`, `FitParsingService`, `WorkoutSummaryBuilder`, `WorkoutFactsDto`; testy TCX/GPX przechodza | TCX/GPX maja backendowe parsowanie i summary; FIT parser jest w kodzie, ale nadal potrzebuje testu na realnym pliku `.fit` i decyzji o przechowywaniu raw FIT/GPX. |
 | M5 - integracje sportowe produkcyjne | CZESCIOWO | trasy Strava/Garmin sa w Laravel; lokalne testy integracji przechodza; Garmin live smoke potwierdzil sync aktywnosci, download TCX i upload zaplanowanego workoutu; oficjalne Polar/Suunto jeszcze nie | Strava ma sciezke OAuth. Garmin connector dziala w trybie `live` na `python-garminconnect`; to nie jest oficjalny Garmin Activity API. Adapter pozostaje sciezka MVP z jawnie zaakceptowanym ryzykiem nieoficjalnego logowania. |
 | M6 - AI provider hardening | CZESCIOWO | `/api/ai/plan`, `/api/ai/insights`, feedback-v2 AI endpointy istnieja; env moze dzialac jako stub | Do dopracowania provider OpenAI, limity, cache i observability produkcyjne. |
 
@@ -75,7 +82,7 @@ Aktualny onboarding:
 | Profil | `user_profiles` z typed JSON i projekcjami | `ProfileController`, `UserProfile`, migracje M1 |
 | Treningi | `workouts`, `workout_raw_tcx`, `workout_import_events` | `WorkoutsController`, `ExternalWorkoutImportService` |
 | Sygnały | Training signals v1/v2, rolling load, intensity buckets, safety flags | `TrainingSignalsService`, `TrainingSignalsV2Service` |
-| Plan | weekly plan, block context, memory tygodniowa | `WeeklyPlanService`, `BlockPeriodizationService`, `PlanMemoryService` |
+| Plan | weekly plan + rolling 14 dni, cross-training guards, block context, memory tygodniowa | `WeeklyPlanService`, `RollingPlanController`, `BlockPeriodizationService`, `PlanMemoryService` |
 | Alerty | per-workout i weekly trend alerts | `TrainingAlertsV1Service`, `training_alerts_v1` |
 | AI | AI plan, AI insights, feedback-v2 AI, cache, rate limit | `AiPlanService`, `AiInsightsService`, `TrainingFeedbackV2AiService`, `AiRateLimitService` |
 | Integracje | Strava OAuth, Garmin connector `stub/live`, sync logs | `IntegrationsController`, `StravaOAuthService`, `GarminConnectorService`, `integrations/garmin-connector`, `integration_accounts`, `integration_sync_runs` |
@@ -90,6 +97,8 @@ Te endpointy istnieja w Laravelze, ale frontend nie pokazuje jeszcze pelnego UX/
 - `/api/training-context`
 - `/api/training-adjustments`
 - `/api/training-feedback-v2/*`
+- `/api/workouts/{id}/feedback`
+- `/api/workouts/{id}/feedback/generate`
 - `/api/workouts/{id}/signals`
 - `/api/workouts/{id}/compliance`
 - `/api/workouts/{id}/compliance-v2`
@@ -99,7 +108,7 @@ Te endpointy istnieja w Laravelze, ale frontend nie pokazuje jeszcze pelnego UX/
 
 | Zrodlo | Status dla MarcinCoach | Sposob integracji | Dane / zakres | Ryzyka i uwagi | Zrodlo |
 |---|---|---|---|---|---|
-| Upload plikow | Obowiazkowy fallback | import plikow FIT/TCX/GPX; obecnie TCX jest wdrozony, FIT/GPX planowane | treningi, czas, dystans, HR, tempo, docelowo cadence/power/elevation | niezalezny od API dostawcow; wymaga parserow i cleaning rules | lokalny kontrakt `POST /api/workouts/upload` i `POST /api/workouts/import` |
+| Upload plikow | Obowiazkowy fallback | import plikow TCX/GPX/FIT; TCX i GPX sa backendowo testowane, FIT ma parser MVP bez testu na realnym fixture | treningi, moving/elapsed time, dystans, HR, tempo, cadence, power, elevation, pace zones, dataAvailability | raw TCX jest zapisywany w `workout_raw_tcx`; raw FIT/GPX na razie tylko parsowane do `workouts.summary`, bez osobnej tabeli raw plikow | lokalny kontrakt `POST /api/workouts/upload` i `POST /api/workouts/import` |
 | Strava | Na start / czesciowo wdrozone | oficjalne OAuth2, token exchange, refresh token, sync aktywnosci | zakresy `activity:read`, `activity:read_all`; aktywnosci uzytkownika | wymagane pilnowanie scope, prywatnosci i zasad Stravy | https://developers.strava.com/docs/authentication/ |
 | Garmin | Na start jako wysokie ryzyko / live smoke wykonany | **Kod aktualnie uzywa zewnetrznego connectora** `GARMIN_CONNECTOR_BASE_URL` / `GARMIN_CONNECTOR_API_KEY`, opartego na `python-garminconnect==0.3.3`, z trybem `stub/live`; oficjalna alternatywa to Garmin Connect Developer Program / Activity API dla approved business developers | Connector zwraca znormalizowane aktywnosci do importu, ma endpoint download FIT/TCX/GPX/KML/CSV oraz endpoint uploadu zaplanowanych workoutow; smoke IQHost pobral 9 aktywnosci z ostatnich 30 dni, TCX jednej aktywnosci i zaplanowal testowy workout `1548384239` w kalendarzu Garmin | To nadal nieoficjalna sciezka z ryzykiem auth/MFA/rate limit/regulaminu; funkcja "wyslij do urzadzenia" jest wdrozona jako MVP. | https://developer.garmin.com/gc-developer-program/activity-api/ |
 | Polar | Kolejny etap | oficjalne AccessLink API v3, OAuth2, register user, pull notifications/webhooki | exercises, FIT, TCX, GPX, daily activity, sleep, HR | wymaga rejestracji klienta i obslugi rate limitow oraz webhook signature | https://www.polar.com/accesslink-api/ |
@@ -131,36 +140,49 @@ Wszystkie pozostale dokumenty `.md` / `.txt` z poprzedniego katalogu `docs/` ora
 
 ## Aktualna kolejnosc dalszych prac
 
-1. Smoke produkcji core flow:
+1. Feedback po treningu w UX:
+   - dodac widok feedbacku po treningu z `GET/POST /api/workouts/{id}/feedback`,
+   - pokazac w UI wnioski: praise, deviations, conclusions, planImpact,
+   - podpiac wygodne przejscie z listy treningow po imporcie/zapisie.
+2. Cross-training hardening:
+   - dodac korekte klasyfikacji zaimportowanych aktywnosci `other`,
+   - dopracowac edycje planowanych aktywnosci na wielu dniach,
+   - dodac realne fixture dla aktywnosci strength/bike/swim z providerow.
+3. Smoke produkcji po backendowym domknieciu:
    - register/login/profile,
-   - import/upload treningu,
-   - training signals/context/adjustments,
-   - weekly plan,
-   - onboarding skip i normalny zapis profilu.
-2. M3/M4 hardening UX:
-   - ekspozycja `blockContext`,
-   - widoczne alerty i decision trace,
-   - scenariusze reczne: powrot po przerwie, load spike, taper, chroniczne niedowykonanie.
-3. M2 deeper data:
-   - FIT/GPX,
-   - moving time,
-   - cadence, power, elevation,
-   - pace-zones per user.
-4. M5/M6:
-   - produkcyjne credentials i smoke Strava,
-   - Garmin: utrzymac connector MVP, dodac monitoring/rate-limit/MFA handling i stabilizacje uploadu zaplanowanych treningow,
-   - Polar/Suunto,
-   - AI provider hardening, rate limit, cache, observability.
+   - upload TCX/GPX i import treningu,
+   - rolling plan 14 dni,
+   - feedback generate/get,
+   - weekly plan jako kompatybilna sciezka,
+   - Strava/Garmin happy path albo jawny blad konfiguracji.
+4. M2 deeper data hardening:
+   - test na realnym pliku `.fit`,
+   - decyzja czy przechowujemy raw FIT/GPX w osobnej tabeli,
+   - czyszczenie outlierow cadence/power/elevation,
+   - strefy tempa per user w planie i feedbacku.
+5. Garmin Event Dashboard spike:
+   - research `https://connect.garmin.com/app/event-dashboard`,
+   - sprawdzic odczyt "Moje wydarzenia",
+   - sprawdzic wyszukiwanie eventow po nazwie/lokalizacji/dacie,
+   - udokumentowac status: stabilne / kruche / niedostepne,
+   - fallback MVP zostaje: reczne wpisanie startu w profilu.
+6. Later:
+   - smog/pogoda z lokalna precyzja,
+   - ZmierzymyCzas jako potencjalne partnerstwo/zrodlo eventow,
+   - HRV/sen/readiness,
+   - platnosci/BLIK po walidacji MVP.
 
 ## Walidacja wykonana dla raportu
 
 | Check | Wynik |
 |---|---|
-| Lokalny backend test suite | `php artisan test` -> `297 passed, 1434 assertions` |
+| Lokalny backend test suite | `php artisan test` -> `312 passed, 1568 assertions` |
+| Focused MVP 14 dni / feedback / deeper data / cross-training | `php artisan test tests\Unit\Analysis\ActivityImpactServiceTest.php tests\Unit\Analysis\WorkoutFactsAggregatorTest.php tests\Unit\Analysis\WorkoutFactsExtractorTest.php tests\Unit\TcxParsingServiceTest.php` -> 34 passed; `php artisan test tests\Feature\Api\PlanningParityTest.php` -> 13 passed |
+| Focused weekplan blocks | `php artisan test tests\Unit\WeeklyPlanServiceTest.php tests\Feature\Api\PlanningParityTest.php tests\Feature\Api\ContractFreezeTest.php` -> 48 passed |
 | Garmin connector stub smoke | FastAPI `TestClient` -> `connect/start`, `sync`, `status` HTTP 200 |
 | Garmin connector live smoke IQHost | `connect/start` -> HTTP 200; `sync` ostatnich 30 dni -> 9 aktywnosci; `status` -> `connected=true`; download TCX jednej aktywnosci -> HTTP 200, 464313 B; `POST /v1/garmin/workouts` -> `scheduled`, `workoutId=1548384239`, kalendarz `2026-04-26`; `GARMIN_MFA_CODE` nie jest trzymany po logowaniu |
 | Frontend build | `npm run build` -> OK |
-| Lokalna lista tras API | `php artisan route:list --path=api` -> 43 trasy |
+| Lokalna lista tras API | `php artisan route:list --path=api` -> Showing [50] routes |
 | Produkcyjna lista tras API | Historycznie: SSH IQHost `php artisan route:list --path=api` -> 42 trasy; do ponowienia przy kolejnym smoke produkcyjnym. |
 | Produkcyjne migracje | SSH IQHost `php artisan migrate:status` -> wszystkie wymagane migracje `Ran` |
 | Front produkcyjny | `https://coach.host89998.iqhs.pl` -> HTTP 200 |

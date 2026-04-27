@@ -22,7 +22,7 @@ use Carbon\CarbonImmutable;
  */
 class UserTrainingAnalysisService
 {
-    public const SERVICE_VERSION = '0.3-aggregates';
+    public const SERVICE_VERSION = '0.4-cross-training';
 
     public function __construct(
         private readonly WorkoutFactsExtractor $extractor = new WorkoutFactsExtractor,

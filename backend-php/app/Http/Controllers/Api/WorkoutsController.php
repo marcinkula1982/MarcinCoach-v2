@@ -6,12 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\Workout;
 use App\Models\WorkoutImportEvent;
 use App\Models\WorkoutRawTcx;
+use App\Services\Analysis\ActivityImpactService;
 use App\Services\FitParsingService;
 use App\Services\GpxParsingService;
 use App\Services\PlanComplianceService;
 use App\Services\PlanComplianceV2Service;
 use App\Services\TcxParsingService;
 use App\Services\TrainingAlertsV1Service;
+use App\Services\TrainingFeedbackV2Service;
 use App\Services\TrainingSignalsService;
 use App\Services\TrainingSignalsV2Service;
 use App\Support\WorkoutSourceContract;
@@ -163,7 +165,7 @@ class WorkoutsController extends Controller
                 $zones['z3Min'] += (float) ($row['intensity']['z3Min'] ?? 0);
                 $zones['z4Min'] += (float) ($row['intensity']['z4Min'] ?? 0);
                 $zones['z5Min'] += (float) ($row['intensity']['z5Min'] ?? 0);
-                if (($row['type'] ?? null) === 'run') {
+                if (in_array((string) ($row['type'] ?? ''), ['run', 'trail_run', 'treadmill'], true)) {
                     $km = (float) ($row['distanceKm'] ?? 0);
                     if ($km > $longRunKm) {
                         $longRunKm = $km;
@@ -597,6 +599,46 @@ class WorkoutsController extends Controller
         ]);
     }
 
+    public function feedback(int $id, Request $request): JsonResponse
+    {
+        $userId = $this->authUserId($request);
+        $workout = Workout::where('id', $id)->where('user_id', $userId)->first();
+        if (! $workout) {
+            return response()->json([
+                'message' => 'workout not found',
+            ], 404);
+        }
+
+        $feedback = app(TrainingFeedbackV2Service::class)->getProductFeedbackForWorkout($id, $userId);
+        if ($feedback === null) {
+            return response()->json([
+                'message' => 'feedback not generated',
+            ], 404);
+        }
+
+        return response()->json($feedback);
+    }
+
+    public function generateFeedback(int $id, Request $request): JsonResponse
+    {
+        $userId = $this->authUserId($request);
+        $workout = Workout::where('id', $id)->where('user_id', $userId)->first();
+        if (! $workout) {
+            return response()->json([
+                'message' => 'workout not found',
+            ], 404);
+        }
+
+        $feedback = app(TrainingFeedbackV2Service::class)->getProductFeedbackForWorkout($id, $userId, true);
+        if ($feedback === null) {
+            return response()->json([
+                'message' => 'feedback generation failed',
+            ], 500);
+        }
+
+        return response()->json($feedback);
+    }
+
     public function signals(int $id, Request $request): JsonResponse
     {
         $userId = $this->authUserId($request);
@@ -861,14 +903,10 @@ class WorkoutsController extends Controller
         $intensity = is_array($summary['intensity'] ?? null) ? $summary['intensity'] : $intensityBuckets;
         $toMin = fn ($sec) => is_numeric($sec) ? round(((float) $sec) / 60, 2) : 0.0;
         $workoutDt = (string) ($summary['startTimeIso'] ?? $workout->created_at?->toIso8601String());
-        $explicitSport = strtolower((string) ($summary['sport'] ?? ''));
-        if ($explicitSport !== '') {
-            $type = in_array($explicitSport, ['run', 'bike', 'swim', 'other'], true) ? $explicitSport : 'other';
-        } else {
-            // Legacy fallback: best-effort string match (used for pre-M2-beyond summaries).
-            $sportGuess = strtolower((string) (($summary['kind'] ?? '').' '.($summary['sport'] ?? '')));
-            $type = str_contains($sportGuess, 'run') || str_contains($sportGuess, 'bieg') ? 'run' : 'other';
-        }
+        $type = (new ActivityImpactService())->normalizeSport($summary['sport'] ?? null, [
+            'activityType' => $summary['activityType'] ?? null,
+            'kind' => $summary['kind'] ?? null,
+        ]);
         $avgPaceSecPerKm = isset($summary['avgPaceSecPerKm']) && is_numeric($summary['avgPaceSecPerKm'])
             ? (int) $summary['avgPaceSecPerKm']
             : null;

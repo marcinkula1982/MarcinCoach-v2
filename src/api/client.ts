@@ -83,6 +83,7 @@ axios.interceptors.response.use(
 
     const isAutoLoadEndpoint =
       error?.config?.url?.includes('weekly-plan') ||
+      error?.config?.url?.includes('rolling-plan') ||
       error?.config?.url?.includes('workouts') ||
       error?.config?.url?.includes('training-signals') ||
       error?.config?.url?.includes('training-analysis') ||

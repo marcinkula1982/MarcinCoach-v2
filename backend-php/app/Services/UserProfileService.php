@@ -49,6 +49,7 @@ class UserProfileService
             'health' => ['hasCurrentPain' => false],
             'equipment' => ['hasHrSensor' => false],
             'paceZones' => null,
+            'crossTrainingPromptPreference' => 'ask_before_plan',
             'quality' => [
                 'score' => 0,
                 'hasPrimaryRace' => false,
@@ -81,6 +82,7 @@ class UserProfileService
         $shoes = $defaults['shoes'];
         $hrZones = $defaults['hrZones'];
         $paceZones = null;
+        $crossTrainingPromptPreference = $defaults['crossTrainingPromptPreference'];
         if (is_string($profile->constraints) && $profile->constraints !== '') {
             $parsed = json_decode($profile->constraints, true);
             if (is_array($parsed)) {
@@ -94,6 +96,9 @@ class UserProfileService
                 }
                 if (isset($parsed['paceZones']) && is_array($parsed['paceZones'])) {
                     $paceZones = $parsed['paceZones'];
+                }
+                if (in_array($parsed['crossTrainingPromptPreference'] ?? null, ['ask_before_plan', 'do_not_ask'], true)) {
+                    $crossTrainingPromptPreference = (string) $parsed['crossTrainingPromptPreference'];
                 }
             }
         }
@@ -158,6 +163,7 @@ class UserProfileService
             'health' => $health,
             'equipment' => $equipment,
             'paceZones' => $paceZones,
+            'crossTrainingPromptPreference' => $crossTrainingPromptPreference,
             'quality' => $quality,
         ];
     }

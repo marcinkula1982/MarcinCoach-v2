@@ -186,6 +186,7 @@ class TrainingFeedbackV2Service
 
         $compliance = $this->loadCompliance($workout->id);
         $signals = FeedbackSignalsMapper::mapFeedbackToSignals($feedback);
+        $praise = [];
         $deviations = [];
 
         if (($compliance['durationStatus'] ?? null) === 'OK') {
@@ -196,7 +197,6 @@ class TrainingFeedbackV2Service
             $deviations[] = 'Czas treningu mocno odbiegal od planu.';
         }
 
-        $praise = [];
         $planCompliance = (string) ($meta['planCompliance'] ?? 'unknown');
         if ($planCompliance === 'planned') {
             $praise[] = 'Plus za trzymanie sie planu i wykonanie zaplanowanej jednostki.';

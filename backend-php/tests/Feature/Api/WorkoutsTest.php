@@ -8,6 +8,7 @@ use App\Models\WorkoutRawTcx;
 use App\Models\WorkoutImportEvent;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
@@ -2252,6 +2253,115 @@ XML;
         $this->assertSame(3000, $summary['intensityBuckets']['totalSec'] ?? null);
     }
 
+    public function test_gpx_upload_persists_rich_summary_fields(): void
+    {
+        $gpx = <<<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="MarcinCoach test">
+  <trk>
+    <trkseg>
+      <trkpt lat="52.229700" lon="21.012200">
+        <ele>100</ele>
+        <time>2026-04-20T10:00:00Z</time>
+        <extensions><hr>130</hr><cad>80</cad><power>190</power></extensions>
+      </trkpt>
+      <trkpt lat="52.230700" lon="21.013200">
+        <ele>108</ele>
+        <time>2026-04-20T10:05:00Z</time>
+        <extensions><hr>140</hr><cad>82</cad><power>200</power></extensions>
+      </trkpt>
+      <trkpt lat="52.231700" lon="21.014200">
+        <ele>104</ele>
+        <time>2026-04-20T10:10:00Z</time>
+        <extensions><hr>150</hr><cad>84</cad><power>210</power></extensions>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>
+XML;
+
+        $response = $this->post('/api/workouts/upload', [
+            'file' => UploadedFile::fake()->createWithContent('run.gpx', $gpx),
+        ]);
+        $response->assertStatus(201);
+
+        $workout = Workout::find($response->json('id'));
+        $this->assertNotNull($workout);
+        $summary = is_array($workout->summary) ? $workout->summary : [];
+
+        $this->assertSame('gpx', $summary['fileType'] ?? null);
+        $this->assertSame('run', $summary['sport'] ?? null);
+        $this->assertSame(600, $summary['elapsedTimeSec'] ?? null);
+        $this->assertSame(600, $summary['movingTimeSec'] ?? null);
+        $this->assertSame(140, $summary['hr']['avgBpm'] ?? null);
+        $this->assertSame(82, $summary['cadence']['avgSpm'] ?? null);
+        $this->assertSame(200, $summary['power']['avgWatts'] ?? null);
+        $this->assertTrue((bool) ($summary['dataAvailability']['elevation'] ?? false));
+    }
+
+    public function test_workout_feedback_generate_endpoint_returns_product_feedback(): void
+    {
+        $workout = Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => [
+                'startTimeIso' => '2026-04-20T10:00:00Z',
+                'durationSec' => 1800,
+                'movingTimeSec' => 1800,
+                'distanceM' => 5000,
+                'sport' => 'run',
+                'intensityBuckets' => ['z1Sec' => 0, 'z2Sec' => 1800, 'z3Sec' => 0, 'z4Sec' => 0, 'z5Sec' => 0, 'totalSec' => 1800],
+                'paceEquality' => 0.9,
+                'hrDrift' => 1.0,
+            ],
+            'workout_meta' => ['planCompliance' => 'planned'],
+            'source' => 'MANUAL_UPLOAD',
+            'source_activity_id' => 'feedback-product-1',
+            'dedupe_key' => 'MANUAL_UPLOAD:feedback-product-1',
+        ]);
+
+        DB::table('plan_compliance_v1')->insert([
+            'workout_id' => $workout->id,
+            'expected_duration_sec' => 1800,
+            'actual_duration_sec' => 1800,
+            'delta_duration_sec' => 0,
+            'duration_ratio' => 1.0,
+            'status' => 'OK',
+            'flag_overshoot_duration' => false,
+            'flag_undershoot_duration' => false,
+            'generated_at' => now(),
+        ]);
+        DB::table('plan_compliance_v2')->insert([
+            'workout_id' => $workout->id,
+            'expected_hr_zone_min' => 2,
+            'expected_hr_zone_max' => 2,
+            'actual_hr_z1_sec' => 0,
+            'actual_hr_z2_sec' => 1800,
+            'actual_hr_z3_sec' => 0,
+            'actual_hr_z4_sec' => 0,
+            'actual_hr_z5_sec' => 0,
+            'high_intensity_sec' => 0,
+            'high_intensity_ratio' => 0,
+            'status' => 'OK',
+            'flag_easy_became_z5' => false,
+            'generated_at' => now(),
+        ]);
+
+        $generated = $this->postJson("/api/workouts/{$workout->id}/feedback/generate");
+        $generated->assertOk();
+        $generated->assertJsonPath('workoutId', $workout->id);
+        $generated->assertJsonPath('summary.durationStatus', 'OK');
+        $generated->assertJsonPath('summary.hrStatus', 'OK');
+        $generated->assertJsonPath('confidence', 'high');
+        $this->assertContains('Dobra robota: czas treningu byl zgodny z zalozeniem.', $generated->json('praise'));
+        $this->assertContains('Plus za trzymanie sie planu i wykonanie zaplanowanej jednostki.', $generated->json('praise'));
+
+        $fetched = $this->getJson("/api/workouts/{$workout->id}/feedback");
+        $fetched->assertOk();
+        $fetched->assertJsonPath('workoutId', $workout->id);
+    }
+
     public function test_training_signals_longrun_only_counts_runs_when_sport_tagged(): void
     {
         Carbon::setTestNow('2026-04-25T00:00:00Z');
@@ -2293,4 +2403,3 @@ XML;
         }
     }
 }
-

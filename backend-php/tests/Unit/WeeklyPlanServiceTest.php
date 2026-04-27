@@ -77,6 +77,48 @@ class WeeklyPlanServiceTest extends TestCase
         $this->assertSame(1, $plan['summary']['qualitySessions']);
     }
 
+    public function test_running_sessions_include_preview_blocks(): void
+    {
+        $context = $this->baseContext([
+            'signals' => [
+                'totalWorkouts' => 6,
+                'flags' => ['fatigue' => false],
+            ],
+        ]);
+
+        $plan = $this->service->generatePlan($context, ['adjustments' => []]);
+        $running = array_values(array_filter($plan['sessions'], fn ($s) => ($s['type'] ?? null) !== 'rest' && (int) ($s['durationMin'] ?? 0) > 0));
+
+        $this->assertNotEmpty($running);
+        foreach ($running as $session) {
+            $this->assertArrayHasKey('blocks', $session);
+            $this->assertSame('warmup', $session['blocks'][0]['kind']);
+            $this->assertStringContainsString('Rozgrzewka ważniejsza niż trening', $session['blocks'][0]['description']);
+            $this->assertSame('cooldown', $session['blocks'][count($session['blocks']) - 1]['kind']);
+            $this->assertStringContainsString('mięśnie błagają', $session['blocks'][count($session['blocks']) - 1]['description']);
+        }
+    }
+
+    public function test_quality_session_blocks_expose_main_structure(): void
+    {
+        $context = $this->baseContext(['signals' => ['totalWorkouts' => 5]]);
+        $blockContext = [
+            'block_type' => 'peak',
+            'block_goal' => 'Peak VO2max',
+            'week_role' => 'peak',
+            'load_direction' => 'increase',
+            'key_capability_focus' => 'vo2max',
+        ];
+
+        $plan = $this->service->generatePlan($context, ['adjustments' => []], $blockContext);
+        $intervals = array_values(array_filter($plan['sessions'], fn ($s) => ($s['type'] ?? null) === 'intervals'))[0];
+        $main = array_values(array_filter($intervals['blocks'], fn ($b) => ($b['kind'] ?? null) === 'main'))[0];
+
+        $this->assertSame('Interwały', $main['title']);
+        $this->assertStringContainsString('5×3min', $main['description']);
+        $this->assertSame('Z4-Z5', $main['intensityHint']);
+    }
+
     public function test_applies_technique_focus_and_surface_constraint_to_sessions(): void
     {
         $context = $this->baseContext();

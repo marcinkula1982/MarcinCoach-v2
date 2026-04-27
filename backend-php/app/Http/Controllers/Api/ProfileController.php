@@ -88,6 +88,7 @@ class ProfileController extends Controller
             'paceZones.z3SecPerKm' => ['nullable', 'numeric', 'min:60', 'max:1200'],
             'paceZones.z4SecPerKm' => ['nullable', 'numeric', 'min:60', 'max:1200'],
             'paceZones.z5SecPerKm' => ['nullable', 'numeric', 'min:60', 'max:1200'],
+            'crossTrainingPromptPreference' => ['sometimes', 'nullable', 'in:ask_before_plan,do_not_ask'],
         ]);
 
         // Cross-field HR zones validation
@@ -113,6 +114,11 @@ class ProfileController extends Controller
         if (array_key_exists('paceZones', $validated)) {
             $profile->constraints = json_encode($this->mergeConstraints($profile->constraints, [
                 'paceZones' => $this->normalizePaceZones($validated['paceZones']),
+            ]), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+        if (array_key_exists('crossTrainingPromptPreference', $validated)) {
+            $profile->constraints = json_encode($this->mergeConstraints($profile->constraints, [
+                'crossTrainingPromptPreference' => $validated['crossTrainingPromptPreference'] ?? 'ask_before_plan',
             ]), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         }
         if (array_key_exists('races', $validated)) {
@@ -406,6 +412,7 @@ class ProfileController extends Controller
             ],
             // M1 beyond minimum additions (additive — no existing keys changed)
             'paceZones' => $constraints['paceZones'] ?? null,
+            'crossTrainingPromptPreference' => $constraints['crossTrainingPromptPreference'] ?? 'ask_before_plan',
             'primaryRace' => $primaryRace,
             'quality' => [
                 'score' => $scoreData['score'],

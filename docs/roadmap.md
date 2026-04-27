@@ -4,49 +4,64 @@ Status dokumentu: aktywny plan dalszych prac.
 
 Po zrealizowaniu funkcjonalnosci nie dopisuj jej tutaj jako historii. Przenies jej status do `docs/status.md`, do sekcji `Dziennik zrealizowanych funkcjonalnosci`, a w tym pliku zostaw tylko kolejne prace do wykonania.
 
+## Kierunek MVP
+
+MVP to webowy coach/planner, nie tracker GPS.
+
+Glowna petla:
+1. plan rolling 14 dni,
+2. trening,
+3. deterministyczny feedback bez AI,
+4. korekta kolejnych dni.
+
+Nie robimy w MVP:
+- platnosci,
+- social feedu,
+- LiveTrack,
+- lokalnej bazy biegow,
+- smogu/pogody,
+- HRV/snu/readiness.
+
 ## Najblizsza kolejnosc
 
-0. Fundament provider-neutral analytics (priorytet):
-   - zasada: importer provider-specific -> `WorkoutFacts` -> `UserTrainingAnalysis` -> AI / plan / alerty / feedback,
-   - backend liczy fakty; OpenAI tylko ubiera gotowy pakiet faktow w narracje,
-   - strefy HR zawsze maja jawny status: `known | derived | estimated | missing`,
-   - plan tygodniowy, alerty i feedback-v2 korzystaja z `UserTrainingAnalysis` + ankiety/celow/ograniczen, nie z luznego tekstu AI.
+1. Feedback po treningu w UX:
+   - po zapisanym/imporcie treningu pokazac `POST /api/workouts/{id}/feedback/generate`,
+   - dodac widok ponownego odczytu `GET /api/workouts/{id}/feedback`,
+   - pokazac sekcje: praise, deviations, conclusions, planImpact,
+   - nie udawac AI: komunikaty sa deterministyczne i oparte o fakty/training compliance.
 
-1. Produkcyjny smoke po porzadkach repo:
-   - register/login/profile,
-   - import/upload treningu,
-   - training signals/context/adjustments,
-   - weekly plan,
-   - onboarding skip i normalny zapis profilu,
-   - Strava/Garmin happy path albo jawny blad konfiguracji.
+2. Cross-training hardening:
+   - dodac UI korekty klasyfikacji aktywnosci zaimportowanych jako `other`,
+   - dopracowac planowane aktywnosci wielodniowe i szybkie powtarzanie tygodniowe,
+   - dodac fixture providerowe dla strength/bike/swim,
+   - zachowac `GET /api/weekly-plan` jako kompatybilny fallback.
 
-2. M3/M4 hardening UX:
-   - pokazanie `blockContext`,
-   - widoczne alerty i decision trace,
-   - scenariusze reczne: powrot po przerwie, load spike, taper, chroniczne niedowykonanie,
-   - lepsze opisy powodow korekt planu.
+3. Deeper data hardening:
+   - dodac test na realnym pliku `.fit`,
+   - zdecydowac, czy raw FIT/GPX zapisywac w osobnej tabeli,
+   - dopracowac cleaning rules dla cadence, power, elevation,
+   - wykorzystac `profile.paceZones` w planie i feedbacku.
 
-3. M2 deeper data:
-   - FIT/GPX,
-   - moving time,
-   - cadence,
-   - power,
-   - elevation,
-   - pace-zones per user.
+4. Races w profilu:
+   - upewnic sie, ze frontend pozwala dodac start recznie: nazwa, data, dystans, priorytet A/B/C, cel czasowy,
+   - pokazac `primaryRace` i wplyw na taper/peak/base,
+   - race import nie blokuje MVP, bo fallbackiem zostaje reczne wpisanie.
 
-4. M5 integracje sportowe:
-   - produkcyjne credentials i smoke Strava,
-   - Garmin: monitoring connectora, rate-limit handling, MFA handling,
-   - Polar AccessLink,
-   - Suunto Cloud API,
-   - jasny fallback przez pliki dla kazdego zrodla.
+5. Garmin Event Dashboard spike:
+   - sprawdzic `https://connect.garmin.com/app/event-dashboard`,
+   - sprawdzic odczyt "Moje wydarzenia",
+   - sprawdzic wyszukiwanie eventow po nazwie/lokalizacji/dacie,
+   - sprawdzic import wybranego eventu jako race A/B/C,
+   - zakonczyc spike jasnym statusem: stabilne / kruche / niedostepne.
 
-5. M6 AI hardening:
-   - produkcyjny provider OpenAI,
-   - limity dzienne i komunikaty UI,
-   - cache,
-   - observability,
-   - testy kontraktowe odpowiedzi AI/stub.
+## Later
+
+- Smog/pogoda z lokalna precyzja lepsza niz samo miasto.
+- ZmierzymyCzas jako docelowe partnerstwo lub selektywne zrodlo eventow.
+- HRV/sen/readiness z urzadzen.
+- Platnosci/BLIK po walidacji MVP.
+- Polar/Suunto jako kolejne integracje po domknieciu MVP.
+- Produkcyjny AI provider hardening: limity, cache, observability.
 
 ## Aktywne referencje
 

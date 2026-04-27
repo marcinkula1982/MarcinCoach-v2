@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Workout;
 use App\Models\WorkoutImportEvent;
+use App\Services\Analysis\ActivityImpactService;
 use App\Support\WorkoutSourceContract;
 use App\Support\WorkoutSummaryBuilder;
 
@@ -61,7 +62,30 @@ class ExternalWorkoutImportService
                 continue;
             }
 
-            $summary = WorkoutSummaryBuilder::build($startTimeIso, $durationSec, $distanceM, ['provider' => $canonicalSource]);
+            $impactService = new ActivityImpactService();
+            $activityType = isset($activity['activityType']) ? (string) $activity['activityType'] : null;
+            $sport = $impactService->normalizeSport($activity['sport'] ?? null, [
+                'activityType' => $activityType,
+                'kind' => $activity['kind'] ?? null,
+            ]);
+            $sportSubtype = $sport === 'strength'
+                ? $impactService->normalizeStrengthSubtype($activity['sportSubtype'] ?? $activity['strengthSubtype'] ?? null)
+                : ($activity['sportSubtype'] ?? null);
+
+            $summary = WorkoutSummaryBuilder::build(
+                $startTimeIso,
+                $durationSec,
+                $distanceM,
+                array_filter([
+                    'provider' => $canonicalSource,
+                    'activityType' => $activityType,
+                    'sport' => $sport,
+                    'sportSubtype' => $sportSubtype,
+                    'crossTrainingIntensity' => $activity['intensity'] ?? $activity['crossTrainingIntensity'] ?? null,
+                    'hr' => $this->hrSummary($activity),
+                    'calories' => isset($activity['calories']) && is_numeric($activity['calories']) ? (int) $activity['calories'] : null,
+                ], fn ($value) => $value !== null),
+            );
             $dedupeKey = WorkoutSourceContract::buildDedupeKey($canonicalSource, $sourceActivityId, $startTimeIso, $durationSec, $distanceM);
 
             $workout = Workout::create([
@@ -95,6 +119,25 @@ class ExternalWorkoutImportService
             'deduped' => $deduped,
             'failed' => $failed,
         ];
+    }
+
+    /**
+     * @param array<string,mixed> $activity
+     * @return array{avgBpm:int|null,maxBpm:int|null}|null
+     */
+    private function hrSummary(array $activity): ?array
+    {
+        $avg = isset($activity['averageHr']) && is_numeric($activity['averageHr']) && (int) $activity['averageHr'] > 0
+            ? (int) $activity['averageHr']
+            : null;
+        $max = isset($activity['maxHr']) && is_numeric($activity['maxHr']) && (int) $activity['maxHr'] > 0
+            ? (int) $activity['maxHr']
+            : null;
+        if ($avg === null && $max === null) {
+            return null;
+        }
+
+        return ['avgBpm' => $avg, 'maxBpm' => $max];
     }
 
     private function runSignalPipelines(int $workoutId): void

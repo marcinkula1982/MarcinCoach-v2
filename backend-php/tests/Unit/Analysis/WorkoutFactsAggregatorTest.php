@@ -3,6 +3,7 @@
 namespace Tests\Unit\Analysis;
 
 use App\Services\Analysis\WorkoutFactsAggregator;
+use App\Services\Analysis\ActivityImpactService;
 use App\Support\Analysis\Dto\WorkoutFactsDto;
 use Carbon\CarbonImmutable;
 use PHPUnit\Framework\TestCase;
@@ -17,8 +18,12 @@ class WorkoutFactsAggregatorTest extends TestCase
         $this->assertSame(0, $result['workoutCount']);
         $this->assertNull($result['lastWorkoutAt']);
         $this->assertNull($result['load7d']);
+        $this->assertNull($result['runningLoad7d']);
+        $this->assertNull($result['crossTrainingFatigue7d']);
+        $this->assertNull($result['overallFatigue7d']);
         $this->assertNull($result['acwr']);
         $this->assertFalse($result['spikeLoad']);
+        $this->assertFalse($result['overallFatigueSpike']);
         $this->assertSame([], $result['gaps']);
     }
 
@@ -126,6 +131,42 @@ class WorkoutFactsAggregatorTest extends TestCase
         $this->assertSame(0.5, $result['consistencyScore']);
     }
 
+    public function test_running_and_cross_training_loads_are_reported_separately(): void
+    {
+        $now = CarbonImmutable::create(2026, 4, 26, 12, 0, 0, 'UTC');
+        $impact = new ActivityImpactService();
+        $facts = [
+            $this->fact($now->subDays(1), durationSec: 60 * 60, distanceMeters: 10000, sport: 'run'),
+            $this->fact(
+                $now->subDays(2),
+                durationSec: 3 * 60 * 60,
+                distanceMeters: 0,
+                sport: 'strength',
+                sportSubtype: 'lower_body',
+                activityImpact: $impact->impact('strength', 'lower_body', 3 * 60 * 60, null, null, ['intensity' => 'hard']),
+            ),
+            $this->fact(
+                $now->subDays(3),
+                durationSec: 30 * 60,
+                distanceMeters: 0,
+                sport: 'bike',
+                activityImpact: $impact->impact('bike', null, 30 * 60, null, null, ['intensity' => 'easy']),
+            ),
+        ];
+
+        $result = (new WorkoutFactsAggregator)->aggregate($facts, $now);
+
+        $this->assertSame(60.0, $result['runningLoad7d']);
+        $this->assertSame(60.0, $result['load7d']);
+        $this->assertSame(197.7, $result['crossTrainingFatigue7d']);
+        $this->assertSame(257.7, $result['overallFatigue7d']);
+        $this->assertSame(60.0, $result['runningLoad28d']);
+        $this->assertSame(197.7, $result['crossTrainingFatigue28d']);
+        $this->assertSame(257.7, $result['overallFatigue28d']);
+        $this->assertNotNull($result['acwrRunning']);
+        $this->assertNotNull($result['acwrOverall']);
+    }
+
     private function fact(
         CarbonImmutable $at,
         ?int $durationSec = 3600,
@@ -133,6 +174,8 @@ class WorkoutFactsAggregatorTest extends TestCase
         string $sport = 'run',
         ?float $maxHr = null,
         ?float $avgHr = null,
+        ?string $sportSubtype = null,
+        array $activityImpact = [],
     ): WorkoutFactsDto {
         static $counter = 0;
         $counter++;
@@ -162,6 +205,8 @@ class WorkoutFactsAggregatorTest extends TestCase
             rawProviderRefs: ['rawTcxId' => null, 'rawFitId' => null, 'rawProviderPayloadId' => null],
             computedAt: $at->toIso8601String(),
             extractorVersion: '1.0',
+            sportSubtype: $sportSubtype,
+            activityImpact: $activityImpact,
         );
     }
 }

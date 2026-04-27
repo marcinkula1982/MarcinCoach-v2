@@ -12,6 +12,7 @@ export type UserProfile = {
   health?: Record<string, unknown> | null
   equipment?: Record<string, unknown> | null
   hrZones?: Record<string, unknown> | null
+  crossTrainingPromptPreference?: 'ask_before_plan' | 'do_not_ask'
   primaryRace?: Record<string, unknown> | null
   quality?: Record<string, unknown> | null
   onboardingCompleted?: boolean
@@ -29,6 +30,7 @@ export type UpdateProfilePayload = {
   health?: Record<string, unknown>
   equipment?: Record<string, unknown>
   hrZones?: Record<string, unknown>
+  crossTrainingPromptPreference?: 'ask_before_plan' | 'do_not_ask'
 }
 
 export async function getMyProfile(): Promise<UserProfile> {

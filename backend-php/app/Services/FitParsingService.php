@@ -336,7 +336,7 @@ class FitParsingService
             1 => 'run',
             2 => 'bike',
             5 => 'swim',
-            11 => 'walk',
+            11 => 'walk_hike',
             default => 'other',
         };
     }

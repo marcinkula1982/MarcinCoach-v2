@@ -22,7 +22,7 @@ class WorkoutFactsExtractor
     /**
      * @var list<string>
      */
-    private const KNOWN_SPORTS = ['run', 'trail_run', 'treadmill', 'walk', 'bike', 'other'];
+    private const KNOWN_SPORTS = ['run', 'trail_run', 'treadmill', 'bike', 'swim', 'walk_hike', 'strength', 'other'];
 
     public function extract(Workout $workout): WorkoutFactsDto
     {
@@ -32,7 +32,8 @@ class WorkoutFactsExtractor
         $startedAt = $this->normalizeStartedAt($summary['startTimeIso'] ?? null);
         $durationSec = $this->intOrNull($summary['durationSec'] ?? null);
         $distanceMeters = $this->distanceFromSummary($summary);
-        $sportKind = $this->mapSport($summary['sport'] ?? null, $meta);
+        $sportKind = $this->mapSport($summary['sport'] ?? null, $summary, $meta);
+        $sportSubtype = $this->resolveSportSubtype($summary, $meta, $sportKind);
 
         $avgHrBpm = $this->floatOrNull($summary['hr']['avgBpm'] ?? null);
         $maxHrBpm = $this->floatOrNull($summary['hr']['maxBpm'] ?? null);
@@ -46,6 +47,18 @@ class WorkoutFactsExtractor
         );
 
         $rawTcxId = $this->resolveRawTcxId($workout);
+        $impactService = new ActivityImpactService();
+        $activityImpact = $impactService->impact(
+            $sportKind,
+            $sportSubtype,
+            $durationSec,
+            $this->floatOrNull($summary['elevationGainMeters'] ?? null),
+            $this->resolvePerceivedEffort($meta),
+            [
+                'intensity' => $summary['crossTrainingIntensity'] ?? $summary['intensityLevel'] ?? $meta['crossTrainingIntensity'] ?? null,
+                'intensityHint' => $summary['intensityHint'] ?? null,
+            ],
+        );
 
         return new WorkoutFactsDto(
             workoutId: (string) $workout->id,
@@ -84,6 +97,8 @@ class WorkoutFactsExtractor
             elevationLossMeters: $this->floatOrNull($summary['elevationLossMeters'] ?? null),
             paceZones: is_array($summary['paceZones'] ?? null) ? $summary['paceZones'] : [],
             dataAvailability: $this->resolveDataAvailability($summary, $rawTcxId),
+            sportSubtype: $sportSubtype,
+            activityImpact: $activityImpact,
         );
     }
 
@@ -111,8 +126,9 @@ class WorkoutFactsExtractor
     /**
      * @param  array<string,mixed>  $meta
      */
-    private function mapSport(mixed $rawSport, array $meta): string
+    private function mapSport(mixed $rawSport, array $summary, array $meta): string
     {
+        $activityType = is_string($summary['activityType'] ?? null) ? (string) $summary['activityType'] : null;
         $candidate = is_string($rawSport) ? strtolower(trim($rawSport)) : '';
         $metaKind = isset($meta['kind']) && is_string($meta['kind']) ? strtolower(trim($meta['kind'])) : '';
 
@@ -125,20 +141,45 @@ class WorkoutFactsExtractor
             return $candidate;
         }
 
-        if (str_contains($candidate, 'run')) {
-            return 'run';
-        }
-        if (str_contains($candidate, 'walk')) {
-            return 'walk';
-        }
-        if (str_contains($candidate, 'bik') || str_contains($candidate, 'cycl')) {
-            return 'bike';
+        $mapped = (new ActivityImpactService())->normalizeSport($candidate, [
+            'activityType' => $activityType,
+            'kind' => $metaKind,
+        ]);
+        if (in_array($mapped, self::KNOWN_SPORTS, true)) {
+            return $mapped;
         }
         if (in_array($metaKind, self::KNOWN_SPORTS, true)) {
             return $metaKind;
         }
 
         return 'other';
+    }
+
+    /**
+     * @param array<string,mixed> $summary
+     * @param array<string,mixed> $meta
+     */
+    private function resolveSportSubtype(array $summary, array $meta, string $sportKind): ?string
+    {
+        foreach ([
+            $summary['sportSubtype'] ?? null,
+            $summary['strengthSubtype'] ?? null,
+            $meta['sportSubtype'] ?? null,
+            $meta['strengthSubtype'] ?? null,
+        ] as $candidate) {
+            if (! is_string($candidate) || trim($candidate) === '') {
+                continue;
+            }
+            if ($sportKind === 'strength') {
+                $normalized = (new ActivityImpactService())->normalizeStrengthSubtype($candidate);
+                if ($normalized !== null) {
+                    return $normalized;
+                }
+            }
+            return strtolower(trim($candidate));
+        }
+
+        return $sportKind === 'strength' ? 'full_body' : null;
     }
 
     /**
@@ -165,8 +206,8 @@ class WorkoutFactsExtractor
             }
         }
 
-        // 2) policz tylko jezeli to bieg / trail / treadmill / walk z dystansem i czasem
-        if (! in_array($sport, ['run', 'trail_run', 'treadmill', 'walk'], true)) {
+        // 2) policz tylko jezeli to bieg / trail / treadmill / walk-hike z dystansem i czasem
+        if (! in_array($sport, ['run', 'trail_run', 'treadmill', 'walk_hike'], true)) {
             return null;
         }
         if ($durationSec === null || $durationSec <= 0) {

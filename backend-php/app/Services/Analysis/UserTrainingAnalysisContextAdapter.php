@@ -23,21 +23,38 @@ class UserTrainingAnalysisContextAdapter
 
         $codes = $this->codes($analysis['planImplications'] ?? []);
         $loadSpike = (bool) ($facts['spikeLoad'] ?? false) || in_array('load_spike', $codes, true);
+        $overallFatigueSpike = (bool) ($facts['overallFatigueSpike'] ?? false);
         $returnAfterBreak = in_array('return_after_break', $codes, true);
+        $runningLoad7d = $this->numberOrZero($facts['runningLoad7d'] ?? $facts['load7d'] ?? null);
+        $runningLoad28d = $this->numberOrZero($facts['runningLoad28d'] ?? $facts['load28d'] ?? null);
+        $crossTrainingFatigue7d = $this->numberOrZero($facts['crossTrainingFatigue7d'] ?? null);
+        $overallFatigue7d = $this->numberOrZero($facts['overallFatigue7d'] ?? $facts['load7d'] ?? null);
 
         return [
             'generatedAtIso' => $windowEnd->toISOString(),
             'windowDays' => $windowDays,
             'windowStart' => $windowStart->toISOString(),
             'windowEnd' => $windowEnd->toISOString(),
-            'weeklyLoad' => $this->numberOrZero($facts['load7d'] ?? null),
-            'rolling4wLoad' => $this->numberOrZero($facts['load28d'] ?? null),
+            'weeklyLoad' => $runningLoad7d,
+            'rolling4wLoad' => $runningLoad28d,
+            'runningLoad' => $runningLoad7d,
+            'runningLoad7d' => $runningLoad7d,
+            'runningLoad28d' => $runningLoad28d,
+            'crossTrainingFatigueLoad' => $crossTrainingFatigue7d,
+            'crossTrainingFatigue7d' => $crossTrainingFatigue7d,
+            'crossTrainingFatigue28d' => $this->numberOrZero($facts['crossTrainingFatigue28d'] ?? null),
+            'overallFatigueLoad' => $overallFatigue7d,
+            'overallFatigue7d' => $overallFatigue7d,
+            'overallFatigue28d' => $this->numberOrZero($facts['overallFatigue28d'] ?? $facts['load28d'] ?? null),
+            'acwrRunning' => is_numeric($facts['acwrRunning'] ?? null) ? (float) $facts['acwrRunning'] : null,
+            'acwrOverall' => is_numeric($facts['acwrOverall'] ?? null) ? (float) $facts['acwrOverall'] : null,
             'buckets' => $this->buckets($legacySignals['buckets'] ?? null),
             'longRun' => $this->longRun($facts, $legacySignals),
             'flags' => [
                 'injuryRisk' => $returnAfterBreak || (bool) ($legacyFlags['injuryRisk'] ?? false),
-                'fatigue' => $loadSpike || (bool) ($legacyFlags['fatigue'] ?? false),
+                'fatigue' => $loadSpike || $overallFatigueSpike || (bool) ($legacyFlags['fatigue'] ?? false),
                 'loadSpike' => $loadSpike,
+                'overallFatigueSpike' => $overallFatigueSpike,
                 'returnAfterBreak' => $returnAfterBreak,
             ],
             'adaptation' => $this->adaptation($legacySignals),

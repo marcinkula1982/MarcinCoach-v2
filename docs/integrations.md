@@ -19,9 +19,10 @@ Onboarding data-first:
 
 | Zrodlo | Status | Integracja | Uwagi |
 |---|---|---|---|
-| TCX upload | Wdrozony fallback | `POST /api/workouts/upload`, parser TCX w Laravel | FIT/GPX sa planowane, ale nie sa jeszcze aktywnym MVP. |
+| Pliki TCX/GPX/FIT | Wdrozony fallback backendowy, wymaga hardeningu FIT | `POST /api/workouts/upload`; parsery TCX, GPX i FIT w Laravel | TCX i GPX sa pokryte testami. FIT ma parser MVP, ale wymaga testu na realnym pliku `.fit`. Raw TCX jest zapisywany, raw GPX/FIT na razie tylko parsowany do `workouts.summary`. |
 | Strava | Czesc backendowa wdrozona | OAuth2, token exchange, sync aktywnosci | Oficjalne API. Wymaga produkcyjnych credentials, smoke i pilnowania scope/prywatnosci. |
 | Garmin | Wdrozony jako MVP wysokiego ryzyka | zewnetrzny connector `GARMIN_CONNECTOR_BASE_URL`, `python-garminconnect`, tryb `stub/live` | Nieoficjalna sciezka przez Garmin Connect. Sync aktywnosci i wysylka zaplanowanych workoutow do kalendarza Garmina sa obslugiwane przez connector; TCX upload zostaje fallbackiem. |
+| Garmin Event Dashboard | Spike / research | `https://connect.garmin.com/app/event-dashboard` | Do sprawdzenia: "Moje wydarzenia", wyszukiwanie eventow po nazwie/lokalizacji/dacie, import eventu jako race A/B/C. Nie blokuje MVP, bo fallbackiem jest reczne wpisanie startu w profilu. |
 | Polar | Planowane | Polar AccessLink API | Oficjalna integracja po stabilizacji Strava/Garmin. |
 | Suunto | Planowane | Suunto API Zone / partner program | Wymaga formalnosci partnerskich. |
 | Apple Watch / Health | Poza backendowym MVP | HealthKit tylko przez aplikacje iOS/watchOS lub eksport plikow | Brak prostego backendowego logowania do Apple Health. |

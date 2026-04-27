@@ -438,9 +438,11 @@ class TrainingAlertsV1Service
             $facts = is_array($analysis['facts'] ?? null) ? $analysis['facts'] : [];
             $codes = $this->codes($analysis['planImplications'] ?? []);
 
-            $load7d = $this->numberOrZero($facts['load7d'] ?? null);
-            $load28d = $this->numberOrZero($facts['load28d'] ?? null);
-            $acwr = is_numeric($facts['acwr'] ?? null) ? (float) $facts['acwr'] : null;
+            $load7d = $this->numberOrZero($facts['overallFatigue7d'] ?? $facts['load7d'] ?? null);
+            $load28d = $this->numberOrZero($facts['overallFatigue28d'] ?? $facts['load28d'] ?? null);
+            $acwr = is_numeric($facts['acwrOverall'] ?? null)
+                ? (float) $facts['acwrOverall']
+                : (is_numeric($facts['acwr'] ?? null) ? (float) $facts['acwr'] : null);
             $baseline7d = $load28d > 0 ? round($load28d / 4.0, 2) : 0.0;
             $isSpike = (bool) ($facts['spikeLoad'] ?? false) || in_array('load_spike', $codes, true);
 
