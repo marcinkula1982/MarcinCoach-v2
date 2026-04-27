@@ -61,4 +61,14 @@ class UserTrainingAnalysisCacheService
                 'computed_at_iso' => (string) ($analysis['computedAt'] ?? now()->utc()->toIso8601String()),
                 'snapshot_json' => json_encode($analysis, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
                 'created_at' => now(),
-         
+                'updated_at' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            // Tabela moze nie istniec jeszcze na produkcji — logujemy, nie wysypujemy endpointu
+            \Illuminate\Support\Facades\Log::warning('training_analysis_snapshots insert failed', [
+                'userId' => $userId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+}
