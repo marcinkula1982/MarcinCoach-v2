@@ -52,15 +52,23 @@ class UserTrainingAnalysisCacheService
      */
     private function storeSnapshot(int $userId, int $windowDays, string $cacheKey, array $analysis): void
     {
-        DB::table('training_analysis_snapshots')->insert([
-            'user_id' => $userId,
-            'window_days' => $windowDays,
-            'service_version' => (string) ($analysis['serviceVersion'] ?? UserTrainingAnalysisService::SERVICE_VERSION),
-            'cache_key' => $cacheKey,
-            'computed_at_iso' => (string) ($analysis['computedAt'] ?? now()->utc()->toIso8601String()),
-            'snapshot_json' => json_encode($analysis, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        try {
+            DB::table('training_analysis_snapshots')->insert([
+                'user_id' => $userId,
+                'window_days' => $windowDays,
+                'service_version' => (string) ($analysis['serviceVersion'] ?? UserTrainingAnalysisService::SERVICE_VERSION),
+                'cache_key' => $cacheKey,
+                'computed_at_iso' => (string) ($analysis['computedAt'] ?? now()->utc()->toIso8601String()),
+                'snapshot_json' => json_encode($analysis, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            // Tabela moze nie istniec jeszcze na produkcji — logujemy, nie wysypujemy endpointu
+            \Illuminate\Support\Facades\Log::warning('training_analysis_snapshots insert failed', [
+                'userId' => $userId,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }

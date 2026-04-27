@@ -35,6 +35,7 @@ Zasada:
 | 2026-04-27 | Profil startow i tempa | Profil przyjmuje `races[].name`, `races[].targetTime`, `races[].priority` oraz `paceZones`; `UserProfileService` wystawia `primaryRace` z nazwa i targetTime | `php artisan test tests\Feature\Api\AuthAndProfileTest.php tests\Unit\UserProfileServiceTest.php` w pelnym suite -> OK. |
 | 2026-04-27 | Cross-training w rolling planie | Dodano deterministyczny model aktywnosci niebiegowych: normalizacja sport/subtype, `activityImpact`, osobne `runningLoad`/`crossTrainingFatigue`/`overallFatigue`, `POST /api/rolling-plan`, guardy kolizji i modal frontendowy przed odswiezeniem planu | `php artisan test` -> 310 passed, 1529 assertions; `npm run build` -> OK; focused cross-training suite -> 47 passed. |
 | 2026-04-27 | Szczegoly treningu w planie | Kazda sesja biegowa w weekplan/rolling plan dostaje `blocks`: rozgrzewka, czesc glowna i schlodzenie/mobilizacja; frontend ma rozwijany podglad szczegolow treningu | `php artisan test` -> 312 passed, 1568 assertions; focused planner/contract suite -> 48 passed; `npm run build` -> OK. |
+| 2026-04-27 | Onboarding UX fix | Przycisk Pomin dziala optimistycznie: `onCompleted()` wywolany natychmiast, PUT `/me/profile` idzie w tle; blad API nie blokuje przejscia. Onboarding wyswietlany tylko nowym userom (`onboardingCompleted===false && workouts.length===0`); istniejacy user z treningami omija onboarding automatycznie. | Weryfikacja reczna: klikniecie Pomin przenosi do dashboardu; user z treningami nie widzi onboardingu po zalogowaniu. |
 
 ## Decyzja o starej ankiecie
 

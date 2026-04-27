@@ -268,12 +268,14 @@ export default function Onboarding({ onCompleted }: OnboardingProps) {
     setFormError('')
     setIsSkipping(true)
 
+    // Optimistyczne przejście — nie blokujemy usera nawet gdy API zawiedzie
+    onCompleted?.()
+
     try {
       await client.put('/me/profile', {
         goals: 'Pominieto onboarding',
         availability: {
           runningDays: ['mon', 'wed', 'fri'],
-          skipped: true,
         },
         health: {
           currentPain: false,
@@ -292,10 +294,9 @@ export default function Onboarding({ onCompleted }: OnboardingProps) {
           },
         }),
       })
-      onCompleted?.()
     } catch (error: any) {
-      const message = error?.response?.data?.message || error?.message || 'Nie udalo sie pominac ankiety.'
-      setFormError(message)
+      // Logujemy błąd, ale user już przeszedł dalej
+      console.warn('skipOnboarding API error (ignorowany):', error?.response?.data?.message || error?.message)
     } finally {
       setIsSkipping(false)
     }

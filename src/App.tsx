@@ -566,7 +566,7 @@ const App = () => {
         </div>
         {loggedInUser ? (
           <>
-            {onboardingCompleted === false ? (
+            {onboardingCompleted === false && workouts.length === 0 ? (
               <Onboarding onCompleted={handleOnboardingCompleted} />
             ) : onboardingCompleted === null ? (
               <div className="mt-10 rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-8 text-center text-slate-300">

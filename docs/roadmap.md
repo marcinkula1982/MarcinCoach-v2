@@ -42,7 +42,13 @@ Nie robimy w MVP:
    - dopracowac cleaning rules dla cadence, power, elevation,
    - wykorzystac `profile.paceZones` w planie i feedbacku.
 
-4. Races w profilu:
+4. Nawigacja tabelaryczna i onboarding jako zakladka:
+   - wprowadzic podzial frontendu na zakładki (np. Plan / Historia / Profil / Ustawienia),
+   - po kliknieciu Pomin w onboardingu nawigowac do konkretnej zakladki (obecnie przechodzi do glownego dashboardu),
+   - onboarding dostepny rowniez z poziomu zakładki Profil dla zalogowanego usera, ktory chce uzupelnic dane,
+   - nie blokowac dostepu do reszty aplikacji gdy onboarding nieukończony.
+
+5. Races w profilu:
    - upewnic sie, ze frontend pozwala dodac start recznie: nazwa, data, dystans, priorytet A/B/C, cel czasowy,
    - pokazac `primaryRace` i wplyw na taper/peak/base,
    - race import nie blokuje MVP, bo fallbackiem zostaje reczne wpisanie.

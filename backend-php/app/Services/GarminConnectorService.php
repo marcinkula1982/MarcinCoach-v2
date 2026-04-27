@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
@@ -60,9 +61,13 @@ class GarminConnectorService
         if ($baseUrl === '') {
             return ['ok' => false, 'payload' => ['error' => 'GARMIN_CONNECTOR_NOT_CONFIGURED']];
         }
-        $response = Http::timeout(20)
-            ->withHeaders($this->headers())
-            ->get($baseUrl . '/v1/garmin/accounts/' . $userId . '/status');
+        try {
+            $response = Http::timeout(20)
+                ->withHeaders($this->headers())
+                ->get($baseUrl . '/v1/garmin/accounts/' . $userId . '/status');
+        } catch (ConnectionException $e) {
+            return ['ok' => false, 'payload' => ['error' => 'GARMIN_CONNECTOR_UNREACHABLE', 'message' => $e->getMessage()]];
+        }
         if (!$response->successful()) {
             return ['ok' => false, 'payload' => $this->failurePayload($response)];
         }
@@ -80,9 +85,13 @@ class GarminConnectorService
         if ($baseUrl === '') {
             return ['ok' => false, 'payload' => ['error' => 'GARMIN_CONNECTOR_NOT_CONFIGURED']];
         }
-        $response = Http::timeout(45)
-            ->withHeaders($this->headers())
-            ->post($baseUrl . $path, $payload);
+        try {
+            $response = Http::timeout(45)
+                ->withHeaders($this->headers())
+                ->post($baseUrl . $path, $payload);
+        } catch (ConnectionException $e) {
+            return ['ok' => false, 'payload' => ['error' => 'GARMIN_CONNECTOR_UNREACHABLE', 'message' => $e->getMessage()]];
+        }
 
         if (!$response->successful()) {
             return ['ok' => false, 'payload' => $this->failurePayload($response)];
