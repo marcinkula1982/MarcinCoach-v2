@@ -110,25 +110,4 @@ class GarminConnectorService
         if ($key !== '') {
             $headers['x-connector-key'] = $key;
         }
-        return $headers;
-    }
-
-    /**
-     * @return array<string,mixed>
-     */
-    private function failurePayload(Response $response): array
-    {
-        $json = $response->json();
-        if (is_array($json) && isset($json['detail']) && is_array($json['detail'])) {
-            return $json['detail'];
-        }
-        if (is_array($json)) {
-            return $json;
-        }
-
-        return [
-            'error' => 'GARMIN_CONNECTOR_FAILED',
-            'message' => $response->body(),
-        ];
-    }
-}
+        return $head

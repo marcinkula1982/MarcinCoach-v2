@@ -600,11 +600,4 @@ export default function Onboarding({ onCompleted }: OnboardingProps) {
               disabled={isSubmitting}
               className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
             >
-              {isSubmitting ? 'Zapisywanie...' : 'Zapisz profil'}
-            </button>
-          </div>
-        </section>
-      )}
-    </form>
-  )
-}
+              {isSubmitting ? 'Zapisywanie...' : 'Zapisz profil'
