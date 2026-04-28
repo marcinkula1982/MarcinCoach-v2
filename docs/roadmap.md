@@ -46,7 +46,10 @@ Nie robimy w MVP:
    - wprowadzic podzial frontendu na zakładki (np. Plan / Historia / Profil / Ustawienia),
    - po kliknieciu Pomin w onboardingu nawigowac do konkretnej zakladki (obecnie przechodzi do glownego dashboardu),
    - onboarding dostepny rowniez z poziomu zakładki Profil dla zalogowanego usera, ktory chce uzupelnic dane,
-   - nie blokowac dostepu do reszty aplikacji gdy onboarding nieukończony.
+   - nie blokowac dostepu do reszty aplikacji gdy onboarding nieukończony,
+   - na ekranie wyboru zrodla danych dodac akcje typu "Brakuje Twojej aplikacji? Powiadom nas",
+   - dodac krotki formularz zgloszenia brakujacej integracji/API: nazwa aplikacji lub urzadzenia, link do API/strony integracji, typ danych (treningi/sen/HRV/readiness), opcjonalny kontakt do usera,
+   - formularz ma byc sygnalem produktowym/backlogowym i nie moze blokowac onboardingu; fallbackiem dla brakujacej aplikacji pozostaje import plikow TCX/GPX/FIT.
 
 5. Races w profilu:
    - upewnic sie, ze frontend pozwala dodac start recznie: nazwa, data, dystans, priorytet A/B/C, cel czasowy,
