@@ -18,3 +18,38 @@ export const login = async (
   setSessionHeaders(sessionToken, loggedUsername)
   return response.data
 }
+
+export const register = async (
+  username: string,
+  password: string,
+  email?: string,
+): Promise<LoginResponse> => {
+  const response = await client.post<LoginResponse>('/auth/register', {
+    username,
+    ...(email ? { email } : {}),
+    password,
+  })
+  const { sessionToken, username: registeredUsername } = response.data
+  setSessionHeaders(sessionToken, registeredUsername)
+  return response.data
+}
+
+export const forgotPassword = async (identifier: string): Promise<{ ok: boolean }> => {
+  const response = await client.post<{ ok: boolean }>('/auth/forgot-password', {
+    identifier,
+  })
+  return response.data
+}
+
+export const resetPassword = async (
+  identifier: string,
+  token: string,
+  password: string,
+): Promise<{ ok: boolean }> => {
+  const response = await client.post<{ ok: boolean }>('/auth/reset-password', {
+    identifier,
+    token,
+    password,
+  })
+  return response.data
+}

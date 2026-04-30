@@ -1,6 +1,6 @@
 # MarcinCoach v2 — scenariusze użytkownika
 
-Stan dokumentu: 2026-04-28.
+Stan dokumentu: 2026-04-29.
 Cel: jeden punkt prawdy o tym, co użytkownik realnie może dziś zrobić w aplikacji, czego nie może, i co planujemy.
 
 ## Po co ten dokument
@@ -84,10 +84,11 @@ Opisy po polsku. ID, kody błędów, endpointy, nazwy pól techniczne — po ang
 
 1. **Backend deterministyczny jest źródłem prawdy.** AI to warstwa eskalacji, nie silnik planu.
 2. **Aplikacja nie udaje pewności gdy nie ma danych.** Mała próbka = niski confidence + ostrożny plan.
-3. **Skip nie jest karą.** Użytkownik bez integracji ma działającą aplikację, tylko z mniejszym zakresem.
-4. **Cross-training jest pełnoprawnym treningiem.** Nie ignorujemy aktywności innych niż bieg, oznaczamy je i liczymy wpływ.
-5. **Każda integracja ma fallback w postaci pliku.** Nawet bez Coros API user importuje FIT/TCX/GPX.
-6. **Manual check-in jest pełnoprawnym fallbackiem.** User bez integracji i bez plików nadal domyka pętlę: plan → wykonanie/pominięcie → feedback → kolejny plan.
+3. **Onboarding jest first-run, ale nie jednorazową bramką.** Nowy user trafia do niego od razu po rejestracji, a user po skipie/przerwaniu może wrócić z Dashboardu lub Profilu.
+4. **Skip nie jest karą.** Użytkownik bez integracji ma działającą aplikację, tylko z mniejszym zakresem.
+5. **Cross-training jest pełnoprawnym treningiem.** Nie ignorujemy aktywności innych niż bieg, oznaczamy je i liczymy wpływ.
+6. **Każda integracja ma fallback w postaci pliku.** Nawet bez Coros API user importuje FIT/TCX/GPX.
+7. **Manual check-in jest pełnoprawnym fallbackiem.** User bez integracji i bez plików nadal domyka pętlę: plan → wykonanie/pominięcie → feedback → kolejny plan.
 
 ## Czego ten dokument NIE zawiera
 

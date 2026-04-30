@@ -130,6 +130,70 @@ class IntegrationsParityTest extends TestCase
         );
     }
 
+    public function test_integrations_status_returns_all_providers(): void
+    {
+        $status = $this->getJson('/api/integrations/status');
+        $status->assertOk();
+        $status->assertJsonStructure(['integrations']);
+
+        $providers = collect($status->json('integrations'))->pluck('provider')->all();
+        $this->assertContains('garmin', $providers);
+        $this->assertContains('strava', $providers);
+        $this->assertContains('suunto_sports_tracker', $providers);
+
+        // Each entry has required fields
+        foreach ($status->json('integrations') as $item) {
+            $this->assertArrayHasKey('provider', $item);
+            $this->assertArrayHasKey('connected', $item);
+            $this->assertArrayHasKey('lastSyncAt', $item);
+        }
+    }
+
+    public function test_integrations_status_reflects_connected_strava(): void
+    {
+        \App\Models\IntegrationAccount::create([
+            'user_id' => 1,
+            'provider' => 'strava',
+            'status' => 'connected',
+            'last_sync_at' => now()->subHour(),
+        ]);
+
+        $status = $this->getJson('/api/integrations/status');
+        $status->assertOk();
+
+        $strava = collect($status->json('integrations'))->firstWhere('provider', 'strava');
+        $this->assertTrue($strava['connected']);
+        $this->assertNotNull($strava['lastSyncAt']);
+    }
+
+    public function test_disconnect_integration_removes_account(): void
+    {
+        \App\Models\IntegrationAccount::create([
+            'user_id' => 1,
+            'provider' => 'garmin',
+            'status' => 'connected',
+        ]);
+
+        $this->assertDatabaseHas('integration_accounts', ['user_id' => 1, 'provider' => 'garmin']);
+
+        $resp = $this->deleteJson('/api/integrations/garmin');
+        $resp->assertOk();
+        $resp->assertJsonPath('ok', true);
+
+        $this->assertDatabaseMissing('integration_accounts', ['user_id' => 1, 'provider' => 'garmin']);
+
+        // Status now shows disconnected
+        $status = $this->getJson('/api/integrations/status');
+        $garmin = collect($status->json('integrations'))->firstWhere('provider', 'garmin');
+        $this->assertFalse($garmin['connected']);
+    }
+
+    public function test_disconnect_unknown_provider_returns_422(): void
+    {
+        $resp = $this->deleteJson('/api/integrations/unknown_provider');
+        $resp->assertStatus(422);
+    }
+
     public function test_garmin_connector_error_payload_is_preserved(): void
     {
         putenv('GARMIN_CONNECTOR_BASE_URL=https://connector.local');

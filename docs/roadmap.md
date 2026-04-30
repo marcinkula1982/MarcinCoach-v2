@@ -4,6 +4,8 @@ Status dokumentu: aktywny plan dalszych prac.
 
 Po zrealizowaniu funkcjonalnosci nie dopisuj jej tutaj jako historii. Przenies jej status do `docs/status.md`, do sekcji `Dziennik zrealizowanych funkcjonalnosci`, a w tym pliku zostaw tylko kolejne prace do wykonania.
 
+Operacyjna kolejnosc wykonywania taskow jest w `docs/execution-plan.md`. Ten plik trzyma kierunek produktu i obszary prac, a nie codzienna liste TODO.
+
 ## Kierunek MVP
 
 MVP to webowy coach/planner, nie tracker GPS.
@@ -44,7 +46,9 @@ Nie robimy w MVP:
 
 4. Nawigacja tabelaryczna i onboarding jako zakladka:
    - wprowadzic podzial frontendu na zakładki (np. Plan / Historia / Profil / Ustawienia),
+   - po zalozeniu konta new user powinien od razu trafic do first-run onboardingu jako naturalnego kolejnego kroku,
    - po kliknieciu Pomin w onboardingu nawigowac do konkretnej zakladki (obecnie przechodzi do glownego dashboardu),
+   - jezeli user pominie albo przerwie onboarding, pokazac pozniej wyrazne CTA "Dokoncz onboarding" / "Uzupelnij dane" na Dashboardzie i w zakladce Profil,
    - onboarding dostepny rowniez z poziomu zakładki Profil dla zalogowanego usera, ktory chce uzupelnic dane,
    - nie blokowac dostepu do reszty aplikacji gdy onboarding nieukończony,
    - na ekranie wyboru zrodla danych dodac akcje typu "Brakuje Twojej aplikacji? Powiadom nas",
@@ -69,12 +73,13 @@ Nie robimy w MVP:
 - ZmierzymyCzas jako docelowe partnerstwo lub selektywne zrodlo eventow.
 - HRV/sen/readiness z urzadzen.
 - Platnosci/BLIK po walidacji MVP.
-- Polar/Suunto jako kolejne integracje po domknieciu MVP.
+- Integracje API sportowe: Strava produkcyjnie (credentials, smoke, webhook), potem Polar AccessLink i oficjalne Suunto API Zone; do czasu partner access Suunto ma tylko kontrolowany Sports Tracker test bridge dla zamknietych testow. Coros jako partner/API gdy bedzie dostep, z fallbackiem FIT/TCX/GPX do tego czasu.
 - Produkcyjny AI provider hardening: limity, cache, observability.
 
 ## Aktywne referencje
 
 - `docs/status.md` - wykonane funkcjonalnosci, technologie, walidacje.
-- `docs/integrations.md` - integracje Garmin/Strava/Polar/Suunto.
+- `docs/execution-plan.md` - operacyjna kolejnosc prac i taski `NOW/NEXT/LATER/DONE`.
+- `docs/integrations.md` - integracje Garmin/Strava/Polar/Suunto/Coros.
 - `docs/deploy/frontend-iqhost-deploy.txt` - deploy frontu.
 - `CLAUDE.md` / `AGENTS.md` - zasady pracy AI i deployu.

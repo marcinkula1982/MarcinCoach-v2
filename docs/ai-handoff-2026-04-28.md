@@ -90,6 +90,8 @@ Opisuje pełny flow dla użytkownika, który:
 
 Decyzja produktowa: manual check-in jest P0/core MVP, nie P2 fallback.
 
+Nowa decyzja z 2026-04-29: onboarding powinien być naturalnym first-run flow od razu po założeniu konta dla new usera, ale nie może być jednorazową bramką. Jeśli user go pominie, przerwie albo wróci po czasie, musi mieć CTA "Dokończ onboarding" / "Uzupełnij dane" z Dashboardu i docelowo z Profilu. `US-ONBOARD-007` podniesiono do P0.
+
 ### Dokument dla IT
 
 Dodany plik:
@@ -168,27 +170,26 @@ Poprawione w scenariuszach:
 W `docs/user-scenarios/coverage-matrix.md`:
 
 - razem: 106 scenariuszy,
-- P0: 59,
-- P1: 40,
+- P0: 60,
+- P1: 39,
 - P2: 7.
 
 Statusy:
 
 - implemented: 22,
-- partial: 43,
-- missing: 30,
+- partial: 46,
+- missing: 27,
 - unknown: 11.
 
 P0 only:
 
 - implemented: 19,
-- partial: 28,
-- missing: 8,
+- partial: 30,
+- missing: 7,
 - unknown: 4.
 
 Najważniejsze P0 missing:
 
-- reset hasła,
 - zgody przy rejestracji,
 - export danych,
 - usunięcie konta,
@@ -210,7 +211,7 @@ Z `gaps-and-next-steps.md`:
 
 2. Pakiet 1 — auth dla nowych użytkowników:
    - rejestracja UI,
-   - reset hasła,
+   - reset hasła: API/mail/UI po EP-005, do domknięcia SMTP smoke i revoke starych sesji,
    - zmiana hasła z profilu.
 
 3. Pakiet 2 — pętla treningowa MVP:
@@ -274,4 +275,3 @@ Aktualny cel: kontynuować prace po przygotowaniu scenariuszy użytkownika. Najw
 
 Najpierw sprawdź git status i nie cofaj istniejących zmian.
 ```
-

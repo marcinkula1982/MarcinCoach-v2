@@ -31,6 +31,18 @@ Realny problem zawsze był: stary `dist/` nie trafiał do `public_html/`.
 
 ---
 
+## ZARZĄDZANIE EXECUTION PLAN
+
+Po każdym wykonanym tasku z `docs/execution-plan.md` AI ma obowiązek zapisać informację o wykonaniu:
+
+1. oznaczyć task jako wykonany w `docs/execution-plan.md`,
+2. dopisać krótki wpis do `docs/status.md` albo wskazanej w execution plan sekcji `Done`,
+3. podać datę, zakres wykonanej zmiany, powiązany scenariusz/ID oraz sposób weryfikacji (test, smoke albo informacja, że nie uruchomiono).
+
+Zasada: `coverage-matrix.md` pokazuje mapę pokrycia, `execution-plan.md` pokazuje kolejność pracy, a `status.md` / `Done` pokazuje, co faktycznie zostało domknięte.
+
+---
+
 ## STRUKTURA PROJEKTU
 
 - `src/` — frontend React/Vite/TypeScript

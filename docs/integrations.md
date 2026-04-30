@@ -13,7 +13,9 @@ Onboarding data-first:
 - Garmin,
 - pliki TCX/FIT/GPX,
 - sciezka reczna, gdy uzytkownik nie ma danych,
-- Polar i Suunto jako kolejne zrodla po stabilizacji MVP.
+- Polar i oficjalne Suunto API Zone jako kolejne zrodla po stabilizacji Strava/Garmin,
+- Suunto Sports Tracker jako tymczasowy importer testowy przed partner access,
+- Coros jako fallback plikowy teraz i przyszla integracja tylko przez oficjalny partner/API access.
 
 ## Aktualny status
 
@@ -24,7 +26,8 @@ Onboarding data-first:
 | Garmin | Wdrozony jako MVP wysokiego ryzyka | zewnetrzny connector `GARMIN_CONNECTOR_BASE_URL`, `python-garminconnect`, tryb `stub/live` | Nieoficjalna sciezka przez Garmin Connect. Sync aktywnosci i wysylka zaplanowanych workoutow do kalendarza Garmina sa obslugiwane przez connector; TCX upload zostaje fallbackiem. |
 | Garmin Event Dashboard | Spike / research | `https://connect.garmin.com/app/event-dashboard` | Do sprawdzenia: "Moje wydarzenia", wyszukiwanie eventow po nazwie/lokalizacji/dacie, import eventu jako race A/B/C. Nie blokuje MVP, bo fallbackiem jest reczne wpisanie startu w profilu. |
 | Polar | Planowane | Polar AccessLink API | Oficjalna integracja po stabilizacji Strava/Garmin. |
-| Suunto | Planowane | Suunto API Zone / partner program | Wymaga formalnosci partnerskich. |
+| Suunto | Tymczasowy importer testowy wdrozony, oficjalne API planowane | `POST /api/integrations/suunto/sports-tracker/sync` przez Sports Tracker browser session token; docelowo Suunto API Zone / partner program | Most testowy jest nieoficjalny, wymaga recznie przekazanego tokena sesji z przegladarki, nie zapisuje tokena w bazie i jest domyslnie wylaczony przez `SUUNTO_SPORTS_TRACKER_ENABLED=false`. |
+| Coros | Planowane jako przyszla integracja, teraz fallback plikowy | FIT/TCX/GPX export z Coros; przyszly partner/API access | Nie reverse-engineerowac. User Coros ma sciezke przez upload i formularz "Powiadom nas". |
 | Apple Watch / Health | Poza backendowym MVP | HealthKit tylko przez aplikacje iOS/watchOS lub eksport plikow | Brak prostego backendowego logowania do Apple Health. |
 
 ## Garmin - status live
@@ -40,6 +43,31 @@ Onboarding data-first:
 - potwierdzenie uzytkownika: trening widoczny/dziala na koncie Garmin.
 
 To potwierdza, ze `python-garminconnect` w obecnej integracji obsluguje nie tylko sync aktywnosci do MarcinCoach, ale tez upload zaplanowanego treningu do Garmin Connect i przypisanie go do kalendarza. Nadal jest to nieoficjalna sciezka Garmin Connect, wiec utrzymujemy jawne ryzyka auth/MFA/rate limit/regulaminu.
+
+## Suunto - tymczasowy most testowy
+
+Decyzja 2026-04-30: do czasu posiadania produkcyjnej wersji MarcinCoach i aplikacji partnerskiej do Suunto uzywamy kontrolowanego, nieoficjalnego mostu przez Sports Tracker/Suunto App.
+
+Zakres wdrozony:
+- backendowy endpoint `POST /api/integrations/suunto/sports-tracker/sync`,
+- body: `sessionToken`, opcjonalnie `format=fit|gpx` (domyslnie `gpx`), `limit`, `fromIso`, `toIso`,
+- domyslny base URL: `https://api.sports-tracker.com/apiserver/v1`,
+- lista aktywnosci: `/workouts?limited=true&limit=...&token=...`,
+- eksport aktywnosci: `/workout/exportFit/{workoutKey}` albo `/workout/exportGpx/{workoutKey}`,
+- import do `workouts` z `source=SUUNTO`, deduplikacja po `source_activity_id`,
+- log w `integration_sync_runs.provider=suunto_sports_tracker`,
+- wpis w `integration_accounts.provider=suunto_sports_tracker` bez zapisu access/refresh tokena.
+
+Zasady bezpieczenstwa:
+- endpoint jest domyslnie wylaczony (`SUUNTO_SPORTS_TRACKER_ENABLED=false`),
+- token sesji Sports Tracker jest transient: przychodzi w request body i nie jest zapisywany w `integration_accounts`, `integration_sync_runs.meta` ani w workoutach,
+- importer jest do controlled beta/testow, nie jako oficjalna publiczna integracja,
+- po uzyskaniu partner access docelowa integracja pozostaje `Suunto API Zone`.
+
+Referencje techniczne:
+- oficjalne Sports Tracker help potwierdza reczny export GPX po zalogowaniu na sports-tracker.com,
+- nieoficjalne skrypty/gisty uzywaja endpointow `api.sports-tracker.com/apiserver/v1/workouts`, `exportFit` i `exportGpx` z tokenem sesji przegladarki,
+- Suunto API Zone potwierdza oficjalna sciezke partnerska/OAuth i FIT jako docelowy format danych.
 
 ## Minimalna probka danych
 
@@ -74,6 +102,7 @@ Kazda integracja zewnetrzna powinna zostawiac slady w `integration_sync_runs`:
 - data ostatniej synchronizacji.
 
 Dla Garmina od poczatku traktujemy ryzyko jako jawne: `unofficial_connector`.
+Dla Suunto do czasu partner access traktujemy most Sports Tracker jako jawne ryzyko: `unofficial_sports_tracker`, domyslnie wylaczone i bez trwalego zapisu tokena.
 
 ## Linki referencyjne
 
@@ -82,4 +111,6 @@ Dla Garmina od poczatku traktujemy ryzyko jako jawne: `unofficial_connector`.
 - python-garminconnect: https://github.com/cyberjunky/python-garminconnect
 - Polar AccessLink: https://www.polar.com/accesslink-api/
 - Suunto API Zone: https://apizone.suunto.com/
+- Suunto / Sports Tracker FIT export bookmarklet: https://gist.github.com/marguslt/b0ee7e88960b2d03de2da62a44233893
+- Sports Tracker GPX export help: https://sports-tracker.helpshift.com/hc/en/3-sports-tracker/faq/30-how-to-export-import-workouts/
 - Apple HealthKit: https://developer.apple.com/documentation/healthkit

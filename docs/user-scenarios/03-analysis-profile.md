@@ -261,7 +261,7 @@ Backend już ma `BlockPeriodizationService` i `PlanMemoryService`. UI to dopełn
 
 **Typ:** happy path
 **Persona:** każda
-**Status:** partial (backend liczy, UI nie pokazuje wyraźnie)
+**Status:** implemented (2026-04-30: ProfileQualityScore widget w ProfileEditSection.tsx — score/100, pasek koloru, lista brakujących elementów z hintami)
 **Priorytet:** P1
 
 ### Stan wejściowy

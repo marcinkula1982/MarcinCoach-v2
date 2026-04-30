@@ -6,7 +6,7 @@ namespace App\Support;
  * Single source of truth for workout source values, normalization,
  * and dedupe key generation — matches the Node.js canonical contract.
  *
- * Node canonical source enum: MANUAL_UPLOAD | GARMIN | STRAVA
+ * Canonical source enum: MANUAL_UPLOAD | MANUAL_CHECK_IN | GARMIN | STRAVA | SUUNTO
  * Node dedupeKey format:
  *   - with activity id:  SOURCE:sourceActivityId
  *   - without activity id: SOURCE:t=<startTimeIso>:d=<round5s>:m=<round10m>
@@ -14,8 +14,10 @@ namespace App\Support;
 class WorkoutSourceContract
 {
     const MANUAL_UPLOAD = 'MANUAL_UPLOAD';
+    const MANUAL_CHECK_IN = 'MANUAL_CHECK_IN';
     const GARMIN = 'GARMIN';
     const STRAVA = 'STRAVA';
+    const SUUNTO = 'SUUNTO';
 
     /**
      * Accepted boundary input values → canonical uppercase storage value.
@@ -26,11 +28,18 @@ class WorkoutSourceContract
     private static array $sourceMap = [
         'manual'        => self::MANUAL_UPLOAD,
         'manual_upload' => self::MANUAL_UPLOAD,
+        'manual_check_in' => self::MANUAL_CHECK_IN,
+        'manual-check-in' => self::MANUAL_CHECK_IN,
+        'check_in'      => self::MANUAL_CHECK_IN,
+        'check-in'      => self::MANUAL_CHECK_IN,
         'tcx'           => self::MANUAL_UPLOAD,
         'gpx'           => self::MANUAL_UPLOAD,
         'fit'           => self::MANUAL_UPLOAD,
         'garmin'        => self::GARMIN,
         'strava'        => self::STRAVA,
+        'suunto'        => self::SUUNTO,
+        'suunto_sports_tracker' => self::SUUNTO,
+        'sports_tracker' => self::SUUNTO,
     ];
 
     /**

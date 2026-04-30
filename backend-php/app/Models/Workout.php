@@ -33,4 +33,9 @@ class Workout extends Model
     {
         return $this->hasOne(WorkoutRawTcx::class, 'workout_id');
     }
+
+    public function manualCheckIn(): HasOne
+    {
+        return $this->hasOne(ManualCheckIn::class, 'workout_id');
+    }
 }

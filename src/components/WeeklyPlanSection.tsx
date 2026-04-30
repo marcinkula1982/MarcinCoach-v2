@@ -2,6 +2,8 @@ import { Fragment, useEffect, useState } from 'react'
 import { hasStoredSession } from '../api/client'
 import { fetchRollingPlan, generateRollingPlan } from '../api/workouts'
 import { garminSendWorkout } from '../api/garmin'
+import ManualCheckInDialog from './ManualCheckInDialog'
+import type { ManualCheckInResponse, ManualCheckInStatus } from '../api/workouts'
 import type {
   CrossTrainingIntensity,
   CrossTrainingPromptPreference,
@@ -168,9 +170,33 @@ const hasWorkoutBlocks = (session: PlannedSession) =>
 // ---------- Component ----------
 type WeeklyPlanSectionProps = {
   refreshToken?: number
+  onManualCheckInSaved?: (response: ManualCheckInResponse) => void | Promise<void>
 }
 
-export default function WeeklyPlanSection({ refreshToken = 0 }: WeeklyPlanSectionProps) {
+type ActiveManualCheckIn = {
+  key: string
+  session: PlannedSession
+  plannedDate: string
+  plannedSessionId?: string
+  initialStatus: ManualCheckInStatus
+}
+
+const manualCheckInKey = (session: PlannedSession, date: string, index: number) =>
+  session.id ?? `${date}-${session.day}-${session.type}-${index}`
+
+const canManualCheckIn = (session: PlannedSession, date: string | null) =>
+  Boolean(date) && date! <= todayIso() && session.type !== 'rest'
+
+const checkInStatusLabel = (status: ManualCheckInStatus) => {
+  if (status === 'done') return 'wykonane'
+  if (status === 'modified') return 'zmienione'
+  return 'pominięte'
+}
+
+export default function WeeklyPlanSection({
+  refreshToken = 0,
+  onManualCheckInSaved,
+}: WeeklyPlanSectionProps) {
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan | null>(null)
   const [weeklyPlanLoading, setWeeklyPlanLoading] = useState(false)
   const [weeklyPlanError, setWeeklyPlanError] = useState<string | null>(null)
@@ -183,6 +209,10 @@ export default function WeeklyPlanSection({ refreshToken = 0 }: WeeklyPlanSectio
   const [skipCrossPrompt, setSkipCrossPrompt] = useState(false)
   const [crossPromptSubmitting, setCrossPromptSubmitting] = useState(false)
   const [expandedDetails, setExpandedDetails] = useState<Record<string, boolean>>({})
+  const [activeManualCheckIn, setActiveManualCheckIn] = useState<ActiveManualCheckIn | null>(null)
+  const [manualCheckInStatuses, setManualCheckInStatuses] = useState<
+    Record<string, { status: ManualCheckInStatus; workoutId: number | null }>
+  >({})
 
   const loadWeeklyPlan = async () => {
     setWeeklyPlanLoading(true)
@@ -323,6 +353,34 @@ export default function WeeklyPlanSection({ refreshToken = 0 }: WeeklyPlanSectio
 
   const toggleDetails = (key: string) => {
     setExpandedDetails((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const openManualCheckIn = (
+    session: PlannedSession,
+    index: number,
+    plannedDate: string,
+    initialStatus: ManualCheckInStatus,
+  ) => {
+    setActiveManualCheckIn({
+      key: manualCheckInKey(session, plannedDate, index),
+      session,
+      plannedDate,
+      plannedSessionId: session.id,
+      initialStatus,
+    })
+  }
+
+  const handleManualCheckInSaved = async (response: ManualCheckInResponse) => {
+    if (activeManualCheckIn) {
+      setManualCheckInStatuses((prev) => ({
+        ...prev,
+        [activeManualCheckIn.key]: {
+          status: response.checkIn.status,
+          workoutId: response.checkIn.workoutId,
+        },
+      }))
+    }
+    await Promise.resolve(onManualCheckInSaved?.(response))
   }
 
   return (
@@ -476,6 +534,18 @@ export default function WeeklyPlanSection({ refreshToken = 0 }: WeeklyPlanSectio
         </div>
       )}
 
+      {activeManualCheckIn && (
+        <ManualCheckInDialog
+          key={activeManualCheckIn.key}
+          session={activeManualCheckIn.session}
+          plannedDate={activeManualCheckIn.plannedDate}
+          plannedSessionId={activeManualCheckIn.plannedSessionId}
+          initialStatus={activeManualCheckIn.initialStatus}
+          onSaved={handleManualCheckInSaved}
+          onClose={() => setActiveManualCheckIn(null)}
+        />
+      )}
+
       {weeklyPlanError && (
         <div className="mb-4 rounded border border-red-500/40 bg-red-900/30 p-4 text-sm text-red-200">
           {weeklyPlanError}
@@ -517,6 +587,7 @@ export default function WeeklyPlanSection({ refreshToken = 0 }: WeeklyPlanSectio
                   <th className="text-left py-2 px-3 text-slate-300">Powierzchnia</th>
                   <th className="text-left py-2 px-3 text-slate-300">Uwagi</th>
                   <th className="text-left py-2 px-3 text-slate-300">Garmin</th>
+                  <th className="text-left py-2 px-3 text-slate-300">Check-in</th>
                 </tr>
               </thead>
               <tbody>
@@ -529,6 +600,9 @@ export default function WeeklyPlanSection({ refreshToken = 0 }: WeeklyPlanSectio
                   const crossDescription = describeCrossTrainingSession(session)
                   const detailsOpen = expandedDetails[key] === true
                   const canShowDetails = hasWorkoutBlocks(session)
+                  const manualKey = date ? manualCheckInKey(session, date, idx) : key
+                  const manualStatus = manualCheckInStatuses[manualKey]
+                  const canCheckIn = canManualCheckIn(session, date)
 
                   return (
                     <Fragment key={key}>
@@ -609,10 +683,49 @@ export default function WeeklyPlanSection({ refreshToken = 0 }: WeeklyPlanSectio
                             '–'
                           )}
                         </td>
+                        <td className="py-2 px-3 text-slate-300">
+                          {canCheckIn && date ? (
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => openManualCheckIn(session, idx, date, 'done')}
+                                  className="rounded-md bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
+                                >
+                                  Wykonane
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openManualCheckIn(session, idx, date, 'modified')}
+                                  className="rounded-md bg-amber-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-amber-500"
+                                >
+                                  Zmienione
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openManualCheckIn(session, idx, date, 'skipped')}
+                                  className="rounded-md bg-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-100 hover:bg-slate-600"
+                                >
+                                  Nie zrobiłem
+                                </button>
+                              </div>
+                              {manualStatus && (
+                                <div className="text-xs text-emerald-300">
+                                  Zapisano: {checkInStatusLabel(manualStatus.status)}
+                                  {manualStatus.workoutId ? ` · workout #${manualStatus.workoutId}` : ''}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-500">
+                              {date && date > todayIso() ? 'Po treningu' : 'â€“'}
+                            </span>
+                          )}
+                        </td>
                       </tr>
                       {detailsOpen && canShowDetails && (
                         <tr className="border-b border-slate-800/50 bg-slate-950/30">
-                          <td colSpan={7} className="px-3 py-3">
+                          <td colSpan={8} className="px-3 py-3">
                             <div className="grid gap-3 md:grid-cols-3">
                               {session.blocks?.map((block, blockIndex) => (
                                 <div key={`${key}-block-${blockIndex}`} className="border-l border-indigo-400/50 pl-3">

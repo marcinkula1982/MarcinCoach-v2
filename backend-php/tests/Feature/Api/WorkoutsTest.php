@@ -2350,16 +2350,42 @@ XML;
 
         $generated = $this->postJson("/api/workouts/{$workout->id}/feedback/generate");
         $generated->assertOk();
+        $generated->assertJsonStructure([
+            'feedbackId',
+            'workoutId',
+            'generatedAtIso',
+            'summary' => [
+                'character',
+                'distanceKm',
+                'movingTimeSec',
+                'avgPaceSecPerKm',
+                'planCompliance',
+                'durationStatus',
+                'hrStatus',
+            ],
+            'praise',
+            'deviations',
+            'conclusions',
+            'planImpact' => ['label', 'warnings'],
+            'confidence',
+            'metrics',
+        ]);
         $generated->assertJsonPath('workoutId', $workout->id);
         $generated->assertJsonPath('summary.durationStatus', 'OK');
         $generated->assertJsonPath('summary.hrStatus', 'OK');
         $generated->assertJsonPath('confidence', 'high');
+        $generated->assertJsonPath('metrics.weeklyLoadContribution', 30);
         $this->assertContains('Dobra robota: czas treningu byl zgodny z zalozeniem.', $generated->json('praise'));
         $this->assertContains('Plus za trzymanie sie planu i wykonanie zaplanowanej jednostki.', $generated->json('praise'));
+
+        $generatedAgain = $this->postJson("/api/workouts/{$workout->id}/feedback/generate");
+        $generatedAgain->assertOk();
+        $this->assertSame($generated->json(), $generatedAgain->json());
 
         $fetched = $this->getJson("/api/workouts/{$workout->id}/feedback");
         $fetched->assertOk();
         $fetched->assertJsonPath('workoutId', $workout->id);
+        $this->assertSame($generated->json(), $fetched->json());
     }
 
     public function test_training_signals_longrun_only_counts_runs_when_sport_tagged(): void

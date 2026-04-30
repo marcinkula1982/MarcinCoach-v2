@@ -4,6 +4,7 @@ import axios from 'axios'
 export const SESSION_TOKEN_KEY = 'marcincoach-session-token'
 export const SESSION_USERNAME_KEY = 'marcincoach-username'
 export const AUTH_LOGOUT_EVENT = 'marcincoach-auth-logout'
+export const AUTH_LOGOUT_REASON_SESSION_EXPIRED = 'session-expired'
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || '/api'
 axios.defaults.baseURL = apiBaseUrl
@@ -81,17 +82,6 @@ axios.interceptors.response.use(
     const message = error?.response?.data?.message as string | undefined
     const hasSession = hasStoredSession()
 
-    const isAutoLoadEndpoint =
-      error?.config?.url?.includes('weekly-plan') ||
-      error?.config?.url?.includes('rolling-plan') ||
-      error?.config?.url?.includes('workouts') ||
-      error?.config?.url?.includes('training-signals') ||
-      error?.config?.url?.includes('training-analysis') ||
-      error?.config?.url?.includes('onboarding-summary') ||
-      error?.config?.url?.includes('ai/plan') ||
-      error?.config?.url?.includes('summary') ||
-      error?.config?.url?.includes('me/profile')
-
     const shouldForceLogout =
       status === 401 ||
       status === 403 ||
@@ -100,9 +90,11 @@ axios.interceptors.response.use(
       message === 'MISSING_SESSION_HEADERS' ||
       message === 'SESSION_USER_MISMATCH'
 
-    if (shouldForceLogout && hasSession && !isAutoLoadEndpoint) {
+    if (shouldForceLogout && hasSession) {
       clearSessionHeaders()
-      window.dispatchEvent(new CustomEvent(AUTH_LOGOUT_EVENT))
+      window.dispatchEvent(new CustomEvent(AUTH_LOGOUT_EVENT, {
+        detail: { reason: AUTH_LOGOUT_REASON_SESSION_EXPIRED },
+      }))
     }
 
     return Promise.reject(error)

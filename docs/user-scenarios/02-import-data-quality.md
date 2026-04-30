@@ -147,7 +147,7 @@ User na dashboardzie. Dziś po treningu chce wgrać plik TCX.
 - Test backend: trigger na sync sygnałów.
 
 ### Uwagi produktowe
-Brak auto-refresh planu po uploadzie to znana luka — patrz US-PLAN-005.
+Auto-refresh planu po uploadzie jest domknięty w EP-009 — patrz US-PLAN-004.
 
 ---
 

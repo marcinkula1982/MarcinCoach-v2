@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import type { ChangeEvent } from 'react'
 import {
   AUTH_LOGOUT_EVENT,
+  AUTH_LOGOUT_REASON_SESSION_EXPIRED,
   clearSessionHeaders,
   getStoredSessionToken,
   getStoredUsername,
@@ -10,6 +11,7 @@ import {
 import { computeMetrics } from './utils/metrics'
 import { parseTcx } from './utils/tcxParser'
 import type {
+  Metrics,
   ParsedTcx,
   RaceMeta,
   WorkoutKind,
@@ -21,11 +23,15 @@ import {
   deleteAllWorkouts,
   uploadTcxFile,
   updateWorkoutMeta,
+  getWorkoutFeedback,
+  generateWorkoutFeedback,
   type WorkoutListItem,
+  type WorkoutFeedback,
+  type ManualCheckInResponse,
   getWorkoutDate,
 } from './api/workouts'
-import { login } from './api/auth'
-import { getMyProfile } from './api/profile'
+import { forgotPassword, login, register, resetPassword } from './api/auth'
+import { getMyProfile, type UserProfile } from './api/profile'
 import WorkoutsList from './components/WorkoutsList'
 import AnalyticsSummary from './components/AnalyticsSummary'
 import WeeklyPlanSection from './components/WeeklyPlanSection'
@@ -33,6 +39,9 @@ import AiPlanSection from './components/AiPlanSection'
 import Onboarding from './components/Onboarding'
 import GarminSection from './components/GarminSection'
 import OnboardingSummaryCard from './components/OnboardingSummaryCard'
+import WorkoutFeedbackPanel from './components/WorkoutFeedbackPanel'
+import ProfileEditSection from './components/ProfileEditSection'
+import IntegrationsSettingsSection from './components/IntegrationsSettingsSection'
 
 // ---------- Format helpers ----------
 const formatSeconds = (value: number) => {
@@ -87,6 +96,48 @@ const FilePicker = ({
   )
 }
 
+type AppTabId = 'dashboard' | 'plan' | 'history' | 'profile' | 'settings'
+type LogoutReason = 'manual' | 'session-expired'
+type AuthMode = 'login' | 'register' | 'forgot' | 'reset'
+
+const APP_TABS: Array<{ id: AppTabId; label: string }> = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'plan', label: 'Plan' },
+  { id: 'history', label: 'Historia' },
+  { id: 'profile', label: 'Profil' },
+  { id: 'settings', label: 'Ustawienia' },
+]
+
+const getOnboardingSkipped = (profile: UserProfile | null): boolean => {
+  if (!profile?.constraints) return false
+  try {
+    const parsed = JSON.parse(profile.constraints)
+    return parsed?.onboarding?.skipped === true
+  } catch {
+    return false
+  }
+}
+
+const OnboardingReturnCta = ({ onClick }: { onClick: () => void }) => (
+  <section className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-5 text-amber-100">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p className="text-xs uppercase tracking-[0.22em] text-amber-200/80">
+          Profil wymaga uzupełnienia
+        </p>
+        <h2 className="mt-1 text-lg font-semibold text-white">Dokończ onboarding</h2>
+      </div>
+      <button
+        type="button"
+        onClick={onClick}
+        className="min-h-11 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300"
+      >
+        Uzupełnij dane
+      </button>
+    </div>
+  </section>
+)
+
 // ---------- Main hook ----------
 const useTrimmedSelection = (parsed: ParsedTcx | null, startIndex: number, endIndex: number) =>
   useMemo(() => {
@@ -120,6 +171,13 @@ const App = () => {
     return getStoredUsername() || ''
   })
   const [password, setPassword] = useState<string>('')
+  const [confirmPassword, setConfirmPassword] = useState<string>('')
+  const [email, setEmail] = useState<string>('')
+  const [authMode, setAuthMode] = useState<AuthMode>('login')
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [authInfo, setAuthInfo] = useState<string | null>(null)
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false)
+  const [resetToken, setResetToken] = useState('')
   const usernameInputRef = useRef<HTMLInputElement>(null)
   const passwordInputRef = useRef<HTMLInputElement>(null)
   const [loggedInUser, setLoggedInUser] = useState<string | null>(() => {
@@ -144,6 +202,9 @@ const App = () => {
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
+  const [workoutFeedback, setWorkoutFeedback] = useState<WorkoutFeedback | null>(null)
+  const [isFeedbackLoading, setIsFeedbackLoading] = useState(false)
+  const [feedbackError, setFeedbackError] = useState<string | null>(null)
   const [workouts, setWorkouts] = useState<WorkoutListItem[]>([])
   const [planCompliance, setPlanCompliance] = useState<'planned' | 'modified' | 'unplanned'>('unplanned')
   const [rpe, setRpe] = useState<number | null>(null)
@@ -152,14 +213,39 @@ const App = () => {
   const [suggestion, setSuggestion] = useState<'planned' | 'modified' | 'unplanned' | null>(null)
   const [suggestionReason, setSuggestionReason] = useState<string | null>(null)
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null)
+  const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [onboardingNeedsAttention, setOnboardingNeedsAttention] = useState(false)
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false)
   const [authRefreshToken, setAuthRefreshToken] = useState(0)
+  const [planRefreshToken, setPlanRefreshToken] = useState(0)
+  const [activeTab, setActiveTab] = useState<AppTabId>('dashboard')
 
   // Auth headers are injected by the axios interceptor in `src/api/client.ts`
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const tokenFromUrl = params.get('resetToken') ?? params.get('token')
+    const identifierFromUrl =
+      params.get('email') ?? params.get('identifier') ?? params.get('username')
+
+    if (tokenFromUrl) {
+      clearSessionHeaders()
+      setLoggedInUser(null)
+      setAuthMode('reset')
+      setResetToken(tokenFromUrl)
+      setAuthError(null)
+      setAuthInfo('Ustaw nowe haslo dla konta.')
+      if (identifierFromUrl) {
+        setUsername(identifierFromUrl)
+      }
+    }
+  }, [])
 
   const baseMetrics = useMemo(
     () => (parsed ? computeMetrics(parsed.trackpoints) : null),
     [parsed],
   )
+  const feedbackMetrics: Metrics | null = baseMetrics
 
   const hasActiveWorkout = Boolean(parsed)
 
@@ -196,6 +282,9 @@ const App = () => {
         setCurrentFile(file)
         setCurrentWorkoutDate(null)
         setCurrentWorkoutId(null)
+        setWorkoutFeedback(null)
+        setFeedbackError(null)
+        setFatigueWarning(null)
       }
       const content = await file.text()
       await loadTcx(content, file.name)
@@ -260,20 +349,57 @@ const App = () => {
     [],
   )
 
+  const loadWorkoutFeedback = useCallback(
+    async (workoutId: number | string, options: { generateIfMissing?: boolean } = {}) => {
+      setIsFeedbackLoading(true)
+      setFeedbackError(null)
+      try {
+        const feedback = options.generateIfMissing
+          ? await generateWorkoutFeedback(workoutId)
+          : await getWorkoutFeedback(workoutId)
+        setWorkoutFeedback(feedback)
+        return feedback
+      } catch (err: any) {
+        if (err?.response?.status === 404 && !options.generateIfMissing) {
+          setWorkoutFeedback(null)
+          return null
+        }
+
+        const message =
+          err?.response?.data?.message ||
+          err?.message ||
+          'Nie udało się pobrać feedbacku dla treningu'
+        setFeedbackError(message)
+        return null
+      } finally {
+        setIsFeedbackLoading(false)
+      }
+    },
+    [],
+  )
+
   const refreshOnboardingStatus = useCallback(async () => {
     if (!hasStoredSession()) {
       setOnboardingCompleted(null)
+      setProfile(null)
+      setOnboardingNeedsAttention(false)
       return
     }
     try {
       const profile = await getMyProfile()
       console.log('PROFILE RESPONSE:', profile)
       console.log('onboardingCompleted:', profile.onboardingCompleted)
+      setProfile(profile)
       setOnboardingCompleted(Boolean(profile.onboardingCompleted))
+      setOnboardingNeedsAttention(!profile.onboardingCompleted || getOnboardingSkipped(profile))
     } catch (err) {
       console.warn('Nie udało się pobrać profilu', err)
       setOnboardingCompleted(false)
     }
+  }, [])
+
+  const refreshRollingPlan = useCallback(() => {
+    setPlanRefreshToken((prev) => prev + 1)
   }, [])
 
   useEffect(() => {
@@ -293,10 +419,19 @@ const App = () => {
     refreshOnboardingStatus()
   }, [loggedInUser, refreshOnboardingStatus])
 
-  const handleLogout = () => {
+  const handleLogout = useCallback((reason: LogoutReason = 'manual') => {
     setLoggedInUser(null)
     clearSessionHeaders()
     setPassword('')
+    setConfirmPassword('')
+    setEmail('')
+    setAuthError(
+      reason === AUTH_LOGOUT_REASON_SESSION_EXPIRED
+        ? 'Sesja wygasla. Zaloguj sie ponownie.'
+        : null,
+    )
+    setAuthInfo(null)
+    setAuthMode('login')
     setWorkouts([])
     setCurrentFileName(null)
     setCurrentWorkoutDate(null)
@@ -305,17 +440,30 @@ const App = () => {
     setEndIndex(0)
     setSaveError(null)
     setSaveSuccess(null)
+    setWorkoutFeedback(null)
+    setFeedbackError(null)
+    setIsFeedbackLoading(false)
     setOnboardingCompleted(null)
+    setProfile(null)
+    setOnboardingNeedsAttention(false)
+    setIsOnboardingOpen(false)
+    setActiveTab('dashboard')
     setAuthRefreshToken((prev) => prev + 1)
-  }
+  }, [])
 
   useEffect(() => {
-    const onUnauthorized = () => handleLogout()
+    const onUnauthorized = (event: Event) => {
+      const reason = (event as CustomEvent<{ reason?: LogoutReason }>).detail?.reason
+      handleLogout(reason === AUTH_LOGOUT_REASON_SESSION_EXPIRED ? 'session-expired' : 'manual')
+    }
     window.addEventListener(AUTH_LOGOUT_EVENT, onUnauthorized)
     return () => window.removeEventListener(AUTH_LOGOUT_EVENT, onUnauthorized)
   }, [handleLogout])
 
   const handleLogin = async () => {
+    setIsAuthSubmitting(true)
+    setAuthError(null)
+    setAuthInfo(null)
     try {
       const loginUsername = usernameInputRef.current?.value ?? username
       const loginPassword = passwordInputRef.current?.value ?? password
@@ -323,17 +471,148 @@ const App = () => {
       // setSessionHeaders + localStorage już ustawione wewnątrz login() → auth.ts
 
       setLoggedInUser(result.username)
+      setEmail('')
       setPassword('')
+      setConfirmPassword('')
+      setResetToken('')
       setOnboardingCompleted(null)
       setAuthRefreshToken((prev) => prev + 1)
       // refreshOnboardingStatus i loadWorkouts wywołują useEffect([loggedInUser]) — nie dublujemy
     } catch (err) {
       console.error('Login failed', err)
+      setAuthError('Niepoprawny login lub haslo')
+    } finally {
+      setIsAuthSubmitting(false)
     }
   }
 
-  const handleOnboardingCompleted = useCallback(() => {
+  const handleRegister = async () => {
+    const registerUsername = (usernameInputRef.current?.value ?? username).trim()
+    const registerPassword = passwordInputRef.current?.value ?? password
+    const registerEmail = email.trim()
+
+    setAuthError(null)
+    setAuthInfo(null)
+
+    if (registerUsername.length < 3) {
+      setAuthError('Login musi miec co najmniej 3 znaki')
+      return
+    }
+
+    if (!registerEmail || !registerEmail.includes('@')) {
+      setAuthError('Podaj poprawny email do resetu hasla')
+      return
+    }
+
+    if (registerPassword.length < 8) {
+      setAuthError('Haslo musi miec co najmniej 8 znakow')
+      return
+    }
+
+    if (registerPassword !== confirmPassword) {
+      setAuthError('Hasla nie sa takie same')
+      return
+    }
+
+    setIsAuthSubmitting(true)
+    try {
+      const result = await register(registerUsername, registerPassword, registerEmail)
+      setLoggedInUser(result.username)
+      setEmail('')
+      setPassword('')
+      setConfirmPassword('')
+      setResetToken('')
+      setWorkouts([])
+      setProfile(null)
+      setOnboardingCompleted(false)
+      setOnboardingNeedsAttention(false)
+      setIsOnboardingOpen(false)
+      setAuthRefreshToken((prev) => prev + 1)
+      setActiveTab('dashboard')
+    } catch (err: any) {
+      console.error('Register failed', err)
+      const status = err?.response?.status
+      setAuthError(
+        status === 422
+          ? 'Konto o takim loginie albo emailu juz istnieje'
+          : 'Nie udalo sie zalozyc konta',
+      )
+    } finally {
+      setIsAuthSubmitting(false)
+    }
+  }
+
+  const handleForgotPassword = async () => {
+    const identifier = (usernameInputRef.current?.value ?? username).trim()
+
+    setAuthError(null)
+    setAuthInfo(null)
+
+    if (!identifier) {
+      setAuthError('Podaj login albo email')
+      return
+    }
+
+    setIsAuthSubmitting(true)
+    try {
+      await forgotPassword(identifier)
+      setAuthInfo('Jesli konto istnieje, wyslalismy link resetu hasla.')
+    } catch (err) {
+      console.error('Forgot password failed', err)
+      setAuthError('Nie udalo sie wyslac linku resetu')
+    } finally {
+      setIsAuthSubmitting(false)
+    }
+  }
+
+  const handleResetPassword = async () => {
+    const identifier = (usernameInputRef.current?.value ?? username).trim()
+    const newPassword = passwordInputRef.current?.value ?? password
+
+    setAuthError(null)
+    setAuthInfo(null)
+
+    if (!identifier) {
+      setAuthError('Podaj login albo email')
+      return
+    }
+
+    if (!resetToken.trim()) {
+      setAuthError('Brakuje tokena resetu')
+      return
+    }
+
+    if (newPassword.length < 8) {
+      setAuthError('Nowe haslo musi miec co najmniej 8 znakow')
+      return
+    }
+
+    if (newPassword !== confirmPassword) {
+      setAuthError('Hasla nie sa takie same')
+      return
+    }
+
+    setIsAuthSubmitting(true)
+    try {
+      await resetPassword(identifier, resetToken.trim(), newPassword)
+      setPassword('')
+      setConfirmPassword('')
+      setResetToken('')
+      setAuthMode('login')
+      setAuthInfo('Haslo zostalo zmienione. Mozesz sie zalogowac.')
+      window.history.replaceState({}, '', window.location.pathname)
+    } catch (err) {
+      console.error('Reset password failed', err)
+      setAuthError('Token resetu jest niepoprawny albo wygasl')
+    } finally {
+      setIsAuthSubmitting(false)
+    }
+  }
+
+  const handleOnboardingCompleted = useCallback((result?: { skipped?: boolean }) => {
     setOnboardingCompleted(true)
+    setOnboardingNeedsAttention(result?.skipped === true)
+    setIsOnboardingOpen(false)
     setAuthRefreshToken((prev) => prev + 1)
     void loadWorkouts()
   }, [loadWorkouts])
@@ -392,6 +671,8 @@ const App = () => {
           setWorkouts(fresh)
           setNote('')
           setSaveSuccess('WorkoutMeta zaktualizowane')
+          refreshRollingPlan()
+          await loadWorkoutFeedback(currentWorkoutId, { generateIfMissing: true })
           return
         } catch (error: any) {
           const msg = error?.response?.data?.message || error?.message || String(error)
@@ -415,13 +696,18 @@ const App = () => {
 
         const fresh = await getWorkouts()
         setWorkouts(fresh)
+        setCurrentWorkoutId(String(workoutId))
+        setCurrentWorkoutDate(summary?.startTimeIso ?? uploadedWorkout.createdAt ?? null)
         setNote('')
         setSaveSuccess('Trening zapisany w bazie')
+        refreshRollingPlan()
+        await loadWorkoutFeedback(workoutId, { generateIfMissing: true })
       } catch (error: any) {
         if (error?.response?.status === 409) {
           setSaveSuccess('Ten trening już jest w bazie (duplikat).')
           setSaveError(null)
           await loadWorkouts()
+          refreshRollingPlan()
           return
         }
         const msg = error?.response?.data?.message || error?.message || String(error)
@@ -440,13 +726,11 @@ const App = () => {
     try {
       console.log('Loading workout from DB, id =', id)
       setCurrentWorkoutId(id)
+      setCurrentFile(null)
+      setWorkoutFeedback(null)
+      setFeedbackError(null)
       const workout = await getWorkout(id)
       console.log('Workout from API:', workout)
-
-      if (!workout.tcxRaw) {
-        console.error('tcxRaw is missing in workout response')
-        return
-      }
 
       const s: any =
         typeof workout.summary === 'string'
@@ -480,7 +764,16 @@ const App = () => {
       setCurrentFileName(s.fileName ?? null)
       setCurrentWorkoutDate(getWorkoutDate(workout) ?? null)
 
-      loadTcx(workout.tcxRaw, s.fileName ?? undefined)
+      if (workout.tcxRaw) {
+        await loadTcx(workout.tcxRaw, s.fileName ?? undefined)
+      } else {
+        setParsed(null)
+        setStartIndex(0)
+        setEndIndex(0)
+        setError(null)
+      }
+
+      await loadWorkoutFeedback(id)
     } catch (err) {
       console.error('Failed to load workout from DB', err)
     }
@@ -491,6 +784,14 @@ const App = () => {
     try {
       await deleteWorkout(id)
       setWorkouts((prev) => prev.filter((w) => String(w.id) !== id))
+      if (currentWorkoutId === id) {
+        setCurrentWorkoutId(null)
+        setCurrentWorkoutDate(null)
+        setCurrentFileName(null)
+        setWorkoutFeedback(null)
+        setFeedbackError(null)
+        setParsed(null)
+      }
     } catch (err) {
       console.error('Failed to delete workout', err)
     }
@@ -500,6 +801,12 @@ const App = () => {
     try {
       await deleteAllWorkouts()
       setWorkouts([])
+      setCurrentWorkoutId(null)
+      setCurrentWorkoutDate(null)
+      setCurrentFileName(null)
+      setWorkoutFeedback(null)
+      setFeedbackError(null)
+      setParsed(null)
     } catch (err) {
       console.error('Failed to delete all workouts', err)
     }
@@ -507,7 +814,80 @@ const App = () => {
 
   const handleGarminSyncComplete = useCallback(async () => {
     await loadWorkouts()
-  }, [loadWorkouts])
+    refreshRollingPlan()
+  }, [loadWorkouts, refreshRollingPlan])
+
+  const handleManualCheckInSaved = useCallback(
+    async (result: ManualCheckInResponse) => {
+      await loadWorkouts()
+      refreshRollingPlan()
+
+      const { checkIn } = result
+      setCurrentFile(null)
+      setCurrentFileName(null)
+      setCurrentWorkoutDate(checkIn.plannedSessionDate ?? null)
+      setParsed(null)
+      setStartIndex(0)
+      setEndIndex(0)
+      setError(null)
+      setFeedbackError(null)
+      setFatigueWarning(
+        checkIn.painFlag
+          ? 'Zgłoszono ból lub kontuzję w manualnym check-inie. Plan powinien być ostrożniejszy po odświeżeniu.'
+          : null,
+      )
+      setPlanCompliance(checkIn.status === 'modified' ? 'modified' : 'planned')
+      setRpe(typeof checkIn.rpe === 'number' ? checkIn.rpe : null)
+      setNote(checkIn.note ?? '')
+
+      if (checkIn.workoutId) {
+        const workoutId = String(checkIn.workoutId)
+        setCurrentWorkoutId(workoutId)
+        await loadWorkoutFeedback(workoutId, { generateIfMissing: true })
+        return
+      }
+
+      setCurrentWorkoutId(null)
+      setWorkoutFeedback(null)
+    },
+    [loadWorkoutFeedback, loadWorkouts, refreshRollingPlan],
+  )
+
+  const handleGenerateFeedback = useCallback(() => {
+    if (!currentWorkoutId) return
+    void loadWorkoutFeedback(currentWorkoutId, { generateIfMissing: true })
+  }, [currentWorkoutId, loadWorkoutFeedback])
+
+  const handleRefreshFeedback = useCallback(() => {
+    if (!currentWorkoutId) return
+    void loadWorkoutFeedback(currentWorkoutId)
+  }, [currentWorkoutId, loadWorkoutFeedback])
+
+  const showPasswordInput = authMode === 'login' || authMode === 'register' || authMode === 'reset'
+  const showConfirmPasswordInput = authMode === 'register' || authMode === 'reset'
+  const usernamePlaceholder =
+    authMode === 'forgot' || authMode === 'reset' ? 'Login lub email' : 'Login'
+  const passwordPlaceholder = authMode === 'reset' ? 'Nowe haslo' : 'Haslo'
+  const passwordAutocomplete = authMode === 'reset' || authMode === 'register'
+    ? 'new-password'
+    : 'current-password'
+  const authSubmitLabel =
+    authMode === 'register'
+      ? 'Utworz konto'
+      : authMode === 'forgot'
+      ? 'Wyslij link'
+      : authMode === 'reset'
+      ? 'Zmien haslo'
+      : 'Zaloguj'
+  const handleAuthSubmit =
+    authMode === 'register'
+      ? handleRegister
+      : authMode === 'forgot'
+      ? handleForgotPassword
+      : authMode === 'reset'
+      ? handleResetPassword
+      : handleLogin
+  const rollingPlanRefreshToken = authRefreshToken + planRefreshToken
 
   // ---------- JSX ----------
   return (
@@ -526,38 +906,133 @@ const App = () => {
               API: {API_BASE_URL}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {!loggedInUser && (
               <>
+                <button
+                  type="button"
+                  className={`rounded px-3 py-1 text-sm ${
+                    authMode === 'login'
+                      ? 'bg-slate-700 text-white'
+                      : 'bg-transparent text-slate-300 hover:bg-slate-800'
+                  }`}
+                  onClick={() => {
+                    setAuthMode('login')
+                    setAuthError(null)
+                    setAuthInfo(null)
+                    setResetToken('')
+                  }}
+                >
+                  Logowanie
+                </button>
+                <button
+                  type="button"
+                  className={`rounded px-3 py-1 text-sm ${
+                    authMode === 'register'
+                      ? 'bg-slate-700 text-white'
+                      : 'bg-transparent text-slate-300 hover:bg-slate-800'
+                  }`}
+                  onClick={() => {
+                    setAuthMode('register')
+                    setAuthError(null)
+                    setAuthInfo(null)
+                    setResetToken('')
+                  }}
+                >
+                  Załóż konto
+                </button>
+                <button
+                  type="button"
+                  className={`rounded px-3 py-1 text-sm ${
+                    authMode === 'forgot' || authMode === 'reset'
+                      ? 'bg-slate-700 text-white'
+                      : 'bg-transparent text-slate-300 hover:bg-slate-800'
+                  }`}
+                  onClick={() => {
+                    setAuthMode('forgot')
+                    setAuthError(null)
+                    setAuthInfo(null)
+                    setPassword('')
+                    setConfirmPassword('')
+                    setResetToken('')
+                  }}
+                >
+                  Nie pamietam hasla
+                </button>
                 <input
                   ref={usernameInputRef}
                   className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm"
-                  placeholder="Login"
+                  placeholder={usernamePlaceholder}
                   autoComplete="username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                 />
-                <input
-                  ref={passwordInputRef}
-                  type="password"
-                  className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm"
-                  placeholder="Hasło"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
+                {authMode === 'register' && (
+                  <input
+                    type="email"
+                    className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm"
+                    placeholder="Email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                )}
+                {authMode === 'reset' && (
+                  <input
+                    type="text"
+                    className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm"
+                    placeholder="Token resetu"
+                    autoComplete="one-time-code"
+                    value={resetToken}
+                    onChange={(e) => setResetToken(e.target.value)}
+                  />
+                )}
+                {showPasswordInput && (
+                  <input
+                    ref={passwordInputRef}
+                    type="password"
+                    className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm"
+                    placeholder={passwordPlaceholder}
+                    autoComplete={passwordAutocomplete}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                )}
+                {showConfirmPasswordInput && (
+                  <input
+                    type="password"
+                    className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm"
+                    placeholder="Powtorz haslo"
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                  />
+                )}
                 <button
-                  className="px-3 py-1 rounded bg-emerald-600 text-sm"
-                  onClick={handleLogin}
+                  className="px-3 py-1 rounded bg-emerald-600 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={handleAuthSubmit}
+                  disabled={isAuthSubmitting}
                 >
-                  Zaloguj
+                  {isAuthSubmitting
+                    ? 'Chwila...'
+                    : authSubmitLabel}
                 </button>
+                {authInfo && (
+                  <div className="basis-full text-right text-xs text-emerald-300">
+                    {authInfo}
+                  </div>
+                )}
+                {authError && (
+                  <div className="basis-full text-right text-xs text-red-300">
+                    {authError}
+                  </div>
+                )}
               </>
             )}
             {loggedInUser && (
               <button
                 className="px-3 py-1 rounded bg-slate-700 text-sm"
-                onClick={handleLogout}
+                onClick={() => handleLogout()}
               >
                 Wyloguj
               </button>
@@ -566,14 +1041,43 @@ const App = () => {
         </div>
         {loggedInUser ? (
           <>
-            {onboardingCompleted === false && workouts.length === 0 ? (
-              <Onboarding onCompleted={handleOnboardingCompleted} />
+            {isOnboardingOpen || (onboardingCompleted === false && workouts.length === 0) ? (
+              <Onboarding
+                onCompleted={handleOnboardingCompleted}
+                initialProfile={profile}
+              />
             ) : onboardingCompleted === null ? (
               <div className="mt-10 rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-8 text-center text-slate-300">
                 Sprawdzanie statusu onboardingu...
               </div>
             ) : (
               <>
+                <nav
+                  className="mb-8 flex gap-2 overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/70 p-1"
+                  aria-label="Główna nawigacja"
+                >
+                  {APP_TABS.map((tab) => {
+                    const isActive = activeTab === tab.id
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setActiveTab(tab.id)}
+                        className={`min-h-11 shrink-0 rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                          isActive
+                            ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-950/30'
+                            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                        }`}
+                        aria-current={isActive ? 'page' : undefined}
+                      >
+                        {tab.label}
+                      </button>
+                    )
+                  })}
+                </nav>
+
+                {activeTab === 'dashboard' && (
+                  <>
             <header
               className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
               aria-label="MarcinCoach workout workspace"
@@ -618,6 +1122,12 @@ const App = () => {
               <FilePicker onChange={handleFile} disabled={isParsing} />
             </header>
 
+            {onboardingNeedsAttention && (
+              <div className="mt-8">
+                <OnboardingReturnCta onClick={() => setIsOnboardingOpen(true)} />
+              </div>
+            )}
+
             <OnboardingSummaryCard refreshToken={authRefreshToken} />
 
             <AnalyticsSummary refreshToken={authRefreshToken} />
@@ -627,7 +1137,10 @@ const App = () => {
               onSyncComplete={handleGarminSyncComplete}
             />
 
-            <WeeklyPlanSection refreshToken={authRefreshToken} />
+            <WeeklyPlanSection
+              refreshToken={rollingPlanRefreshToken}
+              onManualCheckInSaved={handleManualCheckInSaved}
+            />
 
             <AiPlanSection refreshToken={authRefreshToken} />
 
@@ -641,9 +1154,15 @@ const App = () => {
               <div className="mt-6 text-sm text-indigo-200">Parsowanie pliku...</div>
             )}
 
-            {!hasActiveWorkout && !isParsing && (
+            {!hasActiveWorkout && !isParsing && !currentWorkoutId && (
               <div className="mt-10 rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-8 text-center text-slate-300">
                 Wybierz plik TCX, aby zobaczyć metryki i opcje przycinania.
+              </div>
+            )}
+
+            {!hasActiveWorkout && !isParsing && currentWorkoutId && (
+              <div className="mt-10 rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-8 text-center text-slate-300">
+                Ten trening nie ma zapisanego pliku TCX do podglądu, ale feedback możesz odczytać poniżej.
               </div>
             )}
 
@@ -882,6 +1401,18 @@ const App = () => {
               </div>
             )}
 
+            {currentWorkoutId && (
+              <WorkoutFeedbackPanel
+                feedback={workoutFeedback}
+                metrics={feedbackMetrics}
+                isLoading={isFeedbackLoading}
+                error={feedbackError}
+                canGenerate={Boolean(currentWorkoutId)}
+                onGenerate={handleGenerateFeedback}
+                onRefresh={handleRefreshFeedback}
+              />
+            )}
+
             {loggedInUser && (
               <WorkoutsList
                 workouts={workouts}
@@ -891,6 +1422,103 @@ const App = () => {
                 onDeleteAllWorkouts={handleDeleteAllWorkouts}
               />
             )}
+                  </>
+                )}
+
+                {activeTab === 'plan' && (
+                  <div className="space-y-8">
+                    <WeeklyPlanSection
+                      refreshToken={rollingPlanRefreshToken}
+                      onManualCheckInSaved={handleManualCheckInSaved}
+                    />
+                    <AiPlanSection refreshToken={authRefreshToken} />
+                    {currentWorkoutId && (
+                      <WorkoutFeedbackPanel
+                        feedback={workoutFeedback}
+                        metrics={feedbackMetrics}
+                        isLoading={isFeedbackLoading}
+                        error={feedbackError}
+                        canGenerate={Boolean(currentWorkoutId)}
+                        onGenerate={handleGenerateFeedback}
+                        onRefresh={handleRefreshFeedback}
+                      />
+                    )}
+                  </div>
+                )}
+
+                {activeTab === 'history' && (
+                  <div className="space-y-8">
+                    <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.25em] text-indigo-300/80">
+                          Historia
+                        </p>
+                        <h1 className="text-3xl font-bold leading-tight text-white sm:text-4xl">
+                          Treningi
+                        </h1>
+                      </div>
+                      <FilePicker
+                        onChange={(file) => {
+                          setActiveTab('dashboard')
+                          void handleFile(file)
+                        }}
+                        disabled={isParsing}
+                      />
+                    </header>
+                    <WorkoutsList
+                      workouts={workouts}
+                      loggedInUser={loggedInUser}
+                      onLoadWorkout={(id) => {
+                        setActiveTab('dashboard')
+                        void loadTrainingFromDb(id)
+                      }}
+                      onDeleteWorkout={handleDeleteWorkout}
+                      onDeleteAllWorkouts={handleDeleteAllWorkouts}
+                    />
+                  </div>
+                )}
+
+                {activeTab === 'profile' && (
+                  <div className="space-y-8">
+                    <header>
+                      <p className="text-xs uppercase tracking-[0.25em] text-indigo-300/80">
+                        Profil
+                      </p>
+                      <h1 className="text-3xl font-bold leading-tight text-white sm:text-4xl">
+                        Dane biegacza
+                      </h1>
+                    </header>
+                    {onboardingNeedsAttention && (
+                      <OnboardingReturnCta onClick={() => setIsOnboardingOpen(true)} />
+                    )}
+                    <ProfileEditSection
+                      profile={profile}
+                      onProfileUpdated={(updated) => {
+                        setProfile(updated)
+                        setOnboardingCompleted(Boolean(updated.onboardingCompleted))
+                        setOnboardingNeedsAttention(
+                          !updated.onboardingCompleted || getOnboardingSkipped(updated),
+                        )
+                      }}
+                    />
+                  </div>
+                )}
+
+                {activeTab === 'settings' && (
+                  <div className="space-y-8">
+                    <header>
+                      <p className="text-xs uppercase tracking-[0.25em] text-indigo-300/80">
+                        Ustawienia
+                      </p>
+                      <h1 className="text-3xl font-bold leading-tight text-white sm:text-4xl">
+                        Integracje
+                      </h1>
+                    </header>
+                    <IntegrationsSettingsSection
+                      onGarminSyncComplete={handleGarminSyncComplete}
+                    />
+                  </div>
+                )}
               </>
             )}
           </>

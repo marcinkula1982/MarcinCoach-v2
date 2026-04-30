@@ -132,13 +132,11 @@ class TrainingFeedbackV2Service
             'workoutId' => $workoutId,
         ];
 
-        DB::table('training_feedback_v2')->updateOrInsert(
+        TrainingFeedbackV2::query()->updateOrCreate(
             ['workout_id' => $workoutId],
             [
                 'user_id' => $userId,
-                'feedback' => json_encode($feedback, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-                'updated_at' => now(),
-                'created_at' => now(),
+                'feedback' => $feedback,
             ]
         );
 
@@ -183,11 +181,20 @@ class TrainingFeedbackV2Service
         $pace = is_numeric($summary['avgPaceSecPerKm'] ?? null)
             ? (int) $summary['avgPaceSecPerKm']
             : ($distanceM > 0 && $durationSec > 0 ? (int) round($durationSec / ($distanceM / 1000.0)) : null);
+        $dataAvailability = is_array($summary['dataAvailability'] ?? null) ? $summary['dataAvailability'] : [];
+        $isManualCheckIn = (bool) ($summary['manualCheckIn'] ?? false) || (($meta['dataSource'] ?? null) === 'manual_check_in');
+        $hasHrData = array_key_exists('hr', $dataAvailability)
+            ? (bool) $dataAvailability['hr']
+            : isset($summary['hr']);
+        $hasPaceData = $distanceM > 0 && $durationSec > 0 && $pace !== null;
+        $rpe = is_numeric($meta['rpe'] ?? null) ? (int) $meta['rpe'] : null;
+        $painFlag = (bool) ($meta['painFlag'] ?? false);
 
         $compliance = $this->loadCompliance($workout->id);
         $signals = FeedbackSignalsMapper::mapFeedbackToSignals($feedback);
         $praise = [];
         $deviations = [];
+        $conclusions = [];
 
         if (($compliance['durationStatus'] ?? null) === 'OK') {
             $praise[] = 'Dobra robota: czas treningu byl zgodny z zalozeniem.';
@@ -206,37 +213,73 @@ class TrainingFeedbackV2Service
             $praise[] = 'Spontaniczny ruch tez buduje baze, o ile nie rozbija regeneracji.';
         }
 
-        if (($feedback['coachSignals']['hrStable'] ?? false) === true) {
-            $praise[] = 'Tetno bylo stabilne wzgledem charakteru wysilku.';
-        } else {
-            $deviations[] = 'Tetno wygladalo mniej stabilnie - mozliwy dryf, zmeczenie albo warunki dnia.';
+        if ($hasHrData) {
+            if (($feedback['coachSignals']['hrStable'] ?? false) === true) {
+                $praise[] = 'Tetno bylo stabilne wzgledem charakteru wysilku.';
+            } else {
+                $deviations[] = 'Tetno wygladalo mniej stabilnie - mozliwy dryf, zmeczenie albo warunki dnia.';
+            }
         }
-        if (($feedback['coachSignals']['economyGood'] ?? false) === true) {
-            $praise[] = 'Tempo bylo rowne, co jest dobrym sygnalem kontroli.';
-        } else {
-            $deviations[] = 'Tempo bylo zmienne; warto sprawdzic trase, wiatr, przewyzszenia albo RPE.';
+
+        if ($hasPaceData) {
+            if (($feedback['coachSignals']['economyGood'] ?? false) === true) {
+                $praise[] = 'Tempo bylo rowne, co jest dobrym sygnalem kontroli.';
+            } else {
+                $deviations[] = 'Tempo bylo zmienne; warto sprawdzic trase, wiatr, przewyzszenia albo RPE.';
+            }
         }
+
         if (($compliance['easyBecameZ5'] ?? false) === true) {
             $deviations[] = 'Jednostka easy weszla w Z5 - to wazne odchylenie od zalozen.';
-        } elseif (($compliance['hrStatus'] ?? null) === 'OK') {
+        } elseif ($hasHrData && ($compliance['hrStatus'] ?? null) === 'OK') {
             $praise[] = 'Intensywnosc tetna miescila sie w zalozeniach.';
-        } elseif (in_array(($compliance['hrStatus'] ?? null), ['MINOR_DEVIATION', 'MAJOR_DEVIATION'], true)) {
+        } elseif ($hasHrData && in_array(($compliance['hrStatus'] ?? null), ['MINOR_DEVIATION', 'MAJOR_DEVIATION'], true)) {
             $deviations[] = 'Rozklad tetna odbiegal od oczekiwanej strefy.';
         }
 
-        if (($signals['warnings']['overloadRisk'] ?? false) === true) {
+        if ($painFlag) {
+            $conclusions[] = 'Zgloszony bol ma pierwszenstwo: kolejny plan powinien byc ostrozniejszy.';
+        }
+        if ($rpe !== null) {
+            $conclusions[] = $rpe >= 8
+                ? 'RPE bylo wysokie, wiec traktujemy ten dzien jako mocne obciazenie mimo braku telemetryki.'
+                : "RPE {$rpe}/10 zapisane jako subiektywny sygnal obciazenia.";
+        }
+        if ($isManualCheckIn) {
+            $conclusions[] = 'Feedback oparty jest na manualnym check-inie, bez danych HR/GPS.';
+        }
+
+        if ($painFlag) {
+            $planImpact = 'lagodzimy kolejne dni po zgloszeniu bolu';
+        } elseif ($rpe !== null && $rpe >= 8) {
+            $planImpact = 'kolejny dzien powinien byc spokojniejszy po wysokim RPE';
+        } elseif (($signals['warnings']['overloadRisk'] ?? false) === true) {
             $planImpact = 'lagodzimy kolejne dni i pilnujemy ryzyka przeciazenia';
-        } elseif (($signals['warnings']['hrInstability'] ?? false) === true) {
+        } elseif ($hasHrData && ($signals['warnings']['hrInstability'] ?? false) === true) {
             $planImpact = 'kolejny akcent powinien byc ostrozniejszy, jesli objawy sie powtorza';
-        } elseif (($signals['warnings']['economyDrop'] ?? false) === true) {
+        } elseif ($hasPaceData && ($signals['warnings']['economyDrop'] ?? false) === true) {
             $planImpact = 'dodamy wiecej kontroli tempa / techniki zamiast dokladac obciazenie';
         } else {
             $planImpact = 'bez mocnej korekty planu; kontynuujemy zalozony rytm';
         }
 
-        $confidence = ($compliance['durationStatus'] ?? null) !== null || ($compliance['hrStatus'] ?? null) !== null
+        $confidence = $isManualCheckIn
+            ? 'low'
+            : (($compliance['durationStatus'] ?? null) !== null || ($compliance['hrStatus'] ?? null) !== null
             ? 'high'
-            : ($planCompliance !== 'unknown' ? 'medium' : 'low');
+            : ($planCompliance !== 'unknown' ? 'medium' : 'low'));
+        $warnings = is_array($signals['warnings'] ?? null) ? $signals['warnings'] : [];
+        if ($painFlag) {
+            $warnings['painFlag'] = true;
+        }
+        if ($rpe !== null && $rpe >= 8) {
+            $warnings['highRpe'] = true;
+        }
+        $metrics = is_array($feedback['metrics'] ?? null) ? $feedback['metrics'] : [];
+        $metrics['rpe'] = $rpe;
+        $metrics['painFlag'] = $painFlag;
+        $metrics['dataSource'] = $isManualCheckIn ? 'manual_check_in' : (string) ($workout->source ?? '');
+        $conclusions[] = $this->conclusionFromSignals($signals);
 
         return [
             'feedbackId' => $feedbackId,
@@ -246,22 +289,20 @@ class TrainingFeedbackV2Service
                 'character' => $feedback['character'] ?? 'easy',
                 'distanceKm' => $distanceM > 0 ? round($distanceM / 1000.0, 2) : null,
                 'movingTimeSec' => $durationSec > 0 ? $durationSec : null,
-                'avgPaceSecPerKm' => $pace,
+                'avgPaceSecPerKm' => $hasPaceData ? $pace : null,
                 'planCompliance' => $planCompliance,
                 'durationStatus' => $compliance['durationStatus'] ?? null,
                 'hrStatus' => $compliance['hrStatus'] ?? null,
             ],
             'praise' => array_values(array_unique($praise)),
             'deviations' => array_values(array_unique($deviations)),
-            'conclusions' => [
-                $this->conclusionFromSignals($signals),
-            ],
+            'conclusions' => array_values(array_unique($conclusions)),
             'planImpact' => [
                 'label' => $planImpact,
-                'warnings' => $signals['warnings'] ?? [],
+                'warnings' => $warnings,
             ],
             'confidence' => $confidence,
-            'metrics' => $feedback['metrics'] ?? [],
+            'metrics' => $metrics,
         ];
     }
 

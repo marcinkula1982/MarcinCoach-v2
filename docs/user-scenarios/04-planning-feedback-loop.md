@@ -2,14 +2,15 @@
 
 Plik obejmuje: rolling plan 14 dni, generowanie i odświeżanie planu, feedback po treningu (deterministyczny), korekta planu po treningu, trening zgodny z planem, trening zmodyfikowany, trening spontaniczny, cross-training, race profile w planie.
 
-Realny stan 28.04.2026:
+Realny stan 30.04.2026:
 - Frontend pokazuje 14 dni przez `fetchRollingPlan(14)`.
 - Brak ręcznej edycji / przesuwania treningów.
-- Brak oznaczania sesji jako wykonana/skip ręcznie.
+- Backend i frontend mają manual check-in dla wykonania/zmiany/skipa bez pliku (`POST /api/workouts/manual-check-in`) przy sesjach rolling planu.
 - "Refresh" pozwala wygenerować nowy plan, opcjonalnie z modal cross-training.
 - Backend feedback: `praise, deviations, conclusions, planImpact, confidence, metrics` — deterministyczny.
 - `planImpact` opisuje, **nie** mutuje planu natychmiast — wpływa po regeneracji.
-- Auto-refresh planu po imporcie treningu: niezawodny tylko po manualnym refresh.
+- Auto-refresh planu po imporcie/check-inie: po EP-009 frontend podbija token planu po uploadzie TCX, Garmin sync i manual check-inie, a `WeeklyPlanSection` pobiera ponownie `GET /api/rolling-plan?days=14`.
+- EP-010 dodał lokalny API smoke pełnej pętli manualnej bez pliku: health -> register/login -> profile -> rolling plan -> manual check-in -> feedback -> rolling plan. Produkcyjny/browser smoke nadal nieuruchomiony.
 - Trening dziś vs historyczny: missing (spec, nie wdrożone).
 
 ---
@@ -136,34 +137,37 @@ Sugestia: modal tylko gdy w ostatnich 7 dniach jest gap > 2 dni bez treningu, **
 
 ---
 
-## US-PLAN-004 — Auto-refresh planu po imporcie treningu
+## US-PLAN-004 — Auto-refresh planu po imporcie/check-inie
 
 **Typ:** happy path (oczekiwany)
 **Persona:** każda po imporcie
-**Status:** missing (manual refresh wymagany dziś)
+**Status:** implemented
 **Priorytet:** P1
 
 ### Stan wejściowy
-User wgrywa nowy trening (TCX upload lub Garmin sync).
+User wgrywa nowy trening (TCX upload lub Garmin sync) albo zapisuje manual check-in bez pliku.
 
 ### Oczekiwane zachowanie po wdrożeniu
-- Backend po zapisie workoutu uruchamia: signals → compliance → alerts → plan regeneration.
-- Frontend dostaje notification (websocket / polling / refresh on focus) i odświeża plan.
+- Frontend po zapisie treningu/check-inu podbija token odświeżenia planu.
+- `WeeklyPlanSection` automatycznie pobiera świeży rolling plan bez klikania "Refresh".
+- Wersja MVP nie wymaga websocketów ani snapshot notification; wystarcza lokalny refresh po mutacji danych treningowych.
 
 ### Oczekiwane API
-- `POST /api/workouts/upload` zwraca w response info o nowym snapshot id.
-- Frontend wywołuje `GET /api/rolling-plan?days=14` jeśli snapshot się zmienił.
+- `POST /api/workouts/upload` zapisuje workout.
+- `POST /api/workouts/manual-check-in` zapisuje check-in.
+- Po sukcesie frontend wywołuje `GET /api/rolling-plan?days=14` przez `WeeklyPlanSection`.
 
 ### Kryteria akceptacji (P1)
-- Po uploadzie plan się odświeża automatycznie (< 5s opóźnienia).
+- Po uploadzie albo manual check-inie plan odświeża się automatycznie (< 5s opóźnienia).
 - User nie musi klikać refresh.
-- Jeśli backend nie zdąży — UI pokazuje "Plan się aktualizuje..." z timeoutem 10s, potem prompt do manualnego refresh.
+- Manualny refresh pozostaje dostępny jako fallback.
 
 ### Testy / smoke
-- Test e2e: upload → plan zmienia się bez kliknięcia refresh.
+- Build frontendu: `npm run build` -> OK po EP-009.
+- E2E do wykonania w EP-010: upload/check-in → feedback → plan zmienia się bez kliknięcia refresh.
 
 ### Uwagi produktowe
-Roadmap nie wymienia tego eksplicytnie ale to istotna luka UX. Dziś user może wgrać trening i nie wiedzieć że plan się dezaktualizował.
+Roadmap nie wymienia tego eksplicytnie, ale to istotna luka UX. Po EP-009 bazowy frontendowy refresh jest domknięty; pozostała walidacja manual/E2E.
 
 ---
 
@@ -171,7 +175,7 @@ Roadmap nie wymienia tego eksplicytnie ale to istotna luka UX. Dziś user może 
 
 **Typ:** happy path
 **Persona:** każda po imporcie
-**Status:** partial (backend tak, UX missing)
+**Status:** implemented (backend + UX; bez produkcyjnego smoke)
 **Priorytet:** P0
 
 ### Stan wejściowy
@@ -184,7 +188,7 @@ User wgrał lub zsynchronizował trening.
 1. Otwiera szczegóły treningu lub wraca na dashboard.
 2. Klika "Pokaż feedback" lub feedback pojawia się automatycznie.
 
-### Oczekiwane zachowanie UI (po wdrożeniu)
+### Zachowanie UI
 - Sekcja feedback z 5 częściami:
   - **Praise:** "Trzymałeś tempo Z2 przez 80% biegu — bardzo dobrze."
   - **Deviations:** "Tempo było szybsze o 15% niż planowane easy."
@@ -209,7 +213,7 @@ User wgrał lub zsynchronizował trening.
 - Test e2e: import → feedback widoczny.
 
 ### Uwagi produktowe
-Roadmap punkt 1 wymienia to jako konkretne zadanie. Backend ma endpoint, UX nie. To **istotna luka MVP**.
+Domknięte w EP-006: backend ma endpointy, frontend pokazuje feedback po zapisie oraz pozwala ponownie odczytać zapisany wynik.
 
 ---
 
@@ -217,7 +221,7 @@ Roadmap punkt 1 wymienia to jako konkretne zadanie. Backend ma endpoint, UX nie.
 
 **Typ:** happy path
 **Persona:** P-GARMIN
-**Status:** partial (backend liczy, UX feedbacku ograniczony)
+**Status:** partial (backend liczy, UI pokazuje feedback; brakuje wariantowego smoke/E2E)
 **Priorytet:** P0
 
 ### Stan wejściowy
@@ -549,21 +553,21 @@ Spec: "nie może traktować każdego opuszczenia treningu jako problemu". Ważne
 ## US-PLAN-018 — Pełna pętla po pierwszym treningu
 
 **Typ:** integration / regression
-**Persona:** P-GARMIN
-**Status:** partial
+**Persona:** P-GARMIN, P-NOVICE/manual fallback
+**Status:** partial (local API smoke)
 **Priorytet:** P0
 
 ### Stan wejściowy
-User ma plan, robi pierwszy trening, wgrywa.
+User ma plan, robi pierwszy trening i importuje go albo zapisuje manual check-in bez pliku.
 
 ### Sekwencja
 1. **Plan dnia widoczny** (US-PLAN-002).
 2. **User wykonuje trening** w terenie.
-3. **Wraca, importuje** (TCX upload albo Garmin sync) — US-IMPORT-003 lub US-GARMIN-005.
+3. **Wraca, importuje** (TCX upload albo Garmin sync) albo zapisuje manual check-in bez pliku — US-IMPORT-003, US-GARMIN-005 lub US-MANUAL-002.
 4. **Workout zapisany**, sygnały przeliczone.
 5. **Feedback wygenerowany** — US-PLAN-005.
 6. **User czyta feedback** (praise / deviations / conclusions / planImpact).
-7. **Plan się odświeża** automatycznie (po wdrożeniu US-PLAN-004) lub manualnie (US-PLAN-003).
+7. **Plan się odświeża** automatycznie po imporcie/check-inie (US-PLAN-004), z manualnym refresh jako fallbackiem (US-PLAN-003).
 8. **Plan na jutro** zaktualizowany według `planImpact`.
 
 ### Kryteria akceptacji (P0)
@@ -573,7 +577,8 @@ User ma plan, robi pierwszy trening, wgrywa.
 
 ### Testy / smoke
 - Manual smoke produkcyjny: realny trening → realny upload → feedback → plan.
-- Test e2e zautomatyzowany na fixtures.
+- Lokalny API smoke po EP-010: `php artisan test tests\Feature\Api\MvpSmokeTest.php` -> 1 passed, 51 assertions; wariant bez pliku przechodzi przez manual check-in, low-data feedback i ponowny rolling plan.
+- Test e2e zautomatyzowany na fixtures oraz produkcyjny/browser smoke nadal do zrobienia.
 
 ### Uwagi produktowe
 **To jest core MVP.** Bez tej pętli aplikacja jest tylko logiem treningów. To powinien być jeden z 3-5 scenariuszy które są pokryte testem e2e na produkcji (smoke).

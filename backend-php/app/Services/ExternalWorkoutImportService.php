@@ -72,6 +72,7 @@ class ExternalWorkoutImportService
                 ? $impactService->normalizeStrengthSubtype($activity['sportSubtype'] ?? $activity['strengthSubtype'] ?? null)
                 : ($activity['sportSubtype'] ?? null);
 
+            $parsed = is_array($activity['parsed'] ?? null) ? $activity['parsed'] : [];
             $summary = WorkoutSummaryBuilder::build(
                 $startTimeIso,
                 $durationSec,
@@ -85,6 +86,7 @@ class ExternalWorkoutImportService
                     'hr' => $this->hrSummary($activity),
                     'calories' => isset($activity['calories']) && is_numeric($activity['calories']) ? (int) $activity['calories'] : null,
                 ], fn ($value) => $value !== null),
+                $parsed,
             );
             $dedupeKey = WorkoutSourceContract::buildDedupeKey($canonicalSource, $sourceActivityId, $startTimeIso, $durationSec, $distanceM);
 

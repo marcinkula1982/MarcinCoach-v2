@@ -1,6 +1,6 @@
 # Gaps and next steps — luki, blokery, kolejność prac
 
-Stan: 28.04.2026.
+Stan: 30.04.2026.
 Cel: na podstawie scenariuszy z plików 01-08 i macierzy pokrycia odpowiedzieć na trzy pytania:
 1. Co jest niezbędne żeby MVP można było pokazać realnym użytkownikom?
 2. Co możemy odsunąć, ale trzeba mieć ślad w roadmapie?
@@ -10,16 +10,18 @@ Cel: na podstawie scenariuszy z plików 01-08 i macierzy pokrycia odpowiedzieć 
 
 ## Założenia
 
-**Co już mamy (D0 PASS, 28.04.2026 10:00:07 UTC):**
+**Co już mamy (stan po EP-010, 30.04.2026):**
 - Frontend i backend działają na produkcji.
 - Login i sesja działają.
 - Onboarding wizard 2-fazowy działa, ze skipem.
 - Upload TCX działa (single + multi).
 - Garmin connect + sync 30 dni działa (smoke 26.04).
 - Wysyłka workoutu do Garmin działa (smoke 26.04).
+- Suunto ma tymczasowy, backendowy Sports Tracker test bridge do zamkniętych testów (bez trwalego zapisu tokena).
 - Rolling plan 14 dni renderuje się.
 - Backend feedback endpoint działa (deterministyczny).
 - Healthcheck działa.
+- Lokalny API smoke EP-010 przechodzi ścieżką bez pliku: health -> register/login -> profile -> rolling plan -> manual check-in -> feedback -> rolling plan.
 
 **Co używamy jako źródło prawdy (28.04.2026):**
 - `backend-php/docs/`
@@ -44,19 +46,19 @@ Cel: na podstawie scenariuszy z plików 01-08 i macierzy pokrycia odpowiedzieć 
 Te rzeczy musimy mieć **przed pierwszym launchem dla niezamkniętej grupy użytkowników**. Bez nich aplikacja nie spina się jako produkt.
 
 ### Bucket A — Auth i konto
-- **A1: Rejestracja w UI (US-ONBOARD-001).** Backend ma endpoint, UI nie pokazuje przycisku. Bez tego nikt nowy sam się nie zaloguje.
-- **A2: Reset hasła (US-AUTH-009).** Brak. Wymaga skonfigurowania mailera (SMTP). Bez tego user, który zapomni hasła, nie ma jak wrócić.
-- **A3: Globalny 401 interceptor (US-AUTH-006).** Frontend dziś niespójnie obsługuje wygasłą sesję. Trzeba 1 miejsce w kodzie (axios interceptor lub fetch wrapper) które zawsze czyści sesję i robi redirect.
+- **A1: Rejestracja w UI (US-ONBOARD-001).** Po EP-002/EP-005 UI ma "Załóż konto", email do resetu hasła i redirect do onboardingu, ale scenariusz pozostaje partial: login nadal jest `username`, brakuje pełnej walidacji produktowej i smoke produkcyjnego.
+- **A2: Reset hasła (US-AUTH-009).** Po EP-005 istnieją endpointy resetu, mail `PasswordResetMail`, token ważny 1h i flow w UI. Do domknięcia public-launch zostaje konfiguracja SMTP na środowisku i manual smoke; stare custom session tokeny nie są jeszcze globalnie revokowane po resecie.
+- **A3: Globalny 401 interceptor (US-AUTH-006).** Po EP-004 jest jedno miejsce w `src/api/client.ts`, które po 401/403 czyści sesję i pokazuje komunikat przy logowaniu. Do domknięcia zostaje manual smoke 401 oraz ewentualne anulowanie inflight requestów.
 
 ### Bucket B — UX feedbacku i pętla treningowa
-- **B1: UX feedbacku po treningu (US-PLAN-005).** Backend zwraca pełny feedback (praise / deviations / conclusions / planImpact / confidence / metrics), frontend tego nie pokazuje wyraźnie. **To jest core MVP** — bez tego aplikacja jest tylko logiem treningów.
-- **B2: Auto-refresh planu po imporcie (US-PLAN-004).** User wgrywa trening i nie wie, że plan się dezaktualizował, bo trzeba kliknąć refresh. Sugestia: po `POST /workouts/upload` frontend automatycznie odświeża `/rolling-plan?days=14`.
-- **B3: Pełna pętla E2E (US-PLAN-018).** Smoke produkcyjny: login → upload → feedback → plan jutrzejszy. Powinien być cron raz dziennie z alertem.
-- **B4: Manual check-in bez integracji i bez plików (US-MANUAL-002/003/005/006).** User, który nie ma Garmina/Stravy i nie wrzuca TCX, musi móc kliknąć "Wykonane" albo "Nie zrobiłem", podać RPE/ból/notatkę i dostać feedback. **To jest core MVP**, bo inaczej ścieżka "brak danych" kończy się na planie startowym.
+- **B1: UX feedbacku po treningu (US-PLAN-005).** Domknięte w EP-006: frontend pokazuje pełny feedback (praise / deviations / conclusions / planImpact / confidence / metrics) i potrafi ponownie odczytać zapisany feedback. Brakuje tylko manualnego smoke import -> feedback.
+- **B2: Auto-refresh planu po imporcie/check-inie (US-PLAN-004).** Domknięte w EP-009: po uploadzie TCX, Garmin sync i manual check-inie frontend automatycznie odświeża `/rolling-plan?days=14`. Zostaje E2E smoke pełnej pętli.
+- **B3: Pełna pętla E2E (US-PLAN-018).** Po EP-010 lokalny API smoke ścieżką manual check-in bez pliku jest zielony. Nadal brakuje produkcyjnego/browser smoke: login → upload lub check-in → feedback → plan jutrzejszy, najlepiej jako cron raz dziennie z alertem.
+- **B4: Manual check-in bez integracji i bez plików (US-MANUAL-002/003/004/005/006).** Po EP-008/EP-009 backendowy kontrakt, UI i auto-refresh planu są gotowe: user może kliknąć "Wykonane", "Zmienione" albo "Nie zrobiłem", podać czas, opcjonalny dystans, RPE, ból/notatkę, zobaczyć feedback dla syntetycznego workoutu i mieć odświeżony rolling plan. Po EP-010 ścieżka `done` bez pliku ma lokalny API smoke; skipped/modified i browser smoke nadal warto sprawdzić w ręcznym E2E.
 
 ### Bucket C — Race profile i nawigacja
 - **C1: Pełny formularz race w UI (US-RACE-001).** Backend ma, UI tylko upraszcza (data + dystans + priority A). Brakuje: nazwa, target time, edycja (US-RACE-002), usunięcie (US-RACE-003).
-- **C2: Zakładka Profil + nawigacja tabelaryczna.** Bez niej user po skipie nie ma jak wrócić do uzupełnienia (US-ONBOARD-007), zarządzić integracjami (US-INTEGRATION-001), edytować race (US-RACE-002).
+- **C2: Zakładka Profil + nawigacja tabelaryczna + CTA powrotu do onboardingu.** Po EP-001/EP-003 bazowe zakładki i CTA istnieją; do dopracowania zostaje pełny Profil, race management i e2e smoke powrotu do onboardingu.
 
 ### Bucket D — RODO przed publicznym launchem
 Te 5 punktów to **prawny blocker** dla otwartego launchu w UE. Nie blokują zamkniętej bety / testów wśród znajomych, ale otwarcie publiczne wymaga ich domknięcia.
@@ -68,7 +70,7 @@ Te 5 punktów to **prawny blocker** dla otwartego launchu w UE. Nie blokują zam
 - **D5: Disclaimer medyczny (US-PRIVACY-005).** Każde miejsce w UI gdzie pojawia się ból/kontuzja musi mieć adnotację "MarcinCoach nie zastępuje porady medycznej". Bez tego ryzyko klasyfikacji jako urządzenie medyczne.
 
 ### Bucket E — Smoke i monitoring
-- **E1: Automatyczny smoke produkcyjny (US-AUTH-011, US-AUTH-012).** Cron / GitHub Action raz dziennie. Bez tego nie wiemy, że produkcja padła, dopóki user nie zgłosi.
+- **E1: Automatyczny smoke produkcyjny (US-AUTH-011, US-AUTH-012).** Lokalny API smoke istnieje po EP-010, ale nadal potrzeba cron / GitHub Action raz dziennie na produkcji. Bez tego nie wiemy, że produkcja padła, dopóki user nie zgłosi.
 - **E2: Healthcheck monitoring.** Endpoint `/api/health` istnieje (potwierdzony 28.04). Brak monitoringu (UptimeRobot lub własny cron z alertem).
 
 ---
@@ -82,7 +84,8 @@ Te rzeczy poprawiają UX i pokrycie, ale nie blokują pierwszego użytkownika.
 - **Strava webhook (US-STRAVA-003).** Stabilna ścieżka auto-sync. Implementacja przed Garmin polling.
 - **Garmin auto-sync (US-GARMIN-004).** Decyzja: on-demand button + cron 1-2× dziennie. Polling Garmina ma ryzyko rate limit.
 - **Garmin MFA UI (US-GARMIN-002).** Bez pola MFA w UI część użytkowników odbije się na pierwszym kroku.
-- **Globalny widok integracji (US-INTEGRATION-001).** Zakładka Ustawienia → Integracje.
+- **Globalny widok integracji (US-INTEGRATION-001).** Bazowa zakładka Ustawienia już istnieje; brakuje pełnego widoku integracji z ostatnim sync, connect/disconnect i revoke.
+- **Suunto Sports Tracker test bridge (US-SUUNTO-002).** Backendowy endpoint działa i ma test, ale UI oraz manual smoke na realnym koncie Suunto/Sports Tracker są jeszcze missing. To most do zamkniętych testów, nie publiczna integracja.
 
 ### Import i dane
 - **Korekta klasyfikacji aktywności (US-IMPORT-006).** User FIT-based (Coros) jest bezsilny gdy parser się pomyli.
@@ -93,7 +96,7 @@ Te rzeczy poprawiają UX i pokrycie, ale nie blokują pierwszego użytkownika.
 ### Profil i analiza
 - **Propozycja stref HR z danych (US-ANALYSIS-004).** Dziś backend ma `hrZones` ale UI nie pokazuje propozycji. Wpływa na precyzję klasyfikacji intensywności.
 - **Propozycja stref pace (US-ANALYSIS-005).** Analogicznie do HR.
-- **Profile Quality Score widoczny (US-ANALYSIS-008).** Backend liczy, UI nie pokazuje. To sposób na "edukację użytkownika" — pokazuje, że więcej danych = lepszy plan.
+- **Profile Quality Score widoczny (US-ANALYSIS-008).** ~~Backend liczy, UI nie pokazuje.~~ **[DONE 2026-04-30]** ProfileQualityScore widget w zakładce Profil — score/100, pasek koloru, lista braków z hintami.
 - **Trend formy (US-ANALYSIS-007).** Wykresy tygodniowe.
 
 ### Plan
@@ -112,7 +115,7 @@ Te rzeczy poprawiają UX i pokrycie, ale nie blokują pierwszego użytkownika.
 Te rzeczy nie blokują launch, ale chcemy je mieć w roadmapie żeby nie zniknęły.
 
 - **Polar integracja (US-POLAR-002).** Polar AccessLink API jest oficjalne i stabilne. Po Strava webhook.
-- **Suunto integracja (US-SUUNTO-001).** Suunto API Zone wymaga formalności partnerskich.
+- **Suunto integracja oficjalna (US-SUUNTO-001).** Suunto API Zone wymaga formalności partnerskich. Tymczasowy Sports Tracker bridge jest tylko mostem testowym do czasu partner access.
 - **Coros integracja (US-COROS-002).** Brak public API. Można złożyć aplikację partnerską już teraz, sam dev po Polar/Suunto. Tymczasem fallback to FIT/TCX (US-IMPORT-002).
 - **Garmin Event Dashboard (US-GARMIN-EVENT-001).** Spike research, niewiadome czy connector wspiera.
 - **Upload ZIP (US-IMPORT-015).** Power-user feature dla setek plików. Multi-upload TCX częściowo rozwiązuje problem dla zwykłych userów.
@@ -138,7 +141,7 @@ Zasada: każdy "pakiet pracy" zamyka jedną dziurę i nie wymaga rzeczy z późn
 **Cel:** Nowy user może sam założyć konto i odzyskać dostęp.
 
 - A1: Formularz rejestracji w UI + walidacja.
-- A2: Reset hasła (forgot password flow + SMTP konfiguracja).
+- A2: Reset hasła — flow gotowy po EP-005; do zrobienia SMTP produkcyjny smoke i decyzja/revoke starych sesji.
 - A3: Zmiana hasła z profilu (US-AUTH-010, P1 ale tani razem).
 
 **Test domknięcia:** anonim wchodzi, rejestruje się, loguje, zapomina hasła, resetuje, wraca.
@@ -146,10 +149,10 @@ Zasada: każdy "pakiet pracy" zamyka jedną dziurę i nie wymaga rzeczy z późn
 ### Pakiet 2 — Pętla treningowa MVP (5-8 dni)
 **Cel:** Po treningu user widzi sens aplikacji — zarówno po imporcie pliku, jak i bez żadnej integracji.
 
-- B1: UX feedbacku po treningu (5 sekcji: praise / deviations / conclusions / planImpact / confidence + metrics). Backend gotowy.
-- B2: Auto-refresh planu po imporcie. Po `POST /workouts/upload` frontend wywołuje `/rolling-plan?days=14`.
-- B3: Smoke E2E pełnej pętli włączony do cron z pakietu 0.
-- B4: Manual check-in: przy dzisiejszej sesji user może wybrać "Wykonane" / "Nie zrobiłem", wpisać czas, dystans opcjonalnie, RPE, ból/notatkę i dostać feedback bez HR/pace.
+- B1: UX feedbacku po treningu (5 sekcji: praise / deviations / conclusions / planImpact / confidence + metrics). Domknięte w EP-006; manual smoke import -> feedback nadal do wykonania przy E2E.
+- B2: Auto-refresh planu po imporcie/check-inie. Domknięte w EP-009: po `POST /workouts/upload`, Garmin sync i `POST /workouts/manual-check-in` frontend wywołuje `/rolling-plan?days=14`.
+- B3: Smoke E2E pełnej pętli: lokalny API smoke gotowy po EP-010; produkcyjny/browser smoke i cron z pakietu 0 nadal do zrobienia.
+- B4: Manual check-in: gotowe po EP-008/EP-009 dla "Wykonane" / "Zmienione" / "Nie zrobiłem", feedbacku i auto-refreshu planu; po EP-010 wariant `done` bez pliku ma lokalny API smoke.
 
 **Test domknięcia:** wgrałem TCX → widzę feedback → widzę zaktualizowany plan na jutro; oraz bez pliku klikam "Wykonane" → zapisuję RPE/notatkę → widzę manual feedback → plan nie traci ciągłości.
 
@@ -157,9 +160,10 @@ Zasada: każdy "pakiet pracy" zamyka jedną dziurę i nie wymaga rzeczy z późn
 **Cel:** User może zarządzać swoim kontem i celami.
 
 - C2: Zakładka Profil + nawigacja tabelaryczna (Dashboard / Treningi / Plan / Profil / Ustawienia).
+- US-ONBOARD-007: CTA "Dokończ onboarding" / "Uzupełnij dane" dla usera, który pominął lub przerwał first-run onboarding.
 - C1: Pełny formularz race w Profil → Starty (dodaj, edytuj, usuń).
-- US-ONBOARD-007: Powrót do uzupełnienia onboardingu z Profilu.
-- Profile Quality Score widoczny (US-ANALYSIS-008, P1 ale tani razem).
+- First-run onboarding po rejestracji pozostaje domyślnym flow dla nowych kont.
+- ~~Profile Quality Score widoczny (US-ANALYSIS-008, P1 ale tani razem).~~ **[DONE 2026-04-30]**
 
 **Test domknięcia:** user po skipie wraca przez zakładkę Profil, uzupełnia, dodaje race, widzi że plan się dostosował.
 
@@ -185,7 +189,7 @@ Zasada: każdy "pakiet pracy" zamyka jedną dziurę i nie wymaga rzeczy z późn
 - US-STRAVA-003: Webhook subscription dla nowych aktywności.
 - US-GARMIN-004: On-demand "Sprawdź nowe treningi" button + cron 1-2× dziennie.
 - US-GARMIN-002: MFA UI dla Garmin.
-- US-INTEGRATION-001: Zakładka Integracje.
+- US-INTEGRATION-001: Pełny widok integracji w Ustawieniach.
 
 **Test domknięcia:** user łączy Stravę przez OAuth, robi trening, w ciągu 60s widzi go w MarcinCoach. Garmin user z MFA też przechodzi.
 
@@ -223,6 +227,7 @@ Zasada: każdy "pakiet pracy" zamyka jedną dziurę i nie wymaga rzeczy z późn
 ### Pakiet 9 — Integracje przyszłościowe (kiedy będzie czas)
 - US-POLAR-002: Polar AccessLink integration.
 - US-SUUNTO-001: Suunto API Zone.
+- US-SUUNTO-002: UI/manual smoke dla tymczasowego Sports Tracker test bridge, jeśli zamknięta beta potrzebuje realnych danych Suunto przed partner access.
 - US-COROS-002: Aplikacja partnerska Coros (równolegle z innymi pakietami, formalność).
 - US-IMPORT-015: Upload ZIP.
 - US-GARMIN-EVENT-001: Spike Garmin Event Dashboard.

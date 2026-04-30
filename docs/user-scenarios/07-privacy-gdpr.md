@@ -64,7 +64,7 @@ User w trakcie rejestracji.
 
 **Typ:** happy path (compliance)
 **Persona:** każdy user z integracją
-**Status:** unknown
+**Status:** partial (2026-04-30: DELETE /api/integrations/{provider} usuwa integration_accounts z komunikatem "treningi pozostają"; UI confirm dialog; revoke tokena u providera nierealizowany — potrzebny osobny krok dla Strava)
 **Priorytet:** P0 (przed launch)
 
 ### Stan wejściowy

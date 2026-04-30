@@ -2,9 +2,13 @@
 
 namespace Tests\Feature\Api;
 
+use App\Mail\PasswordResetMail;
 use App\Models\User;
 use App\Services\SessionTokenService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 class AuthAndProfileTest extends TestCase
@@ -32,6 +36,121 @@ class AuthAndProfileTest extends TestCase
         $response->assertOk();
         $response->assertJsonStructure(['sessionToken', 'username']);
         $this->assertSame('marcin', $response->json('username'));
+    }
+
+    public function test_register_returns_session_token_and_username(): void
+    {
+        $response = $this->postJson('/api/auth/register', [
+            'username' => 'anna',
+            'email' => 'anna@example.com',
+            'password' => 'password123',
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonStructure(['sessionToken', 'username']);
+        $this->assertSame('anna', $response->json('username'));
+        $this->assertDatabaseHas('users', [
+            'name' => 'anna',
+            'email' => 'anna@example.com',
+        ]);
+    }
+
+    public function test_register_rejects_duplicate_username(): void
+    {
+        $response = $this->postJson('/api/auth/register', [
+            'username' => 'marcin',
+            'password' => 'password123',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'Username already taken');
+    }
+
+    public function test_forgot_password_sends_reset_email_and_stores_token(): void
+    {
+        Mail::fake();
+
+        $response = $this->postJson('/api/auth/forgot-password', [
+            'identifier' => 'marcin@example.com',
+        ]);
+
+        $response->assertOk();
+        $response->assertJson(['ok' => true]);
+
+        $this->assertDatabaseHas('password_reset_tokens', [
+            'email' => 'marcin@example.com',
+        ]);
+
+        Mail::assertSent(PasswordResetMail::class, function (PasswordResetMail $mail): bool {
+            return $mail->hasTo('marcin@example.com')
+                && $mail->user->name === 'marcin'
+                && strlen($mail->token) >= 64
+                && str_contains($mail->resetUrl, 'resetToken=');
+        });
+    }
+
+    public function test_forgot_password_does_not_reveal_unknown_accounts(): void
+    {
+        Mail::fake();
+
+        $response = $this->postJson('/api/auth/forgot-password', [
+            'identifier' => 'unknown@example.com',
+        ]);
+
+        $response->assertOk();
+        $response->assertJson(['ok' => true]);
+        Mail::assertNothingSent();
+    }
+
+    public function test_reset_password_updates_password_and_deletes_token(): void
+    {
+        Mail::fake();
+
+        $this->postJson('/api/auth/forgot-password', [
+            'identifier' => 'marcin',
+        ])->assertOk();
+
+        $token = null;
+        Mail::assertSent(PasswordResetMail::class, function (PasswordResetMail $mail) use (&$token): bool {
+            $token = $mail->token;
+
+            return true;
+        });
+
+        $this->assertNotNull($token);
+
+        $response = $this->postJson('/api/auth/reset-password', [
+            'identifier' => 'marcin@example.com',
+            'token' => $token,
+            'password' => 'new-password-123',
+        ]);
+
+        $response->assertOk();
+        $response->assertJson(['ok' => true]);
+
+        $user = User::query()->where('name', 'marcin')->firstOrFail();
+        $this->assertTrue(Hash::check('new-password-123', (string) $user->password));
+        $this->assertDatabaseMissing('password_reset_tokens', [
+            'email' => 'marcin@example.com',
+        ]);
+    }
+
+    public function test_reset_password_rejects_invalid_token(): void
+    {
+        DB::table('password_reset_tokens')->insert([
+            'email' => 'marcin@example.com',
+            'token' => Hash::make('valid-token'),
+            'created_at' => now(),
+        ]);
+
+        $response = $this->postJson('/api/auth/reset-password', [
+            'identifier' => 'marcin@example.com',
+            'token' => 'invalid-token-123456',
+            'password' => 'new-password-123',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'Invalid or expired password reset token');
     }
 
     public function test_get_and_update_profile_contract(): void

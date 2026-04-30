@@ -1,6 +1,6 @@
 # MarcinCoach v2 — scenariusze użytkownika do konsultacji IT
 
-Stan dokumentu: 2026-04-28.
+Stan dokumentu: 2026-04-30.
 Cel: jeden czytelny plik dla konsultacji z działem IT. Dokument scala mapę scenariuszy z `docs/user-scenarios/` i pokazuje, które ścieżki użytkownika są już obsłużone, które są częściowe, a które wymagają decyzji technicznej lub wdrożenia.
 
 Źródła szczegółowe:
@@ -15,12 +15,13 @@ Cel: jeden czytelny plik dla konsultacji z działem IT. Dokument scala mapę sce
 MarcinCoach v2 jest aplikacją coachingową dla biegaczy. Docelowa pętla użytkownika:
 
 1. User zakłada konto lub loguje się.
-2. User dostarcza dane: integracja, plik treningowy albo manualny opis.
-3. System buduje profil i analizuje historię / odpowiedzi.
-4. System generuje rolling plan 14 dni.
-5. Po treningu system zbiera wykonanie, generuje feedback i aktualizuje kolejny plan.
+2. Nowy user po rejestracji trafia do first-run onboardingu.
+3. User dostarcza dane: integracja, plik treningowy albo manualny opis.
+4. System buduje profil i analizuje historię / odpowiedzi.
+5. System generuje rolling plan 14 dni.
+6. Po treningu system zbiera wykonanie, generuje feedback i aktualizuje kolejny plan.
 
-Najważniejsza zasada produktowa: aplikacja nie może wymagać zegarka ani integracji. User bez Garmina, Stravy i plików TCX/FIT/GPX nadal musi mieć działającą pętlę przez manual check-in.
+Najważniejsza zasada produktowa: aplikacja nie może wymagać zegarka ani integracji. User bez Garmina, Stravy i plików TCX/FIT/GPX nadal musi mieć działającą pętlę przez manual check-in. Onboarding powinien startować od razu po założeniu konta, ale user po skipie/przerwaniu musi mieć później jasny powrót z Dashboardu lub Profilu.
 
 ---
 
@@ -108,13 +109,15 @@ Wymaganie techniczne do konsultacji: aktualny backend `POST /api/workouts` wymag
 ## 5. Główne decyzje dla IT
 
 1. **Manual check-in jako P0.** Potrzebny endpoint lub kontrakt pozwalający zapisać wykonanie/pominięcie treningu bez `tcxRaw`.
-2. **Feedback UX.** Backend generuje deterministyczny feedback, ale frontend nie domyka jeszcze czytelnego widoku feedbacku po treningu.
-3. **Rolling plan.** Aktualny kontrakt dla nowego planu to `GET /api/rolling-plan?days=14` i `POST /api/rolling-plan`.
-4. **Profil.** Aktualny kontrakt profilu to `GET/PUT /api/me/profile`.
-5. **Strava.** Backend ma elementy OAuth/sync, ale produkcja wymaga credentials i smoke z realnym kontem.
-6. **Garmin.** History sync i wysyłka workoutu były smoke'owane 26.04; auto-sync i MFA UI są nadal lukami.
-7. **RODO.** Nie blokuje zamkniętej bety, ale blokuje publiczny launch dla realnych nieanonimowych użytkowników w UE.
-8. **Smoke E2E.** Skrypt `scripts/e2e-cross-stack.mjs` jest missing/TODO; lokalnie istnieje tylko `scripts/import-tcx.ps1`.
+2. **Onboarding first-run + resumable.** Nowy user po rejestracji trafia do onboardingu, ale jeśli go pominie/przerwie, aplikacja pokazuje później CTA "Dokończ onboarding" z Dashboardu/Profilu.
+3. **Feedback UX.** Backend generuje deterministyczny feedback, ale frontend nie domyka jeszcze czytelnego widoku feedbacku po treningu.
+4. **Rolling plan.** Aktualny kontrakt dla nowego planu to `GET /api/rolling-plan?days=14` i `POST /api/rolling-plan`.
+5. **Profil.** Aktualny kontrakt profilu to `GET/PUT /api/me/profile`.
+6. **Strava.** Backend ma elementy OAuth/sync, ale produkcja wymaga credentials i smoke z realnym kontem.
+7. **Garmin.** History sync i wysyłka workoutu były smoke'owane 26.04; auto-sync i MFA UI są nadal lukami.
+8. **RODO.** Nie blokuje zamkniętej bety, ale blokuje publiczny launch dla realnych nieanonimowych użytkowników w UE.
+9. **Polar/Suunto/Coros.** To są ścieżki backlogowe, nie MVP blockers: Polar/Suunto jako przyszłe API, Coros tylko przez oficjalny partner/API access; dla Suunto mamy tymczasowy Sports Tracker test bridge do zamkniętych testów, a fallbackiem pozostaje FIT/TCX/GPX + "Powiadom nas".
+10. **Smoke E2E.** Skrypt `scripts/e2e-cross-stack.mjs` jest missing/TODO; lokalnie istnieje tylko `scripts/import-tcx.ps1`.
 
 ---
 
@@ -123,7 +126,7 @@ Wymaganie techniczne do konsultacji: aktualny backend `POST /api/workouts` wymag
 MVP można uznać za domknięte, gdy:
 
 1. Nowy user może sam założyć konto, zalogować się i odzyskać hasło.
-2. User może przejść onboarding z integracją, uploadem lub bez danych.
+2. User po rejestracji trafia do onboardingu i może go później dokończyć, jeśli go pominie/przerwie.
 3. User widzi rolling plan 14 dni.
 4. Po treningu user może:
    - zaimportować trening,
@@ -143,15 +146,15 @@ Aktualna macierz zawiera 106 scenariuszy:
 
 | Priorytet | Liczba |
 |---|---:|
-| P0 | 59 |
-| P1 | 40 |
+| P0 | 60 |
+| P1 | 39 |
 | P2 | 7 |
 
 | Status | Liczba |
 |---|---:|
 | implemented | 22 |
-| partial | 43 |
-| missing | 30 |
+| partial | 46 |
+| missing | 27 |
 | unknown | 11 |
 
 P0 only:
@@ -159,8 +162,8 @@ P0 only:
 | Status P0 | Liczba |
 |---|---:|
 | implemented | 19 |
-| partial | 28 |
-| missing | 8 |
+| partial | 30 |
+| missing | 7 |
 | unknown | 4 |
 
 ---
@@ -171,13 +174,13 @@ P0 only:
 
 | ID | Scenariusz | Pri | Status | IT focus |
 |---|---|---|---|---|
-| US-ONBOARD-001 | Rejestracja nowego użytkownika | P0 | partial | Backend jest, brak UI rejestracji |
+| US-ONBOARD-001 | Rejestracja nowego użytkownika | P0 | partial | Bazowy UI rejestracji jest; email do resetu dodany, nadal brak pełnego smoke |
 | US-ONBOARD-002 | Login istniejącego użytkownika | P0 | implemented | Sesja `x-session-token` + `x-username` |
 | US-ONBOARD-003 | Wizard faza 1 — wybór źródła | P0 | implemented | FE flow wyboru danych |
 | US-ONBOARD-004 | Wizard faza 2 — pytania | P0 | partial | Mapping pól do profilu |
 | US-ONBOARD-005 | Skip onboardingu | P0 | implemented | Dashboard bez danych |
 | US-ONBOARD-006 | Powiadom o brakującej aplikacji | P1 | missing | Formularz requestu integracji/API |
-| US-ONBOARD-007 | Powrót do onboardingu z Profilu | P1 | missing | Nawigacja + profil |
+| US-ONBOARD-007 | Powrót do onboardingu z Dashboardu/Profilu | P0 | partial | CTA i prefill są, brakuje e2e smoke i pełnego flow edycji |
 | US-ONBOARD-008 | Onboarding na mobile | P1 | unknown | Mobile audit |
 | US-ONBOARD-009 | Multi-session login | P1 | implemented | Równoległe sesje |
 | US-ONBOARD-010 | Manual onboarding bez danych | P0 | partial | Core fallback do manual check-in |
@@ -223,7 +226,7 @@ P0 only:
 | US-PLAN-001 | Pierwszy rolling plan 14 dni | P0 | implemented | `GET /api/rolling-plan?days=14` |
 | US-PLAN-002 | Plan na dzień dzisiejszy widoczny | P0 | partial | Today highlight |
 | US-PLAN-003 | Refresh planu manualny | P0 | implemented | `POST /api/rolling-plan` |
-| US-PLAN-004 | Auto-refresh planu po imporcie | P1 | missing | Refresh after import |
+| US-PLAN-004 | Auto-refresh planu po imporcie/check-inie | P1 | implemented | Frontend refreshes `GET /api/rolling-plan?days=14` after import/check-in |
 | US-PLAN-005 | Generowanie feedbacku po treningu | P0 | partial | Backend ready, FE missing |
 | US-PLAN-006 | Trening zgodny z planem | P0 | partial | Compliance feedback |
 | US-PLAN-007 | Trening krótszy niż planowany | P0 | partial | Deviation feedback |
@@ -237,7 +240,7 @@ P0 only:
 | US-PLAN-015 | Powrót po przerwie / chorobie | P0 | partial | Safe return UX |
 | US-PLAN-016 | Zgłoszenie bólu w trakcie cyklu | P0 | partial | Medical disclaimer + plan guard |
 | US-PLAN-017 | Brak treningu kilka dni | P1 | partial | Drift detection |
-| US-PLAN-018 | Pełna pętla po pierwszym treningu | P0 | partial | E2E smoke |
+| US-PLAN-018 | Pełna pętla po pierwszym treningu | P0 | partial | Local API smoke EP-010; prod/browser smoke missing |
 
 ### 8.5 Integracje
 
@@ -258,13 +261,14 @@ P0 only:
 | US-POLAR-001 | Placeholder Polar w onboardingu | P2 | missing | Future placeholder |
 | US-POLAR-002 | Pełna integracja Polar | P2 | missing | Future API |
 | US-SUUNTO-001 | Placeholder Suunto w onboardingu | P2 | missing | Future placeholder |
+| US-SUUNTO-002 | Tymczasowy Suunto Sports Tracker test bridge | P1 | partial | Backend endpoint, feature flag, bez trwalego zapisu tokena; UI/prod smoke missing |
 | US-COROS-001 | Coros bez integracji, fallback FIT/TCX | P2 | missing | File fallback |
 | US-COROS-002 | Pełna integracja Coros | P2 | missing | Future partnership/API |
 | US-RACE-001 | Ręczne dodanie startu | P0 | partial | `PUT /api/me/profile` races |
 | US-RACE-002 | Edycja startu / zmiana celu | P1 | partial | Profile race update |
 | US-RACE-003 | Usunięcie startu | P1 | partial | Profile race update |
 | US-GARMIN-EVENT-001 | Import eventu z Garmin Event Dashboard | P2 | missing | Spike |
-| US-INTEGRATION-001 | Globalny widok integracji | P1 | missing | Settings/integrations UI |
+| US-INTEGRATION-001 | Globalny widok integracji | P1 | partial | Bazowa zakładka Ustawienia jest, pełne zarządzanie integracjami nadal missing |
 
 ### 8.6 Auth, sesja i smoke
 
@@ -275,13 +279,13 @@ P0 only:
 | US-AUTH-003 | Logout | P0 | implemented | Token revoke |
 | US-AUTH-004 | Sesja wygasa po 30 dniach | P0 | implemented | Cache TTL |
 | US-AUTH-005 | Ręczne usunięcie tokena | P1 | partial | Local storage edge case |
-| US-AUTH-006 | 401 podczas autoload | P1 | partial | Global interceptor |
+| US-AUTH-006 | 401 podczas autoload | P1 | partial | Global interceptor po EP-004; smoke/cancel inflight brak |
 | US-AUTH-007 | Sesja wygasła w trakcie uploadu | P1 | partial | Retry/session expired UX |
 | US-AUTH-008 | Login na 2 urządzeniach | P1 | implemented | Multi-session |
-| US-AUTH-009 | Zapomniałem hasła / reset | P0 | missing | SMTP + reset flow |
+| US-AUTH-009 | Zapomniałem hasła / reset | P0 | partial | API/mail/UI po EP-005; brak SMTP smoke i revoke starych sesji |
 | US-AUTH-010 | Zmiana hasła z profilu | P1 | missing | Profile settings |
-| US-AUTH-011 | Smoke: register/login/profile | P0 | partial | Automated smoke |
-| US-AUTH-012 | Smoke: pełny flow MVP | P0 | partial | E2E script missing |
+| US-AUTH-011 | Smoke: register/login/profile | P0 | partial | Local API smoke EP-010; prod cron missing |
+| US-AUTH-012 | Smoke: pełny flow MVP | P0 | partial | Local API smoke EP-010; prod/browser smoke missing |
 | US-AUTH-013 | Frontend deploy nie psuje produkcji | P0 | partial | Deploy smoke |
 | US-AUTH-014 | CORS / cross-origin | P0 | implemented | Production API access |
 | US-AUTH-015 | Backend healthcheck | P0 | implemented | `/api/health` |
@@ -305,12 +309,12 @@ P0 only:
 
 | ID | Scenariusz | Pri | Status | IT focus |
 |---|---|---|---|---|
-| US-MANUAL-001 | Plan startowy bez integracji i bez plików | P0 | partial | Low-data rolling plan |
-| US-MANUAL-002 | Oznaczenie dzisiejszego treningu jako wykonanego | P0 | missing | New endpoint/model without raw file |
-| US-MANUAL-003 | Check-in z częściowymi danymi | P0 | partial | Optional duration/distance/RPE/pain |
-| US-MANUAL-004 | Trening wykonany inaczej niż plan | P0 | partial | `modified` compliance |
-| US-MANUAL-005 | Pominięcie zaplanowanego treningu | P0 | missing | Skipped session state |
-| US-MANUAL-006 | Feedback bez telemetryki | P0 | partial | No fake HR/pace |
+| US-MANUAL-001 | Plan startowy bez integracji i bez plików | P0 | partial | Low-data rolling plan; local API smoke EP-010 |
+| US-MANUAL-002 | Oznaczenie dzisiejszego treningu jako wykonanego | P0 | implemented | API/UI done; local API smoke EP-010 |
+| US-MANUAL-003 | Check-in z częściowymi danymi | P0 | implemented | Optional duration/distance/RPE/pain |
+| US-MANUAL-004 | Trening wykonany inaczej niż plan | P0 | implemented | `modified` compliance |
+| US-MANUAL-005 | Pominięcie zaplanowanego treningu | P0 | partial | Skipped state exists; plan-impact/browser smoke still needed |
+| US-MANUAL-006 | Feedback bez telemetryki | P0 | implemented | No fake HR/pace; local API smoke EP-010 |
 | US-MANUAL-007 | Długoterminowy manual mode | P1 | missing | 14+ days without files/integrations |
 
 ---
@@ -321,14 +325,11 @@ P0 only:
 
 | ID | Luka | Decyzja IT |
 |---|---|---|
-| US-AUTH-009 | Reset hasła | SMTP, token resetu, UI flow |
 | US-PRIVACY-001 | Zgody przy rejestracji | Tabela/audit zgód, wersje dokumentów |
 | US-PRIVACY-003 | Export danych | Format exportu, async job, raw files |
 | US-PRIVACY-004 | Usunięcie konta i danych | Cascade delete/anonymizacja |
 | US-PRIVACY-005 | Granica medyczna | Stałe disclaimery i copy UI |
 | US-PRIVACY-007 | Audit log zgód | Immutable audit |
-| US-MANUAL-002 | Wykonanie treningu bez pliku | Manual check-in API |
-| US-MANUAL-005 | Pominięcie treningu | Skipped session model |
 
 ### Unknown
 
@@ -342,9 +343,9 @@ P0 only:
 
 ## 10. Proponowana kolejność prac dla IT
 
-1. Monitoring i smoke: healthcheck, login smoke, E2E smoke script.
+1. Monitoring i smoke: healthcheck, login smoke, produkcyjny/browser E2E smoke script.
 2. Auth: rejestracja UI, reset hasła, globalny 401/session expired UX.
-3. Pętla treningowa MVP: feedback UX, auto-refresh planu, manual check-in.
+3. Pętla treningowa MVP: lokalny API smoke jest po EP-010; do domknięcia produkcyjny/browser smoke po feedbacku, auto-refreshu planu i manual check-inie.
 4. Profil i nawigacja: Profil, Starty, powrót do onboardingu, integracje.
 5. RODO przed publicznym launchem: zgody, export, delete, disclaimer, audit.
 6. Integracje: Strava prod smoke, Strava webhook, Garmin auto-sync/MFA, widok integracji.
@@ -370,12 +371,13 @@ Aktualne:
 - `POST /api/integrations/garmin/connect`
 - `POST /api/integrations/garmin/sync`
 - `POST /api/integrations/garmin/workouts/send`
+- `POST /api/integrations/suunto/sports-tracker/sync`
 
 Do zaprojektowania:
 - Manual check-in bez pliku, np. `POST /api/workouts/manual-check-in`.
 - Skipped session state dla treningu pominiętego.
 - Revoke/disconnect integracji.
-- Reset hasła.
+- Reset hasła: SMTP smoke i decyzja o revoke starych sesji po resecie.
 - Export i delete konta.
 - Consent audit.
 
@@ -390,4 +392,3 @@ Do zaprojektowania:
 5. Czy Strava na produkcji ma już finalne credentials i redirect URI?
 6. Jakie minimum RODO jest wymagane przed zamkniętą betą, a jakie przed publicznym launchem?
 7. Gdzie uruchamiamy smoke E2E: GitHub Actions, cron na serwerze, czy zewnętrzny monitoring?
-

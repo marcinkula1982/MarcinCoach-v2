@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AiInsightsController;
 use App\Http\Controllers\Api\AiPlanController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\IntegrationsController;
+use App\Http\Controllers\Api\ManualCheckInController;
 use App\Http\Controllers\Api\OnboardingSummaryController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\RollingPlanController;
@@ -24,6 +25,8 @@ Route::get('/', fn () => response()->json(['status' => 'ok', 'service' => 'Marci
 Route::post('/auth/register', [AuthController::class, 'register']);
 Route::post('/auth/login', [AuthController::class, 'login']);
 Route::post('/auth/logout', [AuthController::class, 'logout']);
+Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('/auth/reset-password', [AuthController::class, 'resetPassword']);
 Route::post('/integrations/strava/connect', [IntegrationsController::class, 'stravaConnect']);
 Route::get('/integrations/strava/callback', [IntegrationsController::class, 'stravaCallback']);
 Route::post('/integrations/strava/sync', [IntegrationsController::class, 'stravaSync']);
@@ -31,6 +34,9 @@ Route::post('/integrations/garmin/connect', [IntegrationsController::class, 'gar
 Route::post('/integrations/garmin/sync', [IntegrationsController::class, 'garminSync']);
 Route::post('/integrations/garmin/workouts/send', [IntegrationsController::class, 'garminSendWorkout']);
 Route::get('/integrations/garmin/status', [IntegrationsController::class, 'garminStatus']);
+Route::post('/integrations/suunto/sports-tracker/sync', [IntegrationsController::class, 'suuntoSportsTrackerSync']);
+Route::get('/integrations/status', [IntegrationsController::class, 'integrationsStatus']);
+Route::delete('/integrations/{provider}', [IntegrationsController::class, 'disconnectIntegration']);
 Route::get('/me', [MeController::class, 'index']);
 Route::get('/me/profile', [ProfileController::class, 'show']);
 Route::put('/me/profile', [ProfileController::class, 'update']);
@@ -60,6 +66,7 @@ Route::get('/workouts/analytics/summary', [WorkoutsController::class, 'analytics
 Route::get('/workouts/analytics/summary-v2', [WorkoutsController::class, 'analyticsSummaryV2']);
 Route::post('/workouts/upload', [WorkoutsController::class, 'upload']);
 Route::post('/workouts/import', [WorkoutsController::class, 'import']);
+Route::post('/workouts/manual-check-in', [ManualCheckInController::class, 'store']);
 Route::delete('/workouts', [WorkoutsController::class, 'destroyAll']);
 Route::get('/workouts/{id}', [WorkoutsController::class, 'show']);
 Route::delete('/workouts/{id}', [WorkoutsController::class, 'destroy']);

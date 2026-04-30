@@ -1,13 +1,13 @@
 # 05 — Integracje
 
-Plik obejmuje: Garmin (sync historii, auto-sync, send workout, MFA), Strava (OAuth, sync, webhook), Polar (planowane), Suunto (planowane), Coros (missing, fallback FIT/TCX), Garmin Event Dashboard (spike), race profile (manual, import).
+Plik obejmuje: Garmin (sync historii, auto-sync, send workout, MFA), Strava (OAuth, sync, webhook), Polar (planowane), Suunto (tymczasowy Sports Tracker test bridge + oficjalne API planowane), Coros (missing, fallback FIT/TCX), Garmin Event Dashboard (spike), race profile (manual, import).
 
-Realny stan 28.04.2026:
+Realny stan 30.04.2026:
 - Garmin: history sync **partial-implemented** (smoke 26.04 dla 30 dni / 9 aktywności), auto-sync **missing**, send workout **implemented** (smoke 26.04, workout id 1548384239).
 - Garmin MFA: connector ścieżka istnieje (`GARMIN_MFA_CODE`), UI nie ma pola — **partial / risky**.
 - Strava: OAuth/callback/sync — backend lokalnie tak, produkcja **unknown / needs credentials**. Mapowanie pól partial (id, start, elapsed, distance, sport/type, HR avg/max).
 - Polar: **missing**.
-- Suunto: **missing**.
+- Suunto: oficjalne API Zone **missing**, tymczasowy Sports Tracker test bridge **partial/backend implemented**.
 - Coros: **missing** (P2, future), fallback FIT/TCX import.
 - Garmin Event Dashboard: **missing / spike**.
 
@@ -165,7 +165,7 @@ User właśnie połączył Garmin.
 
 **Typ:** happy path (oczekiwany)
 **Persona:** P-GARMIN
-**Status:** missing
+**Status:** partial
 **Priorytet:** P1
 
 ### Stan wejściowy
@@ -525,6 +525,49 @@ Suunto API Zone wymaga formalności partnerskich (zgłoszenie aplikacji). Implem
 
 ---
 
+## US-SUUNTO-002 — Tymczasowy import Suunto przez Sports Tracker
+
+**Typ:** controlled beta / test bridge
+**Persona:** użytkownik Suunto, zanim MarcinCoach ma partner access
+**Status:** partial (backend implemented, UI missing, production smoke missing)
+**Priorytet:** P1
+
+### Stan wejściowy
+MarcinCoach nie ma jeszcze dostępu do Suunto API Zone, ale potrzebujemy realnych danych Suunto w zamkniętych testach.
+
+### Kroki testera
+1. Tester loguje się w przeglądarce na sports-tracker.com kontem powiązanym z Suunto App.
+2. Tester pozyskuje browser session token z tej sesji.
+3. Wywołuje `POST /api/integrations/suunto/sports-tracker/sync` z `sessionToken`, opcjonalnie `format=fit|gpx` i `limit`.
+4. Backend pobiera listę aktywności i export FIT/GPX z Sports Tracker.
+5. Backend importuje aktywności jako `source = SUUNTO`.
+
+### Oczekiwane API
+- `POST /api/integrations/suunto/sports-tracker/sync`
+- Body: `{ sessionToken, format?: "fit"|"gpx", limit?: number, fromIso?: string, toIso?: string }`; domyślnie `format = "gpx"`.
+- Endpoint wymaga `SUUNTO_SPORTS_TRACKER_ENABLED=true`; domyślnie jest wyłączony.
+
+### Oczekiwane zmiany danych
+- `workouts.source = SUUNTO`.
+- `workout_import_events.source = SUUNTO`.
+- `integration_sync_runs.provider = suunto_sports_tracker`.
+- `integration_accounts.provider = suunto_sports_tracker`, ale bez `access_token` i `refresh_token`.
+
+### Kryteria akceptacji
+- Token sesji Sports Tracker nie jest utrwalany w bazie.
+- Import deduplikuje po `workoutKey`.
+- GPX/FIT przechodzi przez istniejące parsery i buduje normalny `summary`.
+- Błędy pobrania lub parsowania są w sync run jako partial/failed, bez crasha.
+
+### Testy / smoke
+- Test backend: `SuuntoSportsTrackerIntegrationTest.php`.
+- Manual smoke z realnym kontem Suunto/Sports Tracker: TODO.
+
+### Uwagi produktowe
+To jest świadomy most testowy, nie publiczna integracja. Docelowa ścieżka pozostaje Suunto API Zone po akceptacji partner programu.
+
+---
+
 # Coros (missing, future)
 
 ## US-COROS-001 — Coros nie ma integracji, ale user może wgrywać pliki
@@ -696,14 +739,14 @@ User na Garmin Connect ma w "Moich wydarzeniach" dodany maraton.
 
 **Typ:** happy path
 **Persona:** każda
-**Status:** missing
+**Status:** implemented (2026-04-30: IntegrationsSettingsSection.tsx + GET /api/integrations/status + DELETE /api/integrations/{provider}; real status z lastSyncAt, sync/connect/disconnect; fallback info dla Polar/Suunto/Coros)
 **Priorytet:** P1
 
 ### Stan wejściowy
 User chce zobaczyć "co mam podłączone".
 
 ### Kroki użytkownika
-1. Idzie do Ustawienia → Integracje (TODO: zakładka).
+1. Idzie do Ustawienia → Integracje (bazowa zakładka istnieje).
 2. Widzi listę:
    - Garmin: ✓ Połączono. Ostatnia synchronizacja: 2 godziny temu. [Sync] [Odłącz]
    - Strava: ✗ Nie połączono. [Połącz]
@@ -720,3 +763,5 @@ User chce zobaczyć "co mam podłączone".
 
 ### Uwagi produktowe
 **Centralna kontrola** to też element RODO (US-PRIVACY-002).
+
+Stan po EP-001: bazowa zakładka `Ustawienia` istnieje, Garmin ma swój dotychczasowy panel, a Strava/Polar/Suunto/Coros mają proste statusy startowe. Brakuje jeszcze pełnego zarządzania integracjami, disconnect/revoke i ostatniego sync per provider.

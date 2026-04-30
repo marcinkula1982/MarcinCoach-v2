@@ -8,10 +8,12 @@ use App\Models\IntegrationSyncRun;
 use App\Services\ExternalWorkoutImportService;
 use App\Services\GarminConnectorService;
 use App\Services\StravaOAuthService;
+use App\Services\SuuntoSportsTrackerService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Validation\Rule;
 
 class IntegrationsController extends Controller
 {
@@ -19,6 +21,7 @@ class IntegrationsController extends Controller
         private readonly StravaOAuthService $stravaOAuthService,
         private readonly GarminConnectorService $garminConnectorService,
         private readonly ExternalWorkoutImportService $externalWorkoutImportService,
+        private readonly SuuntoSportsTrackerService $suuntoSportsTrackerService,
     ) {
     }
 
@@ -226,6 +229,145 @@ class IntegrationsController extends Controller
             return response()->json($result['payload'], 502);
         }
         return response()->json($result['payload']);
+    }
+
+    public function suuntoSportsTrackerSync(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'sessionToken' => ['required', 'string', 'min:10', 'max:4096'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:30'],
+            'format' => ['nullable', Rule::in(['fit', 'gpx'])],
+            'fromIso' => ['nullable', 'date'],
+            'toIso' => ['nullable', 'date'],
+        ]);
+
+        if (!$this->suuntoSportsTrackerService->enabled()) {
+            return response()->json([
+                'error' => 'SUUNTO_SPORTS_TRACKER_DISABLED',
+                'message' => 'Temporary Suunto Sports Tracker sync is disabled.',
+            ], 422);
+        }
+
+        $userId = $this->authUserId($request);
+        $format = (string) ($validated['format'] ?? 'gpx');
+        $limit = (int) ($validated['limit'] ?? 10);
+
+        $syncRun = IntegrationSyncRun::create([
+            'user_id' => $userId,
+            'provider' => 'suunto_sports_tracker',
+            'status' => 'started',
+            'started_at' => now(),
+            'meta' => [
+                'mode' => 'unofficial_sports_tracker',
+                'format' => $format,
+                'tokenPersisted' => false,
+            ],
+        ]);
+
+        $result = $this->suuntoSportsTrackerService->fetchActivities(
+            (string) $validated['sessionToken'],
+            $limit,
+            $format,
+            isset($validated['fromIso']) ? (string) $validated['fromIso'] : null,
+            isset($validated['toIso']) ? (string) $validated['toIso'] : null,
+        );
+
+        if (!$result['ok']) {
+            $syncRun->status = 'failed';
+            $syncRun->error_code = (string) ($result['payload']['error'] ?? 'SUUNTO_SPORTS_TRACKER_SYNC_FAILED');
+            $syncRun->error_message = isset($result['payload']['message']) ? (string) $result['payload']['message'] : null;
+            $syncRun->finished_at = now();
+            $syncRun->save();
+
+            return response()->json($result['payload'], 502);
+        }
+
+        $activities = is_array($result['payload']['items'] ?? null) ? $result['payload']['items'] : [];
+        $stats = $this->externalWorkoutImportService->importActivities($userId, 'suunto', $activities);
+        $connectorFailed = (int) ($result['payload']['failed'] ?? 0);
+        $failed = $stats['failed'] + $connectorFailed;
+        $fetched = (int) ($result['payload']['fetchedKeys'] ?? $stats['fetched']);
+
+        $syncRun->status = $failed > 0 ? 'partial' : 'success';
+        $syncRun->fetched_count = $fetched;
+        $syncRun->imported_count = $stats['imported'];
+        $syncRun->deduped_count = $stats['deduped'];
+        $syncRun->failed_count = $failed;
+        $syncRun->finished_at = now();
+        $syncRun->meta = [
+            'mode' => 'unofficial_sports_tracker',
+            'format' => $format,
+            'downloaded' => (int) ($result['payload']['downloaded'] ?? count($activities)),
+            'errors' => $result['payload']['errors'] ?? [],
+            'tokenPersisted' => false,
+        ];
+        $syncRun->save();
+
+        IntegrationAccount::query()->updateOrCreate(
+            ['user_id' => $userId, 'provider' => 'suunto_sports_tracker'],
+            [
+                'last_sync_at' => now(),
+                'status' => $failed > 0 ? 'degraded' : 'connected',
+                'access_token' => null,
+                'refresh_token' => null,
+                'meta' => [
+                    'mode' => 'unofficial_sports_tracker',
+                    'persistentAuth' => false,
+                    'lastFormat' => $format,
+                ],
+            ],
+        );
+
+        return response()->json([
+            'syncRunId' => $syncRun->id,
+            'fetched' => $fetched,
+            'imported' => $stats['imported'],
+            'deduped' => $stats['deduped'],
+            'failed' => $failed,
+            'downloaded' => (int) ($result['payload']['downloaded'] ?? count($activities)),
+            'format' => $format,
+        ]);
+    }
+
+    public function integrationsStatus(Request $request): JsonResponse
+    {
+        $userId = $this->authUserId($request);
+
+        $providers = ['garmin', 'strava', 'suunto_sports_tracker'];
+        $accounts = IntegrationAccount::query()
+            ->where('user_id', $userId)
+            ->whereIn('provider', $providers)
+            ->get()
+            ->keyBy('provider');
+
+        $result = array_map(function (string $provider) use ($accounts): array {
+            /** @var \App\Models\IntegrationAccount|null $account */
+            $account = $accounts->get($provider);
+            return [
+                'provider' => $provider,
+                'connected' => $account !== null && $account->status === 'connected',
+                'lastSyncAt' => $account?->last_sync_at?->toIso8601String(),
+                'status' => $account?->status,
+            ];
+        }, $providers);
+
+        return response()->json(['integrations' => array_values($result)]);
+    }
+
+    public function disconnectIntegration(Request $request, string $provider): JsonResponse
+    {
+        $allowed = ['garmin', 'strava', 'suunto_sports_tracker'];
+        if (!in_array($provider, $allowed, true)) {
+            return response()->json(['message' => 'Unknown provider'], 422);
+        }
+
+        $userId = $this->authUserId($request);
+        IntegrationAccount::query()
+            ->where('user_id', $userId)
+            ->where('provider', $provider)
+            ->delete();
+
+        return response()->json(['ok' => true, 'provider' => $provider]);
     }
 
     /**

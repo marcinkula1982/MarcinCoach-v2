@@ -29,6 +29,87 @@ export type Workout = {
   tcxRaw?: string | null
 }
 
+export type WorkoutFeedback = {
+  feedbackId: number
+  workoutId: number
+  generatedAtIso: string
+  summary: {
+    character?: string
+    distanceKm?: number | null
+    movingTimeSec?: number | null
+    avgPaceSecPerKm?: number | null
+    planCompliance?: string
+    durationStatus?: string | null
+    hrStatus?: string | null
+  }
+  praise: string[]
+  deviations: string[]
+  conclusions: string[]
+  planImpact: {
+    label: string
+    warnings?: Record<string, boolean>
+  }
+  confidence: string
+  metrics: Record<string, unknown>
+}
+
+export type ManualCheckInStatus = 'done' | 'modified' | 'skipped'
+
+export type ManualCheckInPayload = {
+  plannedSessionDate: string
+  plannedSessionId?: string
+  status: ManualCheckInStatus
+  plannedSession?: Record<string, unknown>
+  plannedType?: string
+  plannedDurationMin?: number
+  plannedIntensity?: string
+  actualStartTimeIso?: string
+  actualDurationMin?: number
+  durationMin?: number
+  distanceKm?: number
+  sport?: string
+  rpe?: number
+  mood?: string
+  painFlag?: boolean
+  painNote?: string
+  note?: string
+  skipReason?: string
+  modificationReason?: string
+  planModifications?: Array<Record<string, unknown>>
+}
+
+export type ManualCheckIn = {
+  id: number
+  workoutId: number | null
+  plannedSessionDate: string | null
+  plannedSessionId: string | null
+  status: ManualCheckInStatus
+  planCompliance: string
+  plannedType: string | null
+  plannedDurationMin: number | null
+  plannedIntensity: string | null
+  plannedSession: Record<string, unknown> | null
+  actualDurationMin: number | null
+  distanceM: number | null
+  distanceKm: number | null
+  rpe: number | null
+  mood: string | null
+  painFlag: boolean
+  painNote: string | null
+  note: string | null
+  skipReason: string | null
+  modificationReason: string | null
+  planModifications: Array<Record<string, unknown>> | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type ManualCheckInResponse = {
+  created: boolean
+  updated: boolean
+  checkIn: ManualCheckIn
+}
+
 /**
  * Kanoniczna data treningu.
  * UWAGA: wszystkie widoki oparte na WorkoutListItem (lista, this week, itp.)
@@ -74,6 +155,29 @@ export async function updateWorkoutMeta(id: number, workoutMeta: WorkoutMeta): P
   await client.patch(`/workouts/${id}/meta`, { workoutMeta }, {
     headers: buildAuthHeaders(),
   })
+}
+
+export async function getWorkoutFeedback(id: number | string): Promise<WorkoutFeedback> {
+  const response = await client.get<WorkoutFeedback>(`/workouts/${id}/feedback`, {
+    headers: buildAuthHeaders(),
+  })
+  return response.data
+}
+
+export async function generateWorkoutFeedback(id: number | string): Promise<WorkoutFeedback> {
+  const response = await client.post<WorkoutFeedback>(`/workouts/${id}/feedback/generate`, undefined, {
+    headers: buildAuthHeaders(),
+  })
+  return response.data
+}
+
+export async function createManualCheckIn(
+  payload: ManualCheckInPayload,
+): Promise<ManualCheckInResponse> {
+  const response = await client.post<ManualCheckInResponse>('/workouts/manual-check-in', payload, {
+    headers: buildAuthHeaders(),
+  })
+  return response.data
 }
 
 export async function deleteAllWorkouts(): Promise<{ deleted: number }> {

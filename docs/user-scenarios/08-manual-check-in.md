@@ -2,12 +2,13 @@
 
 Plik obejmuje użytkownika, który nie podłącza Garmin/Strava/Polar/Suunto/Coros i po treningach nie wrzuca TCX/GPX/FIT. Aplikacja musi dalej działać jako coach: planuje ostrożnie, pyta po treningu "czy zrobiłeś / jak poszło", zbiera minimalne dane subiektywne i na tej podstawie aktualizuje feedback oraz kolejny plan.
 
-Realny stan 28.04.2026:
+Realny stan 30.04.2026:
 - Onboarding ma ścieżkę "Brak danych / wpiszę ręcznie".
 - Backend potrafi zapisać `workoutMeta` (`planCompliance`, `rpe`, `fatigueFlag`, `note`) dla istniejącego workoutu.
-- Backend `POST /api/workouts` wymaga dziś `tcxRaw`, więc nie jest jeszcze czystym ręcznym zapisem treningu.
-- Frontend nie ma pełnego przycisku "Wykonane / Nie zrobiłem" na sesji planu bez pliku.
-- Feedback bez danych telemetrycznych jest wymaganiem produktowym, ale nie jest domkniętym flow end-to-end.
+- Backend ma `manual_check_ins` oraz `POST /api/workouts/manual-check-in`: `done`/`modified` zapisują syntetyczny workout `MANUAL_CHECK_IN` bez `tcxRaw`, a `skipped` zamyka dzień bez treningu 0 km.
+- Check-in jest idempotentny per dzień albo per dzień + `plannedSessionId`.
+- Frontend ma przy sesjach rolling planu przyciski "Wykonane", "Zmienione" i "Nie zrobiłem" oraz modal check-inu bez pliku.
+- Feedback bez danych telemetrycznych działa backendowo i nie wymyśla HR/tempa, gdy ich nie ma; flow bez pliku ma UI po EP-008, auto-refresh planu po EP-009 i lokalny API smoke po EP-010. Produkcyjny/browser smoke nadal nieuruchomiony.
 
 Ten obszar jest **core MVP**. Bez niego "brak integracji" oznacza tylko startowy plan, a nie zamkniętą pętlę coachingu.
 
@@ -48,6 +49,7 @@ Nowy użytkownik nie ma zegarka, nie ma historii treningów i nie chce importowa
 ### Testy / smoke
 - E2E: nowe konto → brak danych → onboarding manualny → dashboard → plan widoczny.
 - Backend: profil bez workoutów → rolling plan bez 500.
+- Lokalny API smoke po EP-010: register/login → profil manual-source → rolling plan bez pliku → check-in → feedback → rolling plan.
 
 ---
 
@@ -55,7 +57,7 @@ Nowy użytkownik nie ma zegarka, nie ma historii treningów i nie chce importowa
 
 **Typ:** happy path
 **Persona:** P-NOVICE, P-RETURN
-**Status:** missing
+**Status:** implemented
 **Priorytet:** P0
 
 ### Stan wejściowy
@@ -73,11 +75,11 @@ User ma na dziś zaplanowany trening, ale nie ma pliku ani integracji.
 - Dystans jest opcjonalny, bo beginner może go nie znać.
 - Jeśli user nie poda dystansu, feedback nie mówi o tempie.
 
-### Proponowane API
+### API
 - `POST /api/workouts/manual-check-in`
 - Body minimum:
   - `plannedSessionDate`
-  - `status: completed`
+  - `status: done` (`completed` jest akceptowane jako alias)
   - `durationMin`
   - `distanceKm?`
   - `rpe?`
@@ -86,8 +88,8 @@ User ma na dziś zaplanowany trening, ale nie ma pliku ani integracji.
   - `note?`
 
 ### Oczekiwane zmiany danych
-- Powstaje workout typu manual/check-in bez raw file.
-- Workout jest powiązany z planowaną sesją z danego dnia.
+- Powstaje workout `source=MANUAL_CHECK_IN` bez raw file.
+- Workout jest powiązany z rekordem `manual_check_ins` i planowaną sesją z danego dnia.
 - Przeliczają się signals/compliance/alerts w wersji low-data.
 
 ### Kryteria akceptacji (P0)
@@ -99,6 +101,7 @@ User ma na dziś zaplanowany trening, ale nie ma pliku ani integracji.
 ### Testy / smoke
 - E2E: plan dziś → Wykonane → zapis → workout na liście.
 - Backend: manual check-in bez dystansu zapisuje się poprawnie.
+- Lokalny API smoke po EP-010: `done` check-in bez pliku tworzy workout `MANUAL_CHECK_IN`, bez rekordu `workout_raw_tcx`.
 
 ---
 
@@ -106,7 +109,7 @@ User ma na dziś zaplanowany trening, ale nie ma pliku ani integracji.
 
 **Typ:** happy path / partial data
 **Persona:** P-NOVICE, P-RETURN
-**Status:** partial
+**Status:** implemented
 **Priorytet:** P0
 
 ### Stan wejściowy
@@ -125,6 +128,7 @@ User zrobił trening, ale pamięta tylko część danych.
 
 ### Oczekiwane API
 - Manual check-in akceptuje brak dystansu i brak RPE, ale wymaga przynajmniej statusu wykonania.
+- Backendowy kontrakt po EP-007: `POST /api/workouts/manual-check-in`, statusy `done`, `modified`, `skipped`, idempotencja per dzień/sesja.
 - `PATCH /api/workouts/{id}/meta` może być użyty tylko dla istniejącego workoutu; nie zastępuje tworzenia manualnego workoutu.
 
 ### Kryteria akceptacji (P0)
@@ -136,6 +140,7 @@ User zrobił trening, ale pamięta tylko część danych.
 ### Testy / smoke
 - Backend: 4 warianty body, każdy zapisuje workout.
 - E2E: zapis tylko czasu i RPE → feedback bez pace/HR.
+- Lokalny API smoke po EP-010: czas + RPE bez dystansu przechodzi przez zapis, listę workoutów i feedback.
 
 ---
 
@@ -143,7 +148,7 @@ User zrobił trening, ale pamięta tylko część danych.
 
 **Typ:** edge case
 **Persona:** P-NOVICE, P-RETURN, P-GARMIN bez uploadu po treningu
-**Status:** partial
+**Status:** implemented
 **Priorytet:** P0
 
 ### Stan wejściowy
@@ -179,7 +184,7 @@ Plan: easy 45 min. User zrobił 25 min albo 70 min.
 
 **Typ:** happy path / missed session
 **Persona:** P-NOVICE, P-RETURN
-**Status:** missing
+**Status:** partial
 **Priorytet:** P0
 
 ### Stan wejściowy
@@ -195,14 +200,15 @@ User nie zrobił zaplanowanego treningu.
 - Komunikat jest neutralny i wspierający.
 - Jeśli powodem jest ból/choroba, plan powinien stać się ostrożniejszy.
 
-### Proponowane API
+### API
 - `POST /api/workouts/manual-check-in`
 - Body: `status: skipped`, `plannedSessionDate`, `reason?`, `painFlag?`, `note?`
 
 ### Kryteria akceptacji (P0)
-- Pominięcie jest osobnym stanem, nie treningiem 0 km.
+- Pominięcie jest osobnym stanem, nie treningiem 0 km. Backendowo po EP-007 `skipped` zapisuje `manual_check_ins.workout_id = null`.
 - Plan na kolejne dni może przesunąć lub uprościć kluczową jednostkę.
 - Pominięty long run/quality generuje inny plan impact niż pominięty easy.
+- Po zapisie check-inu frontend odświeża `GET /api/rolling-plan?days=14`.
 
 ### Testy / smoke
 - E2E: dzisiejsza sesja → Nie zrobiłem → plan jutro bez crashu.
@@ -214,7 +220,7 @@ User nie zrobił zaplanowanego treningu.
 
 **Typ:** happy path / low-data feedback
 **Persona:** P-NOVICE, P-RETURN
-**Status:** partial
+**Status:** implemented
 **Priorytet:** P0
 
 ### Stan wejściowy
@@ -225,6 +231,7 @@ User zapisał manual check-in bez HR, tempa i trackpointów.
 - Feedback nie wymyśla tempa, stref HR ani obciążenia z trackpointów.
 - `confidence` jest niższy niż przy Garmin/TCX.
 - `planImpact` mówi ostrożnie, co może się zmienić w kolejnych dniach.
+- Backend po EP-007 zwraca `confidence=low` dla manual check-inu i ukrywa pace/HR, gdy nie ma dystansu/telemetrii.
 
 ### Oczekiwane sekcje
 - `praise` — np. konsekwencja / powrót do rytmu.
@@ -241,6 +248,7 @@ User zapisał manual check-in bez HR, tempa i trackpointów.
 ### Testy / smoke
 - Backend: manual workout bez dystansu → feedback bez pace/HR.
 - E2E: check-in → feedback widoczny → plan odświeżony.
+- Lokalny API smoke po EP-010: feedback dla manual check-inu ma `confidence=low` i `summary.avgPaceSecPerKm=null`, a po nim `GET /api/rolling-plan?days=14` widzi co najmniej 1 workout.
 
 ---
 
@@ -268,4 +276,3 @@ User przez 2 tygodnie nie podłącza integracji i nie wrzuca plików, ale regula
 ### Testy / smoke
 - Seed 14 dni manual check-inów → rolling plan → confidence manual/medium-low.
 - E2E regresja: brak plików przez cały flow.
-

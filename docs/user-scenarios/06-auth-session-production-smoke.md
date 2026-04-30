@@ -128,7 +128,7 @@ User logował się 31 dni temu, nie wszedł od tego czasu, teraz wraca.
 
 **Typ:** edge case
 **Persona:** każda (rzadkie, debug)
-**Status:** partial
+**Status:** partial (global handler FE gotowy; brak manual smoke/cancel inflight)
 **Priorytet:** P1
 
 ### Stan wejściowy
@@ -157,10 +157,10 @@ User w DevTools usunął localStorage lub w innej karcie zrobił logout.
 ### Stan wejściowy
 User wraca po długiej przerwie, frontend ładuje wiele endpointów równocześnie (`/api/me`, `/api/me/profile`, `/api/workouts`, `/api/rolling-plan`).
 
-### Aktualne zachowanie (28.04.2026)
-- Część endpointów po 401 czyści sesję i robi logout.
-- Część autoload endpointów tylko łapie błąd w `.catch()` i nie reaguje.
-- Efekt: UI częściowo wyrenderowany, częściowo z błędami.
+### Aktualne zachowanie (29.04.2026)
+- Po EP-004 frontendowy axios interceptor obsługuje 401/403 globalnie, bez wyjątków dla autoload endpointów.
+- Interceptor czyści token, emituje event logout i pokazuje komunikat "Sesja wygasla. Zaloguj sie ponownie." przy formularzu logowania.
+- Brakuje jeszcze manual smoke 401 oraz anulowania inflight requestów.
 
 ### Oczekiwane zachowanie po naprawie
 - **Globalny axios/fetch interceptor** dla 401: zawsze czyści sesję, redirect do login.
@@ -172,7 +172,8 @@ User wraca po długiej przerwie, frontend ładuje wiele endpointów równocześn
 - User nie widzi mieszanki załadowanych i zepsutych komponentów.
 
 ### Testy / smoke
-- Manual smoke: token expired → otwórz dashboard → tylko ekran login (bez wycieku).
+- `npm run build` -> OK po EP-004.
+- Manual smoke: token expired → otwórz dashboard → tylko ekran login (bez wycieku) — nieuruchomiony.
 
 ### Uwagi produktowe
 **To jest istotna luka UX.** Bez globalnego interceptora user widzi "dziwne błędy" zamiast jasnego "zaloguj się ponownie".
@@ -189,9 +190,10 @@ User wraca po długiej przerwie, frontend ładuje wiele endpointów równocześn
 ### Stan wejściowy
 User zaczyna upload pliku TCX. W trakcie sesja wygasa.
 
-### Aktualne zachowanie (28.04.2026)
+### Aktualne zachowanie (29.04.2026)
 - Backend zwraca 401.
 - Plik **nie zapisuje się**.
+- Po EP-004 frontend czyści sesję globalnie i pokazuje komunikat o wygaśnięciu sesji przy logowaniu.
 - User musi zalogować się ponownie i powtórzyć upload.
 - Plik **może** zostać w pamięci komponentu, ale to nie jest gwarantowane/testowane.
 - Brak modal "session expired, retry?".
@@ -243,7 +245,7 @@ User zalogowany na laptopie i telefonie.
 
 **Typ:** happy path
 **Persona:** każda
-**Status:** unknown / missing
+**Status:** partial (API/mail/UI gotowe; brak SMTP smoke i revoke starych sesji)
 **Priorytet:** P0
 
 ### Stan wejściowy
@@ -257,9 +259,11 @@ User nie pamięta hasła.
 5. Klika link.
 6. Ustawia nowe hasło.
 
-### Oczekiwane API
-- `POST /api/auth/password/forgot` z email.
-- `POST /api/auth/password/reset` z token + new password.
+### Aktualne API po EP-005
+- `POST /api/auth/forgot-password` z `identifier` albo `email`.
+- `POST /api/auth/reset-password` z `identifier`, `token`, `password`.
+- Token jest hashowany w `password_reset_tokens` i wygasa po 1h.
+- Link resetu prowadzi na frontend z `resetToken` i `email` w query string.
 
 ### Kryteria akceptacji (P0)
 - Email z linkiem dostarczony w ciągu 5 min.
@@ -267,13 +271,12 @@ User nie pamięta hasła.
 - Po reset old session tokeny są revoked (security).
 
 ### Testy / smoke
-- Manual smoke: pełny flow.
-- Test backend: walidacja tokenu reset.
+- `php artisan test tests\Feature\Api\AuthAndProfileTest.php` -> 28 passed po EP-005.
+- `npm run build` -> OK po EP-005.
+- Manual smoke SMTP: pełny flow — nieuruchomiony.
 
 ### Uwagi produktowe
-**Status unknown** — nie znalazłem w roadmap ani w docs. To **blocker MVP** (bez tego user który zapomni hasła nie ma jak wrócić). P0.
-
-Wymaga konfiguracji SMTP / mailera.
+Wymaga jeszcze konfiguracji i smoke realnego SMTP na środowisku docelowym. Po resecie hasła stare custom session tokeny nie są jeszcze globalnie revokowane, bo `SessionTokenService` nie ma enumeracji tokenów per user.
 
 ---
 
@@ -309,7 +312,7 @@ User chce zmienić hasło.
 
 **Typ:** smoke regression
 **Persona:** test account
-**Status:** partial (manual)
+**Status:** partial (local API smoke)
 **Priorytet:** P0
 
 ### Cel
@@ -334,6 +337,7 @@ Po każdym deploy backendu lub frontendu smoke test podstawowych flowów auth.
   - POST `/api/auth/login` z test creds → 200 + token
   - GET `/api/me` z tokenem → 200
   - POST `/api/auth/logout` → 200
+- Lokalny smoke API po EP-010: `php artisan test tests\Feature\Api\MvpSmokeTest.php` -> 1 passed, 51 assertions; obejmuje register, login, `/api/me` i profil. Produkcyjny cron nadal nieuruchomiony.
 
 ### Uwagi produktowe
 **Bez tego smoke nikt nie wie że produkcja działa**, dopóki user nie zgłosi błędu. To powinno być w GitHub Actions lub uptime monitor.
@@ -344,7 +348,7 @@ Po każdym deploy backendu lub frontendu smoke test podstawowych flowów auth.
 
 **Typ:** smoke regression
 **Persona:** test account
-**Status:** missing
+**Status:** partial (local API smoke)
 **Priorytet:** P0
 
 ### Cel
@@ -353,7 +357,7 @@ End-to-end smoke przez kluczowe ścieżki MVP.
 ### Kroki manual (po deploy)
 1. Login.
 2. Sprawdź dashboard: weekly plan, analytics, lista treningów.
-3. Upload TCX z fixture.
+3. Upload TCX z fixture albo manual check-in bez pliku.
 4. Sprawdź że workout pojawił się.
 5. Generate feedback.
 6. Refresh plan.
@@ -368,7 +372,7 @@ End-to-end smoke przez kluczowe ścieżki MVP.
 - GET `/api/training-signals?days=28`
 - GET `/api/training-context?days=28`
 - GET `/api/training-adjustments?days=28`
-- POST `/api/workouts/upload` z fixture
+- POST `/api/workouts/upload` z fixture albo POST `/api/workouts/manual-check-in`
 - POST `/api/workouts/{id}/feedback/generate`
 - GET `/api/workouts/{id}/feedback`
 
@@ -377,8 +381,8 @@ End-to-end smoke przez kluczowe ścieżki MVP.
 - Workout flow działa end-to-end.
 
 ### Testy / smoke
-- **Skrypt smoke** `scripts/e2e-cross-stack.mjs` — **missing/TODO**; lokalnie w `scripts/` istnieje tylko `import-tcx.ps1`.
-- Cron raz dziennie z alertem na Slack/email/SMS gdy fail.
+- Lokalny API smoke po EP-010: `php artisan test tests\Feature\Api\MvpSmokeTest.php` -> 1 passed, 51 assertions; workflow: health -> register -> login -> `/me` -> profile -> rolling plan -> manual check-in bez pliku -> feedback generate/get -> rolling plan.
+- Produkcyjny/browser smoke i cron raz dziennie z alertem na Slack/email/SMS nadal do zrobienia.
 
 ### Uwagi produktowe
 **Po D0 (post-launch produkcji)** smoke jest jedyną gwarancją że nikt nie zepsuł. Bez automation polegamy na manual checklist po każdym deploy.

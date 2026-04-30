@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import client from '../api/client'
+import type { UserProfile } from '../api/profile'
 import { uploadTcxFile } from '../api/workouts'
 
 type Source = 'strava' | 'garmin' | 'tcx' | 'manual'
@@ -8,7 +9,8 @@ type ManualLastRun = 'last_7_days' | 'last_30_days' | 'over_30_days' | 'never'
 type YesNo = 'yes' | 'no'
 
 type OnboardingProps = {
-  onCompleted?: () => void
+  onCompleted?: (result?: { skipped?: boolean }) => void
+  initialProfile?: UserProfile | null
 }
 
 const WEEK_DAYS = [
@@ -66,7 +68,20 @@ const deriveRunningDays = (countRaw: string, unavailableDays: string[]) => {
   return available.slice(0, Math.min(count, available.length || 1))
 }
 
-export default function Onboarding({ onCompleted }: OnboardingProps) {
+const isSource = (value: unknown): value is Source =>
+  value === 'strava' || value === 'garmin' || value === 'tcx' || value === 'manual'
+
+const parseProfileConstraints = (raw: string | null | undefined): Record<string, any> => {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+export default function Onboarding({ onCompleted, initialProfile = null }: OnboardingProps) {
   const [phase, setPhase] = useState<'source' | 'questions'>('source')
   const [source, setSource] = useState<Source | null>(null)
   const [sourceStatus, setSourceStatus] = useState('')
@@ -95,6 +110,59 @@ export default function Onboarding({ onCompleted }: OnboardingProps) {
     () => deriveRunningDays(trainingDays, unavailableDays),
     [trainingDays, unavailableDays],
   )
+
+  useEffect(() => {
+    if (!initialProfile) return
+
+    if (typeof initialProfile.goals === 'string') {
+      setGoalText(initialProfile.goals)
+    }
+
+    const firstRace = Array.isArray(initialProfile.races)
+      ? (initialProfile.races[0] as Record<string, any> | undefined)
+      : undefined
+    if (typeof firstRace?.date === 'string') {
+      setRaceDate(firstRace.date)
+    }
+
+    const availability = initialProfile.availability ?? {}
+    const requestedTrainingDays = availability.requestedTrainingDays
+    const runningDays = availability.runningDays
+    if (typeof requestedTrainingDays === 'number') {
+      setTrainingDays(String(requestedTrainingDays))
+    } else if (Array.isArray(runningDays) && runningDays.length > 0) {
+      setTrainingDays(String(runningDays.length))
+    }
+    if (Array.isArray(availability.unavailableDays)) {
+      setUnavailableDays(
+        availability.unavailableDays.filter((day): day is string => typeof day === 'string'),
+      )
+    }
+
+    const health = initialProfile.health ?? {}
+    setCurrentPain(health.currentPain === true ? 'yes' : 'no')
+    if (Array.isArray(health.injuryHistory) && typeof health.injuryHistory[0] === 'string') {
+      setPainNote(health.injuryHistory[0])
+    }
+
+    const constraints = parseProfileConstraints(initialProfile.constraints)
+    const onboarding = constraints.onboarding ?? {}
+    const savedSource = onboarding.source === 'skipped' ? 'manual' : onboarding.source
+    if (isSource(savedSource)) {
+      setSource(savedSource)
+      setPhase('questions')
+    }
+    if (typeof onboarding.uploadedWorkoutsCount === 'number') {
+      setUploadedCount(onboarding.uploadedWorkoutsCount)
+    }
+    if (onboarding.manual && typeof onboarding.manual === 'object') {
+      const manual = onboarding.manual
+      if (typeof manual.lastRun === 'string') setLastRun(manual.lastRun as ManualLastRun)
+      if (typeof manual.runsLast2Weeks === 'number') setRunsLast2Weeks(String(manual.runsLast2Weeks))
+      if (typeof manual.longestRunKm === 'number') setLongestRunKm(String(manual.longestRunKm))
+      if (typeof manual.canRun30Min === 'boolean') setCanRun30Min(manual.canRun30Min ? 'yes' : 'no')
+    }
+  }, [initialProfile])
 
   const toggleUnavailableDay = (day: string) => {
     setUnavailableDays((prev) =>
@@ -255,7 +323,7 @@ export default function Onboarding({ onCompleted }: OnboardingProps) {
     setIsSubmitting(true)
     try {
       await client.put('/me/profile', buildPayload())
-      onCompleted?.()
+      onCompleted?.({ skipped: false })
     } catch (error: any) {
       const message = error?.response?.data?.message || error?.message || 'Nie udało się zapisać profilu.'
       setFormError(message)
@@ -269,7 +337,7 @@ export default function Onboarding({ onCompleted }: OnboardingProps) {
     setIsSkipping(true)
 
     // Optimistyczne przejście — nie blokujemy usera nawet gdy API zawiedzie
-    onCompleted?.()
+    onCompleted?.({ skipped: true })
 
     try {
       await client.put('/me/profile', {
