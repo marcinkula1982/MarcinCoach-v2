@@ -11,6 +11,7 @@ use App\Services\StravaOAuthService;
 use App\Services\SuuntoSportsTrackerService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\Rule;
@@ -29,21 +30,43 @@ class IntegrationsController extends Controller
     {
         $userId = $this->authUserId($request);
         $result = $this->stravaOAuthService->buildConnectUrl($userId);
-        return response()->json($result);
-    }
 
-    public function stravaCallback(Request $request): JsonResponse
-    {
-        $validated = $request->validate([
-            'code' => ['required', 'string', 'min:1'],
-            'state' => ['required', 'string', 'min:1'],
-        ]);
-        $userId = $this->authUserId($request);
-        $result = $this->stravaOAuthService->handleCallback($userId, (string) $validated['code'], (string) $validated['state']);
         if (!($result['ok'] ?? false)) {
             return response()->json($result, 422);
         }
+
         return response()->json($result);
+    }
+
+    public function stravaCallback(Request $request): JsonResponse|RedirectResponse
+    {
+        $state = trim((string) $request->query('state', ''));
+        $providerError = trim((string) $request->query('error', ''));
+        if ($providerError !== '') {
+            if ($state !== '') {
+                $this->stravaOAuthService->discardState($state);
+            }
+
+            return $this->stravaCallbackResponse($request, [
+                'ok' => false,
+                'error' => $providerError,
+            ], 422);
+        }
+
+        $code = trim((string) $request->query('code', ''));
+        if ($code === '' || $state === '') {
+            return $this->stravaCallbackResponse($request, [
+                'ok' => false,
+                'error' => 'STRAVA_CALLBACK_MISSING_CODE_OR_STATE',
+            ], 422);
+        }
+
+        $result = $this->stravaOAuthService->handleCallback($code, $state);
+        if (!($result['ok'] ?? false)) {
+            return $this->stravaCallbackResponse($request, $result, 422);
+        }
+
+        return $this->stravaCallbackResponse($request, $result, 200);
     }
 
     public function stravaSync(Request $request): JsonResponse
@@ -65,12 +88,18 @@ class IntegrationsController extends Controller
             'started_at' => now(),
         ]);
 
-        $res = Http::withToken($token)->timeout(45)->get('https://www.strava.com/api/v3/athlete/activities', [
-            'after' => isset($validated['fromIso']) ? strtotime((string) $validated['fromIso']) : null,
-            'before' => isset($validated['toIso']) ? strtotime((string) $validated['toIso']) : null,
+        $params = [
+            'after' => isset($validated['fromIso'])
+                ? CarbonImmutable::parse((string) $validated['fromIso'])->startOfDay()->timestamp
+                : now()->subDays(30)->timestamp,
             'per_page' => 30,
             'page' => 1,
-        ]);
+        ];
+        if (isset($validated['toIso'])) {
+            $params['before'] = CarbonImmutable::parse((string) $validated['toIso'])->endOfDay()->timestamp;
+        }
+
+        $res = Http::withToken($token)->timeout(45)->get('https://www.strava.com/api/v3/athlete/activities', $params);
         if (!$res->successful()) {
             $syncRun->status = 'failed';
             $syncRun->error_code = 'STRAVA_SYNC_FAILED';
@@ -377,5 +406,39 @@ class IntegrationsController extends Controller
     {
         $type = (string) ($session['type'] ?? 'run');
         return substr("MarcinCoach {$type} {$scheduledDate}", 0, 80);
+    }
+
+    /**
+     * @param array<string,mixed> $result
+     */
+    private function stravaCallbackResponse(Request $request, array $result, int $status): JsonResponse|RedirectResponse
+    {
+        if ($request->expectsJson()) {
+            return response()->json($result, $status);
+        }
+
+        $ok = $status >= 200 && $status < 300 && ($result['ok'] ?? false);
+        $params = [
+            'integration' => 'strava',
+            'status' => $ok ? 'connected' : 'error',
+        ];
+        if (!$ok) {
+            $params['error'] = (string) ($result['error'] ?? 'STRAVA_CALLBACK_FAILED');
+        }
+
+        return redirect()->away($this->frontendUrl($params));
+    }
+
+    /**
+     * @param array<string,string> $params
+     */
+    private function frontendUrl(array $params): string
+    {
+        $baseUrl = rtrim((string) env('FRONTEND_URL', config('app.url', 'http://localhost:5173')), '/');
+        if ($baseUrl === '') {
+            $baseUrl = 'http://localhost:5173';
+        }
+
+        return $baseUrl . '?' . http_build_query($params);
     }
 }
