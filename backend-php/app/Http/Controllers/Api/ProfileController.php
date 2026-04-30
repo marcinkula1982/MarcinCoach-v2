@@ -125,13 +125,13 @@ class ProfileController extends Controller
             $profile->races_json = $validated['races'];
         }
         if (array_key_exists('availability', $validated)) {
-            $profile->availability_json = $validated['availability'];
+            $profile->availability_json = $this->mergeNullableJsonSection($profile->availability_json, $validated['availability']);
         }
         if (array_key_exists('health', $validated)) {
-            $profile->health_json = $validated['health'];
+            $profile->health_json = $this->mergeNullableJsonSection($profile->health_json, $validated['health']);
         }
         if (array_key_exists('equipment', $validated)) {
-            $profile->equipment_json = $validated['equipment'];
+            $profile->equipment_json = $this->mergeNullableJsonSection($profile->equipment_json, $validated['equipment']);
         }
 
         if (isset($validated['hrZones']) && is_array($validated['hrZones'])) {
@@ -326,6 +326,46 @@ class ProfileController extends Controller
     private function mergeConstraints(?string $raw, array $patch): array
     {
         return array_replace_recursive($this->decodeConstraints($raw), $patch);
+    }
+
+    /**
+     * @param array<string,mixed>|null $current
+     * @param array<string,mixed>|null $patch
+     * @return array<string,mixed>|null
+     */
+    private function mergeNullableJsonSection(?array $current, ?array $patch): ?array
+    {
+        if ($patch === null) {
+            return null;
+        }
+
+        return $this->mergeJsonSection(is_array($current) ? $current : [], $patch);
+    }
+
+    /**
+     * @param array<mixed> $current
+     * @param array<mixed> $patch
+     * @return array<mixed>
+     */
+    private function mergeJsonSection(array $current, array $patch): array
+    {
+        foreach ($patch as $key => $value) {
+            $existing = $current[$key] ?? null;
+
+            if (
+                is_array($value)
+                && is_array($existing)
+                && !array_is_list($value)
+                && !array_is_list($existing)
+            ) {
+                $current[$key] = $this->mergeJsonSection($existing, $value);
+                continue;
+            }
+
+            $current[$key] = $value;
+        }
+
+        return $current;
     }
 
     /**

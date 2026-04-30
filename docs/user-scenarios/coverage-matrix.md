@@ -195,16 +195,16 @@ Wartości w kolumnach FE / BE / Test / Smoke:
 - **Razem:** 107 scenariuszy
 
 ### Według statusu
-- **implemented:** 28 (~26%)
-- **partial:** 44 (~41%)
+- **implemented:** 35 (~33%)
+- **partial:** 39 (~36%)
 - **missing:** 24 (~23%)
-- **unknown:** 11 (~10%)
+- **unknown:** 9 (~8%)
 
 ### P0 alone
-- **P0 implemented:** 24
+- **P0 implemented:** 25
 - **P0 partial:** 27
 - **P0 missing:** 5
-- **P0 unknown:** 4
+- **P0 unknown:** 3
 
 ### Krytyczne luki P0 missing
 1. US-PRIVACY-001 — zgody przy rejestracji
@@ -220,14 +220,13 @@ Wartości w kolumnach FE / BE / Test / Smoke:
 4. US-ONBOARD-010 — manual onboarding bez danych (działa częściowo, wymaga spięcia z check-in)
 5. US-PLAN-015 — UX powrotu po przerwie
 6. US-PLAN-018 — pełna pętla pierwszy trening (lokalny API smoke bez pliku jest po EP-010; produkcyjny/browser E2E nadal potrzebny)
-7. US-RACE-001 — pełny formularz race w UI
-8. US-AUTH-011/012 — lokalny API smoke jest po EP-010; automatyczny smoke produkcyjny/cron nadal potrzebny
-9. US-MANUAL-005 — pominięcie zaplanowanego treningu ma UI/API bez tworzenia treningu 0 km oraz auto-refresh planu; plan impact i produkcyjny/browser E2E smoke nadal wymagają walidacji
+7. US-AUTH-011/012 — lokalny API smoke jest po EP-010; automatyczny smoke produkcyjny/cron nadal potrzebny
+8. US-MANUAL-005 — pominięcie zaplanowanego treningu ma UI/API bez tworzenia treningu 0 km oraz auto-refresh planu; plan impact i produkcyjny/browser E2E smoke nadal wymagają walidacji
+9. US-PRIVACY-002 — odłączenie integracji usuwa lokalne konto integracji i ma UI confirm, ale revoke tokena u providera nadal wymaga osobnego kroku
 
 ### Krytyczne luki P0 unknown (do potwierdzenia smoke/testem)
 1. US-STRAVA-001/002 — produkcyjne credentials + smoke z realnym kontem
-2. US-PRIVACY-002 — revoke integracji u providera
-3. US-PRIVACY-006 — klasyfikacja i obsługa danych zdrowotnych jako wrażliwych
+2. US-PRIVACY-006 — klasyfikacja i obsługa danych zdrowotnych jako wrażliwych
 
 ## Aktualizacja matrycy
 

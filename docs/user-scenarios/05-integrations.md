@@ -10,6 +10,8 @@ Realny stan 30.04.2026:
 - Suunto: oficjalne API Zone **missing**, tymczasowy Sports Tracker test bridge **partial/backend implemented**.
 - Coros: **missing** (P2, future), fallback FIT/TCX import.
 - Garmin Event Dashboard: **missing / spike**.
+- Race profile: manualny CRUD w Profilu **implemented** po EP-012 (`RacesManager`, zapis pełnym snapshotem `races`).
+- Globalny widok integracji: **implemented** po EP-014 (status, last sync, connect/sync/disconnect dla Garmin/Strava oraz fallbacki dla Polar/Suunto/Coros).
 
 ---
 
@@ -629,25 +631,25 @@ Można złożyć aplikację partnerską już teraz, żeby trzymać miejsce w kol
 
 **Typ:** happy path
 **Persona:** P-MULTI
-**Status:** partial (backend ma, UI ograniczone)
+**Status:** implemented (2026-04-30: `RacesManager` w Profilu, pełne pola i zapis przez `PUT /api/me/profile`)
 **Priorytet:** P0
 
 ### Stan wejściowy
 User chce dodać start: marathon Wrocław 15.10.2026, cel 3:30, priorytet A.
 
 ### Kroki użytkownika
-1. Idzie do zakładki Profil → Starty (TODO: zakładka missing).
+1. Idzie do zakładki Profil → Starty.
 2. Klika "Dodaj start".
 3. Wypełnia: nazwa, data, dystans (z listy: 5/10/21.1/42.2/inny), cel czasowy (HH:MM:SS), priorytet (A/B/C).
 
-### Oczekiwane zachowanie UI (po wdrożeniu)
+### Aktualne zachowanie UI
 - Formularz z walidacją.
 - Po submit: lista startów aktualizowana.
 - W planie pojawia się info "X tygodni do startu Y".
 
 ### Oczekiwane API
-- Aktualny model backendu: `PUT /api/me/profile` z pełną/zmienioną tablicą `races`.
-- Dedykowane endpointy `POST/PUT/DELETE /api/me/profile/races...` nie istnieją dziś; można je dodać później, jeśli UI race management tego wymaga.
+- Aktualny model backendu: `PUT /api/me/profile` z pełną tablicą `races`.
+- Dedykowane endpointy `POST/PUT/DELETE /api/me/profile/races...` nie są wymagane dla MVP, bo UI zarządza listą przez pełny snapshot.
 
 ### Oczekiwane zmiany danych
 - Wpis w `races` (lub w `user_profiles.races` JSON, w zależności od schema).
@@ -660,9 +662,10 @@ User chce dodać start: marathon Wrocław 15.10.2026, cel 3:30, priorytet A.
 
 ### Testy / smoke
 - Test backend: dodaj race A → block_type respektuje weeksUntilRace.
+- Walidacja EP-012: `npm run build` -> OK; backendowe testy profilu przechodzą; manual browser smoke CRUD nieuruchomiony.
 
 ### Uwagi produktowe
-**Onboarding tworzy race uproszczony** (data + dystans z celu + priority A, bez nazwy/targetTime). Pełny formularz to TODO.
+**Onboarding tworzy race uproszczony** (data + dystans z celu + priority A). Pełne zarządzanie startami jest w Profilu przez `RacesManager`.
 
 Roadmap punkt 4: "Races w profilu — upewnić się że frontend pozwala dodać start ręcznie".
 
@@ -672,7 +675,7 @@ Roadmap punkt 4: "Races w profilu — upewnić się że frontend pozwala dodać 
 
 **Typ:** edge case
 **Persona:** P-MULTI
-**Status:** missing (UI)
+**Status:** implemented (2026-04-30: edycja inline przez `RacesManager`, zapis pełnym snapshotem `races`)
 **Priorytet:** P1
 
 ### Stan wejściowy
@@ -684,6 +687,9 @@ User ma race A za 12 tyg, decyduje że to półmaraton zamiast maratonu.
 3. Submit.
 4. Plan się przelicza.
 
+### Oczekiwane API
+- `PUT /api/me/profile` z pełną tablicą `races` po edycji.
+
 ### Patrz US-PLAN-014 dla skutków planu.
 
 ---
@@ -692,13 +698,16 @@ User ma race A za 12 tyg, decyduje że to półmaraton zamiast maratonu.
 
 **Typ:** edge case
 **Persona:** P-RETURN (kontuzja, nie wystartuje)
-**Status:** missing (UI)
+**Status:** implemented (2026-04-30: usuwanie z listy przez `RacesManager`, zapis pełnym snapshotem `races`)
 **Priorytet:** P1
 
 ### Oczekiwane zachowanie
 - Race usunięty z bazy.
 - Plan przelicza się — bez race A → block_type = base lub maintain.
 - Komunikat: "Plan został zaktualizowany — wracamy do trybu utrzymania formy."
+
+### Oczekiwane API
+- `PUT /api/me/profile` z pełną tablicą `races` po usunięciu wybranego startu.
 
 ---
 
@@ -759,9 +768,11 @@ User chce zobaczyć "co mam podłączone".
 - Może zarządzać każdą integracją z jednego miejsca.
 
 ### Testy / smoke
-- Test e2e: lista integracji renderuje się poprawnie dla różnych stanów.
+- `php artisan test tests\Feature\Api\IntegrationsParityTest.php` -> 7 passed, 51 assertions.
+- `npm run build` -> OK.
+- Manual browser smoke listy integracji nieuruchomiony.
 
 ### Uwagi produktowe
 **Centralna kontrola** to też element RODO (US-PRIVACY-002).
 
-Stan po EP-001: bazowa zakładka `Ustawienia` istnieje, Garmin ma swój dotychczasowy panel, a Strava/Polar/Suunto/Coros mają proste statusy startowe. Brakuje jeszcze pełnego zarządzania integracjami, disconnect/revoke i ostatniego sync per provider.
+Stan po EP-014: zakładka `Ustawienia` ma `IntegrationsSettingsSection.tsx`, backend udostępnia `GET /api/integrations/status` i `DELETE /api/integrations/{provider}`. Disconnect usuwa lokalne `integration_accounts`; provider-side revoke pozostaje osobnym wymogiem RODO w US-PRIVACY-002.

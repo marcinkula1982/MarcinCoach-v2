@@ -407,6 +407,29 @@ class AuthAndProfileTest extends TestCase
         $get->assertJsonPath('availability.runningDays', ['tue', 'thu', 'sat']);
     }
 
+    public function test_profile_partial_json_sections_preserve_existing_keys(): void
+    {
+        $this->putJson('/api/me/profile', [
+            'availability' => ['runningDays' => ['mon', 'wed', 'fri'], 'maxSessionMin' => 90],
+            'health' => ['injuryHistory' => ['ankle_2024'], 'currentPain' => false],
+            'equipment' => ['watch' => true, 'hrSensor' => true],
+        ])->assertOk();
+
+        $response = $this->putJson('/api/me/profile', [
+            'availability' => ['runningDays' => ['tue', 'thu']],
+            'health' => ['currentPain' => true],
+            'equipment' => ['hrSensor' => false],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('availability.runningDays', ['tue', 'thu']);
+        $response->assertJsonPath('availability.maxSessionMin', 90);
+        $response->assertJsonPath('health.currentPain', true);
+        $response->assertJsonPath('health.injuryHistory', ['ankle_2024']);
+        $response->assertJsonPath('equipment.watch', true);
+        $response->assertJsonPath('equipment.hrSensor', false);
+    }
+
     public function test_profile_rejects_invalid_typed_payload(): void
     {
         $response = $this->putJson('/api/me/profile', [

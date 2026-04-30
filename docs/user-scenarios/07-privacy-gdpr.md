@@ -2,7 +2,7 @@
 
 Plik obejmuje: zgody przy pierwszym logowaniu, odłączenie integracji, usunięcie konta i danych, export danych, separacja informacji treningowej od medycznej, dane wrażliwe (ból, kontuzje, HR).
 
-Realny stan 28.04.2026: większość scenariuszy to **missing**. Nie blokuje to zamkniętej bety ani testów wewnętrznych, ale **blokuje publiczny launch dla realnych nieanonimowych użytkowników w UE**.
+Realny stan 30.04.2026: większość scenariuszy to **missing**. Odłączenie integracji jest częściowe po EP-014 (lokalny disconnect + UI confirm, bez provider-side revoke). Nie blokuje to zamkniętej bety ani testów wewnętrznych, ale **blokuje publiczny launch dla realnych nieanonimowych użytkowników w UE**.
 
 ---
 
@@ -371,7 +371,7 @@ RODO Art. 33-34 — w przypadku breachu (wycieku danych) zgłoszenie do UODO w 7
 | Regulamin (dokument) | missing | docs |
 | Export danych | missing | US-PRIVACY-003 |
 | Usunięcie konta | missing | US-PRIVACY-004 |
-| Odłączenie integracji | unknown | US-PRIVACY-002 |
+| Odłączenie integracji | partial | US-PRIVACY-002 |
 | Disclaimer medyczny | missing (UI) | US-PRIVACY-005 |
 | Dane zdrowotne — encryption | unknown | US-PRIVACY-006 |
 | Audit log zgód | missing | US-PRIVACY-007 |

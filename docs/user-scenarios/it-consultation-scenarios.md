@@ -102,15 +102,15 @@ flowchart TD
   K --> L["Rolling plan 14 dni"]
 ```
 
-Wymaganie techniczne do konsultacji: aktualny backend `POST /api/workouts` wymaga `tcxRaw`, więc potrzebny jest osobny model/API dla manualnego check-inu bez pliku.
+Stan po EP-007..EP-010: manual check-in ma osobny kontrakt `POST /api/workouts/manual-check-in`, tworzy syntetyczny workout dla `done/modified`, obsługuje `skipped` bez pliku i ma lokalny smoke API pełnej pętli.
 
 ---
 
 ## 5. Główne decyzje dla IT
 
-1. **Manual check-in jako P0.** Potrzebny endpoint lub kontrakt pozwalający zapisać wykonanie/pominięcie treningu bez `tcxRaw`.
+1. **Manual check-in jako P0.** Endpoint `POST /api/workouts/manual-check-in` istnieje; do konsultacji zostaje produkcyjny/browser smoke i szczegóły plan impact dla skipped.
 2. **Onboarding first-run + resumable.** Nowy user po rejestracji trafia do onboardingu, ale jeśli go pominie/przerwie, aplikacja pokazuje później CTA "Dokończ onboarding" z Dashboardu/Profilu.
-3. **Feedback UX.** Backend generuje deterministyczny feedback, ale frontend nie domyka jeszcze czytelnego widoku feedbacku po treningu.
+3. **Feedback UX.** Frontend pokazuje deterministyczny feedback po treningu; do domknięcia zostaje manual smoke import/check-in → feedback.
 4. **Rolling plan.** Aktualny kontrakt dla nowego planu to `GET /api/rolling-plan?days=14` i `POST /api/rolling-plan`.
 5. **Profil.** Aktualny kontrakt profilu to `GET/PUT /api/me/profile`.
 6. **Strava.** Backend ma elementy OAuth/sync, ale produkcja wymaga credentials i smoke z realnym kontem.
@@ -142,29 +142,29 @@ Publiczny launch wymaga dodatkowo zamknięcia RODO: zgody, regulamin/polityka pr
 
 ## 7. Podsumowanie liczbowe
 
-Aktualna macierz zawiera 106 scenariuszy:
+Aktualna macierz zawiera 107 scenariuszy:
 
 | Priorytet | Liczba |
 |---|---:|
 | P0 | 60 |
-| P1 | 39 |
+| P1 | 40 |
 | P2 | 7 |
 
 | Status | Liczba |
 |---|---:|
-| implemented | 22 |
-| partial | 46 |
-| missing | 27 |
-| unknown | 11 |
+| implemented | 35 |
+| partial | 39 |
+| missing | 24 |
+| unknown | 9 |
 
 P0 only:
 
 | Status P0 | Liczba |
 |---|---:|
-| implemented | 19 |
-| partial | 30 |
-| missing | 7 |
-| unknown | 4 |
+| implemented | 25 |
+| partial | 27 |
+| missing | 5 |
+| unknown | 3 |
 
 ---
 
@@ -217,7 +217,7 @@ P0 only:
 | US-ANALYSIS-005 | Propozycja stref pace | P1 | missing | Pace zones |
 | US-ANALYSIS-006 | Wyświetlenie historii treningów | P0 | implemented | Workout list |
 | US-ANALYSIS-007 | Trend formy / progres | P1 | missing | Trend UI |
-| US-ANALYSIS-008 | Profile Quality Score widoczny | P1 | partial | Backend jest, UI częściowy |
+| US-ANALYSIS-008 | Profile Quality Score widoczny | P1 | implemented | Widget w Profilu pokazuje score, pasek i braki po EP-013 |
 
 ### 8.4 Plan i feedback
 
@@ -227,7 +227,7 @@ P0 only:
 | US-PLAN-002 | Plan na dzień dzisiejszy widoczny | P0 | partial | Today highlight |
 | US-PLAN-003 | Refresh planu manualny | P0 | implemented | `POST /api/rolling-plan` |
 | US-PLAN-004 | Auto-refresh planu po imporcie/check-inie | P1 | implemented | Frontend refreshes `GET /api/rolling-plan?days=14` after import/check-in |
-| US-PLAN-005 | Generowanie feedbacku po treningu | P0 | partial | Backend ready, FE missing |
+| US-PLAN-005 | Generowanie feedbacku po treningu | P0 | implemented | Backend i frontend feedbacku są; zostaje smoke E2E |
 | US-PLAN-006 | Trening zgodny z planem | P0 | partial | Compliance feedback |
 | US-PLAN-007 | Trening krótszy niż planowany | P0 | partial | Deviation feedback |
 | US-PLAN-008 | Trening dłuższy/mocniejszy | P0 | partial | Load/fatigue guard |
@@ -252,7 +252,7 @@ P0 only:
 | US-GARMIN-004 | Auto-sync nowych aktywności | P1 | missing | Cron/polling/webhook strategy |
 | US-GARMIN-005 | Wysyłka workoutu do Garmin | P1 | implemented | Smoke 26.04 |
 | US-GARMIN-006 | Błąd connectora offline | P0 | partial | Error handling |
-| US-GARMIN-007 | Odłączenie konta Garmin | P1 | unknown | Revoke/disconnect |
+| US-GARMIN-007 | Odłączenie konta Garmin | P1 | implemented | Lokalny disconnect konta integracji; provider revoke osobno w RODO |
 | US-STRAVA-001 | Połączenie konta Strava OAuth | P0 | unknown | Prod credentials + smoke |
 | US-STRAVA-002 | Sync historii Strava | P0 | unknown | Prod smoke |
 | US-STRAVA-003 | Webhook dla nowych aktywności | P1 | missing | Webhook subscription |
@@ -264,11 +264,11 @@ P0 only:
 | US-SUUNTO-002 | Tymczasowy Suunto Sports Tracker test bridge | P1 | partial | Backend endpoint, feature flag, bez trwalego zapisu tokena; UI/prod smoke missing |
 | US-COROS-001 | Coros bez integracji, fallback FIT/TCX | P2 | missing | File fallback |
 | US-COROS-002 | Pełna integracja Coros | P2 | missing | Future partnership/API |
-| US-RACE-001 | Ręczne dodanie startu | P0 | partial | `PUT /api/me/profile` races |
-| US-RACE-002 | Edycja startu / zmiana celu | P1 | partial | Profile race update |
-| US-RACE-003 | Usunięcie startu | P1 | partial | Profile race update |
+| US-RACE-001 | Ręczne dodanie startu | P0 | implemented | `RacesManager` + `PUT /api/me/profile` races |
+| US-RACE-002 | Edycja startu / zmiana celu | P1 | implemented | Edycja inline w Profilu |
+| US-RACE-003 | Usunięcie startu | P1 | implemented | Usunięcie z listy w Profilu |
 | US-GARMIN-EVENT-001 | Import eventu z Garmin Event Dashboard | P2 | missing | Spike |
-| US-INTEGRATION-001 | Globalny widok integracji | P1 | partial | Bazowa zakładka Ustawienia jest, pełne zarządzanie integracjami nadal missing |
+| US-INTEGRATION-001 | Globalny widok integracji | P1 | implemented | Ustawienia pokazują status, last sync, sync/connect/disconnect po EP-014 |
 
 ### 8.6 Auth, sesja i smoke
 
@@ -295,7 +295,7 @@ P0 only:
 | ID | Scenariusz | Pri | Status | IT focus |
 |---|---|---|---|---|
 | US-PRIVACY-001 | Zgody przy rejestracji | P0 | missing | Consent storage |
-| US-PRIVACY-002 | Odłączenie integracji revoke | P0 | unknown | Provider revoke |
+| US-PRIVACY-002 | Odłączenie integracji revoke | P0 | partial | UI i lokalny disconnect są; provider-side revoke nadal do zaprojektowania |
 | US-PRIVACY-003 | Export danych | P0 | missing | Data portability |
 | US-PRIVACY-004 | Usunięcie konta i danych | P0 | missing | Cascade delete |
 | US-PRIVACY-005 | Granica info treningowa/medyczna | P0 | missing | Medical disclaimer |
@@ -336,7 +336,6 @@ P0 only:
 | ID | Luka | Decyzja IT |
 |---|---|---|
 | US-STRAVA-001/002 | Strava prod OAuth/sync | Credentials + smoke account |
-| US-PRIVACY-002 | Revoke integracji | Sprawdzenie provider APIs |
 | US-PRIVACY-006 | Dane zdrowotne | Klasyfikacja, retencja, dostęp |
 
 ---
@@ -346,7 +345,7 @@ P0 only:
 1. Monitoring i smoke: healthcheck, login smoke, produkcyjny/browser E2E smoke script.
 2. Auth: rejestracja UI, reset hasła, globalny 401/session expired UX.
 3. Pętla treningowa MVP: lokalny API smoke jest po EP-010; do domknięcia produkcyjny/browser smoke po feedbacku, auto-refreshu planu i manual check-inie.
-4. Profil i nawigacja: Profil, Starty, powrót do onboardingu, integracje.
+4. Profil i nawigacja: Profil, Starty i integracje są po EP-011..EP-014; zostaje browser smoke oraz powrót do onboardingu.
 5. RODO przed publicznym launchem: zgody, export, delete, disclaimer, audit.
 6. Integracje: Strava prod smoke, Strava webhook, Garmin auto-sync/MFA, widok integracji.
 7. Import/data quality: GPX/FIT UI, korekta klasyfikacji, sanity checks.
@@ -365,6 +364,9 @@ Aktualne:
 - `POST /api/rolling-plan`
 - `POST /api/workouts/{id}/feedback/generate`
 - `GET /api/workouts/{id}/feedback`
+- `POST /api/workouts/manual-check-in`
+- `GET /api/integrations/status`
+- `DELETE /api/integrations/{provider}`
 - `POST /api/integrations/strava/connect`
 - `GET /api/integrations/strava/callback`
 - `POST /api/integrations/strava/sync`
@@ -374,9 +376,8 @@ Aktualne:
 - `POST /api/integrations/suunto/sports-tracker/sync`
 
 Do zaprojektowania:
-- Manual check-in bez pliku, np. `POST /api/workouts/manual-check-in`.
-- Skipped session state dla treningu pominiętego.
-- Revoke/disconnect integracji.
+- Provider-side revoke po lokalnym disconnect integracji.
+- Pełny plan impact dla skipped session w produkcyjnym/browser smoke.
 - Reset hasła: SMTP smoke i decyzja o revoke starych sesji po resecie.
 - Export i delete konta.
 - Consent audit.

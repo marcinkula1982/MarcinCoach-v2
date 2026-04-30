@@ -10,7 +10,7 @@ Cel: na podstawie scenariuszy z plików 01-08 i macierzy pokrycia odpowiedzieć 
 
 ## Założenia
 
-**Co już mamy (stan po EP-010, 30.04.2026):**
+**Co już mamy (stan po EP-014, 30.04.2026):**
 - Frontend i backend działają na produkcji.
 - Login i sesja działają.
 - Onboarding wizard 2-fazowy działa, ze skipem.
@@ -19,6 +19,8 @@ Cel: na podstawie scenariuszy z plików 01-08 i macierzy pokrycia odpowiedzieć 
 - Wysyłka workoutu do Garmin działa (smoke 26.04).
 - Suunto ma tymczasowy, backendowy Sports Tracker test bridge do zamkniętych testów (bez trwalego zapisu tokena).
 - Rolling plan 14 dni renderuje się.
+- Profil ma realny widok edycji danych, Profile Quality Score i CRUD startów/races.
+- Ustawienia mają globalny widok integracji ze statusem, last sync i lokalnym disconnect.
 - Backend feedback endpoint działa (deterministyczny).
 - Healthcheck działa.
 - Lokalny API smoke EP-010 przechodzi ścieżką bez pliku: health -> register/login -> profile -> rolling plan -> manual check-in -> feedback -> rolling plan.
@@ -57,8 +59,8 @@ Te rzeczy musimy mieć **przed pierwszym launchem dla niezamkniętej grupy użyt
 - **B4: Manual check-in bez integracji i bez plików (US-MANUAL-002/003/004/005/006).** Po EP-008/EP-009 backendowy kontrakt, UI i auto-refresh planu są gotowe: user może kliknąć "Wykonane", "Zmienione" albo "Nie zrobiłem", podać czas, opcjonalny dystans, RPE, ból/notatkę, zobaczyć feedback dla syntetycznego workoutu i mieć odświeżony rolling plan. Po EP-010 ścieżka `done` bez pliku ma lokalny API smoke; skipped/modified i browser smoke nadal warto sprawdzić w ręcznym E2E.
 
 ### Bucket C — Race profile i nawigacja
-- **C1: Pełny formularz race w UI (US-RACE-001).** Backend ma, UI tylko upraszcza (data + dystans + priority A). Brakuje: nazwa, target time, edycja (US-RACE-002), usunięcie (US-RACE-003).
-- **C2: Zakładka Profil + nawigacja tabelaryczna + CTA powrotu do onboardingu.** Po EP-001/EP-003 bazowe zakładki i CTA istnieją; do dopracowania zostaje pełny Profil, race management i e2e smoke powrotu do onboardingu.
+- **C1: Pełny formularz race w UI (US-RACE-001/002/003).** Domknięte po EP-012: `RacesManager` pozwala dodać, edytować i usunąć start z nazwą, datą, dystansem, priorytetem i target time. Zostaje manual browser smoke CRUD.
+- **C2: Zakładka Profil + nawigacja tabelaryczna + CTA powrotu do onboardingu.** Po EP-001/EP-003/EP-011 bazowe zakładki, CTA i realny Profil istnieją; do dopracowania zostaje e2e smoke powrotu do onboardingu.
 
 ### Bucket D — RODO przed publicznym launchem
 Te 5 punktów to **prawny blocker** dla otwartego launchu w UE. Nie blokują zamkniętej bety / testów wśród znajomych, ale otwarcie publiczne wymaga ich domknięcia.
@@ -84,7 +86,7 @@ Te rzeczy poprawiają UX i pokrycie, ale nie blokują pierwszego użytkownika.
 - **Strava webhook (US-STRAVA-003).** Stabilna ścieżka auto-sync. Implementacja przed Garmin polling.
 - **Garmin auto-sync (US-GARMIN-004).** Decyzja: on-demand button + cron 1-2× dziennie. Polling Garmina ma ryzyko rate limit.
 - **Garmin MFA UI (US-GARMIN-002).** Bez pola MFA w UI część użytkowników odbije się na pierwszym kroku.
-- **Globalny widok integracji (US-INTEGRATION-001).** Bazowa zakładka Ustawienia już istnieje; brakuje pełnego widoku integracji z ostatnim sync, connect/disconnect i revoke.
+- **Globalny widok integracji (US-INTEGRATION-001).** Domknięte po EP-014: Ustawienia pokazują status Garmin/Strava, last sync, sync/connect/disconnect oraz fallbacki Polar/Suunto/Coros. Zostaje provider-side revoke w US-PRIVACY-002 i produkcyjny smoke.
 - **Suunto Sports Tracker test bridge (US-SUUNTO-002).** Backendowy endpoint działa i ma test, ale UI oraz manual smoke na realnym koncie Suunto/Sports Tracker są jeszcze missing. To most do zamkniętych testów, nie publiczna integracja.
 
 ### Import i dane
@@ -159,9 +161,9 @@ Zasada: każdy "pakiet pracy" zamyka jedną dziurę i nie wymaga rzeczy z późn
 ### Pakiet 3 — Profil i nawigacja (5-7 dni)
 **Cel:** User może zarządzać swoim kontem i celami.
 
-- C2: Zakładka Profil + nawigacja tabelaryczna (Dashboard / Treningi / Plan / Profil / Ustawienia).
+- ~~C2: Zakładka Profil + nawigacja tabelaryczna (Dashboard / Treningi / Plan / Profil / Ustawienia).~~ **[DONE 2026-04-30]** Realny Profil jest po EP-011; zostaje smoke UX.
 - US-ONBOARD-007: CTA "Dokończ onboarding" / "Uzupełnij dane" dla usera, który pominął lub przerwał first-run onboarding.
-- C1: Pełny formularz race w Profil → Starty (dodaj, edytuj, usuń).
+- ~~C1: Pełny formularz race w Profil → Starty (dodaj, edytuj, usuń).~~ **[DONE 2026-04-30]** EP-012.
 - First-run onboarding po rejestracji pozostaje domyślnym flow dla nowych kont.
 - ~~Profile Quality Score widoczny (US-ANALYSIS-008, P1 ale tani razem).~~ **[DONE 2026-04-30]**
 
@@ -189,7 +191,7 @@ Zasada: każdy "pakiet pracy" zamyka jedną dziurę i nie wymaga rzeczy z późn
 - US-STRAVA-003: Webhook subscription dla nowych aktywności.
 - US-GARMIN-004: On-demand "Sprawdź nowe treningi" button + cron 1-2× dziennie.
 - US-GARMIN-002: MFA UI dla Garmin.
-- US-INTEGRATION-001: Pełny widok integracji w Ustawieniach.
+- ~~US-INTEGRATION-001: Pełny widok integracji w Ustawieniach.~~ **[DONE 2026-04-30]** EP-014; provider-side revoke zostaje w US-PRIVACY-002.
 
 **Test domknięcia:** user łączy Stravę przez OAuth, robi trening, w ciągu 60s widzi go w MarcinCoach. Garmin user z MFA też przechodzi.
 
