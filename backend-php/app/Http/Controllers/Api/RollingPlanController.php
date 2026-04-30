@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\UserProfile;
 use App\Services\Analysis\ActivityImpactService;
 use App\Services\PlanMemoryService;
+use App\Services\PlanSnapshotService;
 use App\Services\TrainingAdjustmentsService;
 use App\Services\TrainingContextService;
 use App\Services\TrainingFeedbackV2Service;
@@ -14,6 +15,7 @@ use App\Services\WeeklyPlanService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class RollingPlanController extends Controller
 {
@@ -26,6 +28,7 @@ class RollingPlanController extends Controller
         private readonly TrainingFeedbackV2Service $feedbackV2Service,
         private readonly WeeklyPlanService $weeklyPlanService,
         private readonly PlanMemoryService $planMemoryService,
+        private readonly PlanSnapshotService $snapshotService,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -88,6 +91,10 @@ class RollingPlanController extends Controller
 
         $this->rememberWeek($userId, $currentPlan, $blockContext ?? []);
         $this->rememberWeek($userId, $nextPlan, $nextBlockContext ?? []);
+
+        // Snapshoty obu tygodni — źródło prawdy dla feedbacku potreningowego (best-effort).
+        $this->saveRollingSnapshot($userId, $currentPlan);
+        $this->saveRollingSnapshot($userId, $nextPlan);
 
         $weeks = [
             $this->publicWeek($currentPlan, 0),
@@ -545,6 +552,25 @@ class RollingPlanController extends Controller
         try {
             $this->planMemoryService->upsertWeekFromPlan($userId, $plan, $blockContext);
         } catch (\Throwable) {
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $plan
+     */
+    private function saveRollingSnapshot(int $userId, array $plan): void
+    {
+        try {
+            $this->snapshotService->saveFromPlan($userId, $plan, 'rolling');
+        } catch (\Throwable $e) {
+            try {
+                Log::warning('[RollingPlanController] saveFromPlan failed', [
+                    'userId' => $userId,
+                    'source' => 'rolling',
+                    'message' => $e->getMessage(),
+                ]);
+            } catch (\Throwable) {
+            }
         }
     }
 }

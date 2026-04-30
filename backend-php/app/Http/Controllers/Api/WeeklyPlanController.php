@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\PlanMemoryService;
+use App\Services\PlanSnapshotService;
 use App\Services\TrainingAdjustmentsService;
 use App\Services\TrainingAlertsV1Service;
 use App\Services\TrainingContextService;
@@ -23,6 +24,7 @@ class WeeklyPlanController extends Controller
         private readonly WeeklyPlanService $weeklyPlanService,
         private readonly PlanMemoryService $planMemoryService,
         private readonly TrainingAlertsV1Service $alertsService,
+        private readonly PlanSnapshotService $snapshotService,
     ) {
     }
 
@@ -41,6 +43,20 @@ class WeeklyPlanController extends Controller
         $feedbackSignals = $this->feedbackV2Service->getLatestFeedbackSignalsForUser($userId);
         $adjustments = $this->adjustmentsService->generate($context, $feedbackSignals, $blockContext);
         $plan = $this->weeklyPlanService->generatePlan($context, $adjustments, $blockContext);
+
+        // Snapshot planu — źródło prawdy dla feedbacku potreningowego (best-effort).
+        try {
+            $this->snapshotService->saveFromPlan($userId, $plan, 'weekly');
+        } catch (\Throwable $e) {
+            try {
+                Log::warning('[WeeklyPlanController] saveFromPlan failed', [
+                    'userId' => $userId,
+                    'source' => 'weekly',
+                    'message' => $e->getMessage(),
+                ]);
+            } catch (\Throwable) {
+            }
+        }
 
         // Zapis pamięci planistycznej + alerty tygodniowe (best-effort).
         try {

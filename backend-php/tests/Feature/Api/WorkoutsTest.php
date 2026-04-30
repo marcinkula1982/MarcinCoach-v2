@@ -2320,6 +2320,9 @@ XML;
             'source_activity_id' => 'feedback-product-1',
             'dedupe_key' => 'MANUAL_UPLOAD:feedback-product-1',
         ]);
+        $this->insertFeedbackPlanSnapshot('2026-04-20', [
+            ['dateIso' => '2026-04-20', 'type' => 'easy', 'durationMin' => 30, 'intensityHint' => 'Z2'],
+        ]);
 
         DB::table('plan_compliance_v1')->insert([
             'workout_id' => $workout->id,
@@ -2354,6 +2357,16 @@ XML;
             'feedbackId',
             'workoutId',
             'generatedAtIso',
+            'dateRelation',
+            'planMatchStatus',
+            'executionScore',
+            'workoutDataConfidence',
+            'planMatchConfidence',
+            'coachFeedback',
+            'planVsExecution' => ['planned', 'actual', 'differences'],
+            'missingSessions',
+            'riskFlags',
+            'nextStep',
             'summary' => [
                 'character',
                 'distanceKm',
@@ -2366,17 +2379,19 @@ XML;
             'praise',
             'deviations',
             'conclusions',
-            'planImpact' => ['label', 'warnings'],
+            'planImpact' => ['label', 'warnings', 'level', 'message'],
             'confidence',
             'metrics',
         ]);
         $generated->assertJsonPath('workoutId', $workout->id);
         $generated->assertJsonPath('summary.durationStatus', 'OK');
         $generated->assertJsonPath('summary.hrStatus', 'OK');
+        $generated->assertJsonPath('planMatchStatus', 'matched');
         $generated->assertJsonPath('confidence', 'high');
+        $this->assertIsNumeric($generated->json('executionScore'));
         $generated->assertJsonPath('metrics.weeklyLoadContribution', 30);
-        $this->assertContains('Dobra robota: czas treningu byl zgodny z zalozeniem.', $generated->json('praise'));
-        $this->assertContains('Plus za trzymanie sie planu i wykonanie zaplanowanej jednostki.', $generated->json('praise'));
+        $this->assertArrayHasKey('planAware', $generated->json('metrics'));
+        $this->assertStringContainsString('zaplanowany bodziec', implode(' ', $generated->json('praise')));
 
         $generatedAgain = $this->postJson("/api/workouts/{$workout->id}/feedback/generate");
         $generatedAgain->assertOk();
@@ -2386,6 +2401,144 @@ XML;
         $fetched->assertOk();
         $fetched->assertJsonPath('workoutId', $workout->id);
         $this->assertSame($generated->json(), $fetched->json());
+    }
+
+    public function test_workout_feedback_marks_old_workout_as_historical_not_current_plan(): void
+    {
+        Carbon::setTestNow('2026-04-30T12:00:00Z');
+
+        try {
+            $workout = Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => [
+                    'startTimeIso' => '2026-02-14T10:00:00Z',
+                    'durationSec' => 1800,
+                    'movingTimeSec' => 1800,
+                    'distanceM' => 2950,
+                    'sport' => 'run',
+                    'intensityBuckets' => ['z1Sec' => 0, 'z2Sec' => 1800, 'z3Sec' => 0, 'z4Sec' => 0, 'z5Sec' => 0, 'totalSec' => 1800],
+                    'paceEquality' => 0.75,
+                    'hrDrift' => 1.0,
+                ],
+                'workout_meta' => [],
+                'source' => 'GARMIN',
+                'source_activity_id' => 'historical-feedback-1',
+                'dedupe_key' => 'GARMIN:historical-feedback-1',
+            ]);
+
+            $generated = $this->postJson("/api/workouts/{$workout->id}/feedback/generate");
+
+            $generated->assertOk();
+            $generated->assertJsonPath('summary.dateRelation', 'historical');
+            $generated->assertJsonPath('metrics.dateRelation', 'historical');
+            $generated->assertJsonPath('planMatchStatus', 'historical');
+            $generated->assertJsonPath('executionScore', null);
+            $this->assertStringContainsString('analiza archiwalna', (string) $generated->json('planImpact.label'));
+            $allText = implode(' ', array_merge(
+                $generated->json('praise') ?? [],
+                $generated->json('deviations') ?? [],
+                $generated->json('conclusions') ?? [],
+                [(string) $generated->json('planImpact.label'), (string) $generated->json('coachFeedback')]
+            ));
+            $this->assertStringNotContainsString('kontynuujemy', mb_strtolower($allText));
+            $this->assertStringNotContainsString('plan może iść dalej', mb_strtolower($allText));
+            $this->assertNotContains(
+                'Wniosek: trening wyglada spojnie z obecnym rytmem, plan moze isc dalej bez duzej korekty.',
+                $generated->json('conclusions')
+            );
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_workout_feedback_no_plan_has_null_score_and_low_confidence(): void
+    {
+        Carbon::setTestNow('2026-04-30T12:00:00Z');
+
+        try {
+            $workout = $this->feedbackWorkout([
+                'startTimeIso' => '2026-04-30T10:00:00Z',
+                'durationSec' => 1800,
+                'movingTimeSec' => 1800,
+                'distanceM' => 5000,
+                'sport' => 'run',
+            ], 'feedback-no-plan');
+
+            $generated = $this->postJson("/api/workouts/{$workout->id}/feedback/generate");
+
+            $generated->assertOk();
+            $generated->assertJsonPath('planMatchStatus', 'no_plan');
+            $generated->assertJsonPath('executionScore', null);
+            $generated->assertJsonPath('confidence', 'low');
+            $this->assertStringContainsString('Brak zapisanego planu', (string) $generated->json('planImpact.label'));
+            $this->assertStringContainsString('nie mam zapisanego planu', (string) $generated->json('coachFeedback'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_workout_feedback_matched_keeps_legacy_fields_and_adds_plan_aware_fields(): void
+    {
+        Carbon::setTestNow('2026-04-30T12:00:00Z');
+
+        try {
+            $this->insertFeedbackPlanSnapshot('2026-04-30', [
+                ['dateIso' => '2026-04-30', 'type' => 'easy', 'durationMin' => 30, 'intensityHint' => 'Z2'],
+            ]);
+            $workout = $this->feedbackWorkout([
+                'startTimeIso' => '2026-04-30T10:00:00Z',
+                'durationSec' => 1800,
+                'movingTimeSec' => 1800,
+                'distanceM' => 5000,
+                'sport' => 'run',
+                'intensityBuckets' => ['z1Sec' => 0, 'z2Sec' => 1800, 'z3Sec' => 0, 'z4Sec' => 0, 'z5Sec' => 0],
+            ], 'feedback-matched');
+
+            $generated = $this->postJson("/api/workouts/{$workout->id}/feedback/generate");
+
+            $generated->assertOk();
+            $generated->assertJsonPath('planMatchStatus', 'matched');
+            $this->assertIsNumeric($generated->json('executionScore'));
+            foreach (['summary', 'praise', 'deviations', 'conclusions', 'planImpact', 'confidence', 'metrics'] as $legacyKey) {
+                $this->assertArrayHasKey($legacyKey, $generated->json());
+            }
+            $this->assertArrayHasKey('label', $generated->json('planImpact'));
+            $this->assertArrayHasKey('warnings', $generated->json('planImpact'));
+            $this->assertArrayHasKey('level', $generated->json('planImpact'));
+            $this->assertArrayHasKey('message', $generated->json('planImpact'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_workout_feedback_wrong_sport_is_not_partial_and_has_warning_flag(): void
+    {
+        Carbon::setTestNow('2026-04-30T12:00:00Z');
+
+        try {
+            $this->insertFeedbackPlanSnapshot('2026-04-30', [
+                ['dateIso' => '2026-04-30', 'type' => 'easy', 'durationMin' => 30, 'intensityHint' => 'Z2'],
+            ]);
+            $workout = $this->feedbackWorkout([
+                'startTimeIso' => '2026-04-30T10:00:00Z',
+                'durationSec' => 1800,
+                'movingTimeSec' => 1800,
+                'distanceM' => 12000,
+                'sport' => 'bike',
+            ], 'feedback-wrong-sport');
+
+            $generated = $this->postJson("/api/workouts/{$workout->id}/feedback/generate");
+
+            $generated->assertOk();
+            $this->assertNotSame('partial', $generated->json('planMatchStatus'));
+            $generated->assertJsonPath('planMatchStatus', 'unplanned');
+            $this->assertContains('WRONG_SPORT', array_column($generated->json('riskFlags') ?? [], 'code'));
+            $generated->assertJsonPath('planImpact.warnings.WRONG_SPORT', true);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_training_signals_longrun_only_counts_runs_when_sport_tagged(): void
@@ -2427,5 +2580,273 @@ XML;
         } finally {
             Carbon::setTestNow();
         }
+    }
+
+    public function test_workout_feedback_returns_200_with_fallback_when_plan_aware_throws(): void
+    {
+        Carbon::setTestNow('2026-04-30T12:00:00Z');
+
+        try {
+            $workout = $this->feedbackWorkout([
+                'startTimeIso' => '2026-04-30T10:00:00Z',
+                'durationSec' => 1800,
+                'movingTimeSec' => 1800,
+                'distanceM' => 5000,
+                'sport' => 'run',
+            ], 'feedback-fallback-on-throw');
+
+            $this->mock(\App\Services\WorkoutPlanFeedbackService::class, function ($mock) {
+                $mock->shouldReceive('build')->andThrow(new \RuntimeException('Simulated plan-aware failure'));
+            });
+
+            $response = $this->postJson("/api/workouts/{$workout->id}/feedback/generate");
+
+            $response->assertOk();
+
+            // Stary kontrakt musi być zachowany
+            foreach (['feedbackId', 'workoutId', 'summary', 'praise', 'deviations', 'conclusions', 'confidence', 'metrics', 'planImpact'] as $legacyKey) {
+                $this->assertArrayHasKey($legacyKey, $response->json(), "Brak legacy pola: {$legacyKey}");
+            }
+            $this->assertArrayHasKey('label', $response->json('planImpact'));
+            $this->assertArrayHasKey('warnings', $response->json('planImpact'));
+
+            // Nowe pola — bezpieczny fallback
+            $response->assertJsonPath('planMatchStatus', 'unknown');
+            $response->assertJsonPath('executionScore', null);
+            $response->assertJsonPath('planMatchConfidence', 'low');
+
+            // riskFlags musi zawierać PLAN_AWARE_FEEDBACK_FAILED
+            $codes = array_column($response->json('riskFlags') ?? [], 'code');
+            $this->assertContains('PLAN_AWARE_FEEDBACK_FAILED', $codes);
+
+            // planImpact.warnings musi zawierać flagę
+            $this->assertTrue((bool) $response->json('planImpact.warnings.PLAN_AWARE_FEEDBACK_FAILED'));
+
+            // metrics.planAware istnieje jako tablica
+            $this->assertIsArray($response->json('metrics.planAware'));
+
+            // confidence jawnie low
+            $response->assertJsonPath('confidence', 'low');
+
+            // conclusions zawiera neutralny fallback
+            $this->assertContains(
+                'Trening został zapisany, ale decyzji planistycznej nie wyciągam bez pełnej analizy plan-vs-wykonanie.',
+                $response->json('conclusions') ?? []
+            );
+
+            // planImpact.label zawiera neutralny fallback
+            $this->assertStringContainsString(
+                'Brak decyzji planistycznej',
+                (string) $response->json('planImpact.label')
+            );
+
+            // brak legacy tekstów bez polskich znaków
+            $allText = mb_strtolower(implode(' ', array_merge(
+                $response->json('conclusions') ?? [],
+                $response->json('praise') ?? [],
+                $response->json('deviations') ?? [],
+                [(string) $response->json('planImpact.label')]
+            )));
+            $this->assertStringNotContainsString('kontynuujemy zalozony rytm', $allText);
+            $this->assertStringNotContainsString('tetno bylo stabilne', $allText);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // E2E: plan generation → snapshot → feedback actually uses snapshot
+    // -------------------------------------------------------------------------
+
+    /**
+     * End-to-end: GET /api/weekly-plan writes a plan_snapshot; a workout created
+     * on the exact date of a planned session must yield planMatchStatus = matched
+     * or partial (never no_plan).
+     */
+    public function test_feedback_uses_snapshot_written_by_weekly_plan_endpoint(): void
+    {
+        // 2026-04-27 is a Monday → weekStart = 2026-04-27
+        Carbon::setTestNow('2026-04-27T12:00:00Z');
+
+        try {
+            // Step 1: Generate weekly plan — PlanSnapshotService writes a row.
+            $planResponse = $this->getJson('/api/weekly-plan?days=28');
+            $planResponse->assertOk();
+
+            // Step 2: Confirm snapshot was written.
+            $this->assertGreaterThanOrEqual(
+                1,
+                DB::table('plan_snapshots')->where('user_id', 1)->count(),
+                'GET /api/weekly-plan must write at least one plan_snapshots row'
+            );
+
+            // Step 3: Pick the first non-rest session from the snapshot.
+            $row = DB::table('plan_snapshots')->where('user_id', 1)->latest('id')->first();
+            $this->assertNotNull($row, 'plan_snapshots must have a row after plan generation');
+            $snapshotData    = json_decode((string) $row->snapshot_json, true);
+            $runningSessions = array_values(array_filter(
+                $snapshotData['sessions'] ?? [],
+                fn (array $s) => ! in_array($s['type'] ?? '', ['rest', 'off'], true)
+                    && (int) ($s['durationMin'] ?? 0) > 0
+            ));
+            $this->assertNotEmpty($runningSessions, 'Snapshot must contain at least one runnable session');
+
+            $plannedSession  = $runningSessions[0];
+            $sessionDateIso  = (string) $plannedSession['dateIso'];  // e.g. '2026-04-27'
+            $plannedDuration = max(30, (int) ($plannedSession['durationMin'] ?? 40));
+
+            // Step 4: Create a workout on the exact planned date with matching effort.
+            $workout = Workout::create([
+                'user_id'    => 1,
+                'action'     => 'save',
+                'kind'       => 'training',
+                'summary'    => [
+                    'startTimeIso'     => $sessionDateIso . 'T10:00:00Z',
+                    'durationSec'      => $plannedDuration * 60,
+                    'movingTimeSec'    => $plannedDuration * 60,
+                    'distanceM'        => $plannedDuration * 165,
+                    'sport'            => 'run',
+                    'intensityBuckets' => [
+                        'z1Sec' => 0, 'z2Sec' => $plannedDuration * 60,
+                        'z3Sec' => 0, 'z4Sec' => 0, 'z5Sec' => 0,
+                    ],
+                ],
+                'source'     => 'MANUAL_UPLOAD',
+                'dedupe_key' => 'MANUAL_UPLOAD:e2e-plan-to-feedback',
+            ]);
+
+            // Step 5: Generate feedback.
+            $feedback = $this->postJson("/api/workouts/{$workout->id}/feedback/generate");
+            $feedback->assertOk();
+
+            // Step 6: planMatchStatus must NOT be no_plan — the snapshot was there.
+            $planMatchStatus = $feedback->json('planMatchStatus');
+            $this->assertNotSame(
+                'no_plan',
+                $planMatchStatus,
+                "planMatchStatus must not be no_plan when a snapshot covers {$sessionDateIso}; got: {$planMatchStatus}"
+            );
+            $this->assertContains(
+                $planMatchStatus,
+                ['matched', 'partial', 'unplanned', 'missed_related'],
+                'planMatchStatus must be a real plan-aware value'
+            );
+            $this->assertIsNumeric(
+                $feedback->json('executionScore'),
+                'executionScore must be numeric when a plan session was found'
+            );
+            $this->assertNotNull(
+                $feedback->json('planVsExecution.actual'),
+                'planVsExecution.actual must not be null'
+            );
+            $this->assertNotNull(
+                $feedback->json('planVsExecution.planned'),
+                'planVsExecution.planned must not be null for exact date match'
+            );
+
+            // Legacy contract intact.
+            foreach (['feedbackId', 'workoutId', 'summary', 'coachFeedback', 'planImpact', 'metrics'] as $key) {
+                $this->assertArrayHasKey($key, $feedback->json(), "Legacy field missing: {$key}");
+            }
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    /**
+     * End-to-end: when a workout's date is outside every stored snapshot window
+     * the feedback must not pretend a plan match happened.
+     * planMatchStatus must be no_plan (recent-past) or historical (old workout).
+     */
+    public function test_feedback_gives_no_plan_when_workout_predates_all_snapshots(): void
+    {
+        // 2026-04-27 is a Monday; plan snapshot covers 2026-04-27 – 2026-05-03.
+        Carbon::setTestNow('2026-04-27T12:00:00Z');
+
+        try {
+            // Generate plan → snapshot covers current week only.
+            $this->getJson('/api/weekly-plan?days=28')->assertOk();
+            $this->assertGreaterThanOrEqual(
+                1,
+                DB::table('plan_snapshots')->where('user_id', 1)->count(),
+                'plan_snapshots must have at least one row'
+            );
+
+            // Workout ~90 days before the snapshot window.
+            $workout = Workout::create([
+                'user_id'    => 1,
+                'action'     => 'save',
+                'kind'       => 'training',
+                'summary'    => [
+                    'startTimeIso'  => '2026-01-26T10:00:00Z',
+                    'durationSec'   => 1800,
+                    'movingTimeSec' => 1800,
+                    'distanceM'     => 5000,
+                    'sport'         => 'run',
+                ],
+                'source'     => 'MANUAL_UPLOAD',
+                'dedupe_key' => 'MANUAL_UPLOAD:e2e-outside-window',
+            ]);
+
+            $feedback = $this->postJson("/api/workouts/{$workout->id}/feedback/generate");
+            $feedback->assertOk();
+
+            // ~90 days ago → historical; no snapshot covers 2026-01-26.
+            $planMatchStatus = $feedback->json('planMatchStatus');
+            $this->assertContains(
+                $planMatchStatus,
+                ['no_plan', 'historical'],
+                "Workout predating all snapshots must yield no_plan or historical, not '{$planMatchStatus}'"
+            );
+            $this->assertNull(
+                $feedback->json('planVsExecution.planned'),
+                'planVsExecution.planned must be null when no snapshot covers the workout date'
+            );
+
+            // Legacy contract intact even in no-plan path.
+            foreach (['feedbackId', 'workoutId', 'summary', 'planImpact', 'metrics'] as $key) {
+                $this->assertArrayHasKey($key, $feedback->json(), "Legacy field missing: {$key}");
+            }
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $summary
+     */
+    private function feedbackWorkout(array $summary, string $sourceActivityId): Workout
+    {
+        return Workout::create([
+            'user_id' => 1,
+            'action' => 'save',
+            'kind' => 'training',
+            'summary' => $summary,
+            'workout_meta' => [],
+            'source' => 'MANUAL_UPLOAD',
+            'source_activity_id' => $sourceActivityId,
+            'dedupe_key' => 'MANUAL_UPLOAD:'.$sourceActivityId,
+        ]);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $sessions
+     */
+    private function insertFeedbackPlanSnapshot(string $dateIso, array $sessions): void
+    {
+        $windowStart = Carbon::parse($dateIso)->startOfDay()->toISOString();
+        $windowEnd = Carbon::parse($dateIso)->endOfDay()->toISOString();
+
+        DB::table('plan_snapshots')->insert([
+            'user_id' => 1,
+            'snapshot_json' => json_encode([
+                'windowStartIso' => $windowStart,
+                'windowEndIso' => $windowEnd,
+                'sessions' => $sessions,
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'window_start_iso' => $windowStart,
+            'window_end_iso' => $windowEnd,
+            'created_at' => now(),
+        ]);
     }
 }

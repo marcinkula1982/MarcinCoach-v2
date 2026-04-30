@@ -189,6 +189,11 @@ class TrainingFeedbackV2Service
         $hasPaceData = $distanceM > 0 && $durationSec > 0 && $pace !== null;
         $rpe = is_numeric($meta['rpe'] ?? null) ? (int) $meta['rpe'] : null;
         $painFlag = (bool) ($meta['painFlag'] ?? false);
+        $workoutDate = $this->workoutDate($workout);
+        $daysFromToday = $workoutDate !== null
+            ? Carbon::now()->startOfDay()->diffInDays($workoutDate->copy()->startOfDay(), false)
+            : null;
+        $isHistoricalWorkout = $daysFromToday !== null && $daysFromToday < -3;
 
         $compliance = $this->loadCompliance($workout->id);
         $signals = FeedbackSignalsMapper::mapFeedbackToSignals($feedback);
@@ -249,7 +254,9 @@ class TrainingFeedbackV2Service
             $conclusions[] = 'Feedback oparty jest na manualnym check-inie, bez danych HR/GPS.';
         }
 
-        if ($painFlag) {
+        if ($isHistoricalWorkout) {
+            $planImpact = 'analiza archiwalna: ten trening nie koryguje bezposrednio biezacego planu; uzywamy go jako kontekstu historii i trendu';
+        } elseif ($painFlag) {
             $planImpact = 'lagodzimy kolejne dni po zgloszeniu bolu';
         } elseif ($rpe !== null && $rpe >= 8) {
             $planImpact = 'kolejny dzien powinien byc spokojniejszy po wysokim RPE';
@@ -279,12 +286,66 @@ class TrainingFeedbackV2Service
         $metrics['rpe'] = $rpe;
         $metrics['painFlag'] = $painFlag;
         $metrics['dataSource'] = $isManualCheckIn ? 'manual_check_in' : (string) ($workout->source ?? '');
-        $conclusions[] = $this->conclusionFromSignals($signals);
+        $metrics['daysFromToday'] = $daysFromToday;
+        $metrics['dateRelation'] = $this->dateRelation($daysFromToday);
+
+        try {
+            $planAware = app(WorkoutPlanFeedbackService::class)->build($workout, $feedback, $compliance, $signals);
+            $planAwareImpact = is_array($planAware['planImpact'] ?? null) ? $planAware['planImpact'] : [];
+            $warnings = array_merge($warnings, $this->riskFlagsToWarnings($planAware['riskFlags'] ?? []));
+            $metrics['planAware'] = is_array($planAware['metrics'] ?? null) ? $planAware['metrics'] : [];
+
+            $praise = is_array($planAware['praise'] ?? null) ? $planAware['praise'] : [];
+            $deviations = is_array($planAware['deviations'] ?? null) ? $planAware['deviations'] : [];
+            $conclusions = is_array($planAware['conclusions'] ?? null) ? $planAware['conclusions'] : [];
+            $planImpact = (string) ($planAwareImpact['message'] ?? $planImpact);
+            $planMatchConf = (string) ($planAware['confidence'] ?? $confidence);
+            $confidenceRank = ['low' => 0, 'medium' => 1, 'high' => 2];
+            $confidence = ($confidenceRank[$confidence] ?? 0) <= ($confidenceRank[$planMatchConf] ?? 0)
+                ? $confidence
+                : $planMatchConf;
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('WorkoutPlanFeedbackService::build failed', [
+                'workoutId' => $workout->id ?? null,
+                'userId' => $workout->user_id ?? null,
+                'exceptionClass' => get_class($e),
+            ]);
+            $planAware = [
+                'dateRelation' => null,
+                'planMatchStatus' => 'unknown',
+                'executionScore' => null,
+                'workoutDataConfidence' => 'medium',
+                'planMatchConfidence' => 'low',
+                'coachFeedback' => 'Analiza plan-vs-wykonanie jest chwilowo niedostępna. Dane o samym treningu zostały zapisane.',
+                'planVsExecution' => ['planned' => null, 'actual' => null, 'differences' => []],
+                'missingSessions' => [],
+                'riskFlags' => [['code' => 'PLAN_AWARE_FEEDBACK_FAILED', 'level' => 'high', 'message' => 'Analiza planu treningowego nie powiodła się.']],
+                'nextStep' => 'Dane treningu zostały zapisane. Wróć do feedbacku lub odśwież po chwili.',
+            ];
+            $planAwareImpact = [];
+            $warnings['PLAN_AWARE_FEEDBACK_FAILED'] = true;
+            $metrics['planAware'] = [];
+            $praise = [];
+            $deviations = ['Nie udało się wykonać pełnego porównania treningu z planem.'];
+            $conclusions = ['Trening został zapisany, ale decyzji planistycznej nie wyciągam bez pełnej analizy plan-vs-wykonanie.'];
+            $planImpact = 'Brak decyzji planistycznej z powodu niedostępnej analizy plan-vs-wykonanie.';
+            $confidence = 'low';
+        }
 
         return [
             'feedbackId' => $feedbackId,
             'workoutId' => (int) $workout->id,
             'generatedAtIso' => $createdAt,
+            'dateRelation' => $planAware['dateRelation'] ?? null,
+            'planMatchStatus' => $planAware['planMatchStatus'] ?? null,
+            'executionScore' => $planAware['executionScore'] ?? null,
+            'workoutDataConfidence' => $planAware['workoutDataConfidence'] ?? null,
+            'planMatchConfidence' => $planAware['planMatchConfidence'] ?? null,
+            'coachFeedback' => $planAware['coachFeedback'] ?? null,
+            'planVsExecution' => $planAware['planVsExecution'] ?? null,
+            'missingSessions' => $planAware['missingSessions'] ?? [],
+            'riskFlags' => $planAware['riskFlags'] ?? [],
+            'nextStep' => $planAware['nextStep'] ?? null,
             'summary' => [
                 'character' => $feedback['character'] ?? 'easy',
                 'distanceKm' => $distanceM > 0 ? round($distanceM / 1000.0, 2) : null,
@@ -293,6 +354,8 @@ class TrainingFeedbackV2Service
                 'planCompliance' => $planCompliance,
                 'durationStatus' => $compliance['durationStatus'] ?? null,
                 'hrStatus' => $compliance['hrStatus'] ?? null,
+                'workoutDate' => $workoutDate?->toDateString(),
+                'dateRelation' => $metrics['dateRelation'],
             ],
             'praise' => array_values(array_unique($praise)),
             'deviations' => array_values(array_unique($deviations)),
@@ -300,6 +363,8 @@ class TrainingFeedbackV2Service
             'planImpact' => [
                 'label' => $planImpact,
                 'warnings' => $warnings,
+                'level' => $planAwareImpact['level'] ?? null,
+                'message' => $planAwareImpact['message'] ?? null,
             ],
             'confidence' => $confidence,
             'metrics' => $metrics,
@@ -324,10 +389,36 @@ class TrainingFeedbackV2Service
     }
 
     /**
+     * @return array<string,bool>
+     */
+    private function riskFlagsToWarnings(mixed $riskFlags): array
+    {
+        if (! is_array($riskFlags)) {
+            return [];
+        }
+
+        $warnings = [];
+        foreach ($riskFlags as $flag) {
+            if (! is_array($flag)) {
+                continue;
+            }
+            $code = trim((string) ($flag['code'] ?? ''));
+            if ($code !== '') {
+                $warnings[$code] = true;
+            }
+        }
+
+        return $warnings;
+    }
+
+    /**
      * @param array<string,mixed> $signals
      */
-    private function conclusionFromSignals(array $signals): string
+    private function conclusionFromSignals(array $signals, bool $isHistoricalWorkout = false): string
     {
+        if ($isHistoricalWorkout) {
+            return 'Wniosek: to trening historyczny, wiec nie oceniamy go jako wykonania dzisiejszego planu; liczy sie jako element historii obciazenia i regularnosci.';
+        }
         if (($signals['warnings']['overloadRisk'] ?? false) === true) {
             return 'Wniosek: obciazenie z tej jednostki podbija ryzyko, wiec kolejny trening powinien byc spokojny.';
         }
@@ -339,6 +430,38 @@ class TrainingFeedbackV2Service
         }
 
         return 'Wniosek: trening wyglada spojnie z obecnym rytmem, plan moze isc dalej bez duzej korekty.';
+    }
+
+    private function workoutDate(Workout $workout): ?Carbon
+    {
+        $summary = is_array($workout->summary) ? $workout->summary : [];
+        $startTimeIso = $summary['startTimeIso'] ?? null;
+        if (is_string($startTimeIso) && $startTimeIso !== '') {
+            try {
+                return Carbon::parse($startTimeIso);
+            } catch (\Throwable) {
+                // fallback below
+            }
+        }
+
+        return $workout->created_at instanceof Carbon ? $workout->created_at : null;
+    }
+
+    private function dateRelation(?int $daysFromToday): string
+    {
+        if ($daysFromToday === null) {
+            return 'unknown';
+        }
+        if ($daysFromToday < -3) {
+            return 'historical';
+        }
+        if ($daysFromToday < 0) {
+            return 'recent_past';
+        }
+        if ($daysFromToday === 0) {
+            return 'today';
+        }
+        return 'future';
     }
 
     /**

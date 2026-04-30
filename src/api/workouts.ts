@@ -33,6 +33,29 @@ export type WorkoutFeedback = {
   feedbackId: number
   workoutId: number
   generatedAtIso: string
+  dateRelation?: 'current' | 'historical' | 'future' | 'unknown' | string | null
+  planMatchStatus?:
+    | 'matched'
+    | 'partial'
+    | 'unplanned'
+    | 'missed_related'
+    | 'historical'
+    | 'no_plan'
+    | 'unknown'
+    | string
+    | null
+  executionScore?: number | null
+  workoutDataConfidence?: 'high' | 'medium' | 'low' | string | null
+  planMatchConfidence?: 'high' | 'medium' | 'low' | string | null
+  coachFeedback?: string | null
+  planVsExecution?: {
+    planned?: Record<string, unknown> | null
+    actual?: Record<string, unknown> | null
+    differences?: Array<Record<string, unknown>>
+  } | null
+  missingSessions?: Array<Record<string, unknown>>
+  riskFlags?: Array<Record<string, unknown>>
+  nextStep?: string | null
   summary: {
     character?: string
     distanceKm?: number | null
@@ -41,6 +64,8 @@ export type WorkoutFeedback = {
     planCompliance?: string
     durationStatus?: string | null
     hrStatus?: string | null
+    workoutDate?: string | null
+    dateRelation?: string | null
   }
   praise: string[]
   deviations: string[]
@@ -48,6 +73,8 @@ export type WorkoutFeedback = {
   planImpact: {
     label: string
     warnings?: Record<string, boolean>
+    level?: 'none' | 'low' | 'medium' | 'high' | string | null
+    message?: string | null
   }
   confidence: string
   metrics: Record<string, unknown>
