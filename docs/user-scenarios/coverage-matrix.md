@@ -112,11 +112,11 @@ Wartości w kolumnach FE / BE / Test / Smoke:
 
 | ID | Nazwa | Pri | FE | BE | Test | Smoke | Status |
 |---|---|---|---|---|---|---|---|
-| US-STRAVA-001 | Połączenie konta (OAuth, prod needs credentials) | P0 | ~ | ~ | ~ | ✗ | unknown |
-| US-STRAVA-002 | Sync historii Strava (prod needs smoke) | P0 | ~ | ~ | ~ | ✗ | unknown |
+| US-STRAVA-001 | Połączenie konta (OAuth, prod needs credentials) | P0 | ~ | ✓ | ✓ | ✗ | partial |
+| US-STRAVA-002 | Sync historii Strava (prod needs smoke) | P0 | ~ | ✓ | ✓ | ✗ | partial |
 | US-STRAVA-003 | Webhook dla nowych aktywności | P1 | ✗ | ✗ | ✗ | ✗ | missing |
 | US-STRAVA-004 | Brak zgody na zakres / scope | P1 | ? | ? | ✗ | ✗ | unknown |
-| US-STRAVA-005 | Refresh access_token | P0 | — | ~ | ✗ | ✗ | partial |
+| US-STRAVA-005 | Refresh access_token | P0 | — | ✓ | ✓ | ✗ | partial |
 
 ### Polar / Suunto / Coros
 
@@ -196,15 +196,15 @@ Wartości w kolumnach FE / BE / Test / Smoke:
 
 ### Według statusu
 - **implemented:** 35 (~33%)
-- **partial:** 39 (~36%)
+- **partial:** 41 (~38%)
 - **missing:** 24 (~23%)
-- **unknown:** 9 (~8%)
+- **unknown:** 7 (~7%)
 
 ### P0 alone
 - **P0 implemented:** 25
-- **P0 partial:** 27
+- **P0 partial:** 29
 - **P0 missing:** 5
-- **P0 unknown:** 3
+- **P0 unknown:** 1
 
 ### Krytyczne luki P0 missing
 1. US-PRIVACY-001 — zgody przy rejestracji
@@ -223,10 +223,10 @@ Wartości w kolumnach FE / BE / Test / Smoke:
 7. US-AUTH-011/012 — lokalny API smoke jest po EP-010; automatyczny smoke produkcyjny/cron nadal potrzebny
 8. US-MANUAL-005 — pominięcie zaplanowanego treningu ma UI/API bez tworzenia treningu 0 km oraz auto-refresh planu; plan impact i produkcyjny/browser E2E smoke nadal wymagają walidacji
 9. US-PRIVACY-002 — odłączenie integracji usuwa lokalne konto integracji i ma UI confirm, ale revoke tokena u providera nadal wymaga osobnego kroku
+10. US-STRAVA-001/002 — lokalny backend i testy sa gotowe, ale produkcyjne credentials Stravy sa brakujace i live smoke nie zostal wykonany
 
 ### Krytyczne luki P0 unknown (do potwierdzenia smoke/testem)
-1. US-STRAVA-001/002 — produkcyjne credentials + smoke z realnym kontem
-2. US-PRIVACY-006 — klasyfikacja i obsługa danych zdrowotnych jako wrażliwych
+1. US-PRIVACY-006 — klasyfikacja i obsługa danych zdrowotnych jako wrażliwych
 
 ## Aktualizacja matrycy
 

@@ -22,7 +22,7 @@ Onboarding data-first:
 | Zrodlo | Status | Integracja | Uwagi |
 |---|---|---|---|
 | Pliki TCX/GPX/FIT | Wdrozony fallback backendowy, wymaga hardeningu FIT | `POST /api/workouts/upload`; parsery TCX, GPX i FIT w Laravel | TCX i GPX sa pokryte testami. FIT ma parser MVP, ale wymaga testu na realnym pliku `.fit`. Raw TCX jest zapisywany, raw GPX/FIT na razie tylko parsowany do `workouts.summary`. |
-| Strava | Czesc backendowa wdrozona | OAuth2, token exchange, sync aktywnosci | Oficjalne API. Wymaga produkcyjnych credentials, smoke i pilnowania scope/prywatnosci. |
+| Strava | Backend gotowy lokalnie, produkcyjny smoke zablokowany credentials | OAuth2, token exchange, callback bez sesyjnych headerow, refresh token, sync aktywnosci | Oficjalne API. 2026-04-30: produkcyjne `.env` na IQHost nie ma jeszcze `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_REDIRECT_URI`, `STRAVA_SCOPES`, wiec live smoke czeka na konfiguracje aplikacji Strava. |
 | Garmin | Wdrozony jako MVP wysokiego ryzyka | zewnetrzny connector `GARMIN_CONNECTOR_BASE_URL`, `python-garminconnect`, tryb `stub/live` | Nieoficjalna sciezka przez Garmin Connect. Sync aktywnosci i wysylka zaplanowanych workoutow do kalendarza Garmina sa obslugiwane przez connector; TCX upload zostaje fallbackiem. |
 | Garmin Event Dashboard | Spike / research | `https://connect.garmin.com/app/event-dashboard` | Do sprawdzenia: "Moje wydarzenia", wyszukiwanie eventow po nazwie/lokalizacji/dacie, import eventu jako race A/B/C. Nie blokuje MVP, bo fallbackiem jest reczne wpisanie startu w profilu. |
 | Polar | Planowane | Polar AccessLink API | Oficjalna integracja po stabilizacji Strava/Garmin. |
@@ -43,6 +43,26 @@ Onboarding data-first:
 - potwierdzenie uzytkownika: trening widoczny/dziala na koncie Garmin.
 
 To potwierdza, ze `python-garminconnect` w obecnej integracji obsluguje nie tylko sync aktywnosci do MarcinCoach, ale tez upload zaplanowanego treningu do Garmin Connect i przypisanie go do kalendarza. Nadal jest to nieoficjalna sciezka Garmin Connect, wiec utrzymujemy jawne ryzyka auth/MFA/rate limit/regulaminu.
+
+## Strava - produkcyjny setup
+
+Stan 2026-04-30:
+- backendowy flow OAuth jest przygotowany pod prawdziwy redirect ze Stravy: `state` jest jednorazowym ticketem powiazanym z userem, a callback nie wymaga headerow sesji z frontendu,
+- po sukcesie callback wraca na `FRONTEND_URL` z `?integration=strava&status=connected`,
+- sync pobiera domyslnie ostatnie 30 dni, a frontend wysyla `fromIso` przy kliknieciu synchronizacji,
+- testy lokalne pokrywaja connect/callback/sync, browser redirect bez headerow sesji i refresh wygaslego access tokena,
+- live smoke na produkcji nie zostal wykonany, bo credentials Stravy nie sa ustawione na IQHost.
+
+Wymagana konfiguracja aplikacji Strava:
+- w Strava API Settings ustawic `Authorization Callback Domain`: `api.coach.host89998.iqhs.pl`,
+- w produkcyjnym `.env` Laravel ustawic:
+  - `FRONTEND_URL=https://coach.host89998.iqhs.pl`,
+  - `STRAVA_CLIENT_ID=<client id ze Stravy>`,
+  - `STRAVA_CLIENT_SECRET=<client secret ze Stravy>`,
+  - `STRAVA_REDIRECT_URI=https://api.coach.host89998.iqhs.pl/api/integrations/strava/callback`,
+  - `STRAVA_SCOPES=activity:read_all,profile:read_all`.
+
+Uwaga do logowania: jesli Strava prosi o kod przy logowaniu, to jest kod logowania do konta Strava. Po tym kroku OAuth nadal zwraca standardowy `code` w callbacku, ktory backend wymienia na tokeny.
 
 ## Suunto - tymczasowy most testowy
 

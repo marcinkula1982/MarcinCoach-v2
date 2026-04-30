@@ -34,7 +34,7 @@ class IntegrationsParityTest extends TestCase
         $connect->assertOk();
         $state = (string) $connect->json('state');
         $this->assertNotSame('', $state);
-        $this->assertNotNull(Cache::get("strava:oauth:state:1:{$state}"));
+        $this->assertSame(1, Cache::get("strava:oauth:state:{$state}")['userId'] ?? null);
 
         Http::fake([
             'https://www.strava.com/oauth/token' => Http::response([
@@ -61,6 +61,73 @@ class IntegrationsParityTest extends TestCase
         $sync = $this->postJson('/api/integrations/strava/sync');
         $sync->assertOk();
         $sync->assertJsonStructure(['syncRunId', 'fetched', 'imported', 'deduped', 'failed']);
+    }
+
+    public function test_strava_browser_callback_redirects_to_frontend_without_session_headers(): void
+    {
+        putenv('FRONTEND_URL=https://coach.example');
+        putenv('STRAVA_CLIENT_ID=123');
+        putenv('STRAVA_CLIENT_SECRET=abc');
+        putenv('STRAVA_REDIRECT_URI=http://localhost:8000/api/integrations/strava/callback');
+
+        $connect = $this->postJson('/api/integrations/strava/connect');
+        $state = (string) $connect->json('state');
+
+        Http::fake([
+            'https://www.strava.com/oauth/token' => Http::response([
+                'access_token' => 'token-1',
+                'refresh_token' => 'refresh-1',
+                'expires_at' => now()->addHour()->timestamp,
+                'athlete' => ['id' => 42],
+                'scope' => 'activity:read_all',
+            ], 200),
+        ]);
+
+        $callback = $this->get('/api/integrations/strava/callback?code=code-1&state=' . $state);
+        $callback->assertRedirect('https://coach.example?integration=strava&status=connected');
+    }
+
+    public function test_strava_refreshes_expired_access_token_before_sync(): void
+    {
+        putenv('STRAVA_CLIENT_ID=123');
+        putenv('STRAVA_CLIENT_SECRET=abc');
+
+        \App\Models\IntegrationAccount::create([
+            'user_id' => 1,
+            'provider' => 'strava',
+            'external_user_id' => '42',
+            'access_token' => 'expired-token',
+            'refresh_token' => 'refresh-old',
+            'access_token_expires_at' => now()->subMinute(),
+            'status' => 'connected',
+        ]);
+
+        Http::fake([
+            'https://www.strava.com/oauth/token' => Http::response([
+                'access_token' => 'token-new',
+                'refresh_token' => 'refresh-new',
+                'expires_at' => now()->addHour()->timestamp,
+            ], 200),
+            'https://www.strava.com/api/v3/athlete/activities*' => Http::response([], 200),
+        ]);
+
+        $sync = $this->postJson('/api/integrations/strava/sync', [
+            'fromIso' => '2026-04-01',
+        ]);
+
+        $sync->assertOk();
+        $this->assertDatabaseHas('integration_accounts', [
+            'provider' => 'strava',
+            'access_token' => 'token-new',
+            'refresh_token' => 'refresh-new',
+            'status' => 'connected',
+        ]);
+
+        Http::assertSent(fn ($request) =>
+            $request->url() === 'https://www.strava.com/oauth/token'
+            && $request['grant_type'] === 'refresh_token'
+            && $request['refresh_token'] === 'refresh-old'
+        );
     }
 
     public function test_garmin_connect_sync_and_status_contract(): void

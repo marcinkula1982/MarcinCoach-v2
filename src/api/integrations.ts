@@ -33,7 +33,10 @@ export async function syncGarmin(days = 30): Promise<{ imported: number; deduped
   return res.data
 }
 
-export async function syncStrava(): Promise<{ imported: number; deduped: number }> {
-  const res = await client.post<{ imported: number; deduped: number }>('/integrations/strava/sync')
+export async function syncStrava(days = 30): Promise<{ imported: number; deduped: number }> {
+  const fromIso = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10)
+  const res = await client.post<{ imported: number; deduped: number }>('/integrations/strava/sync', {
+    fromIso,
+  })
   return res.data
 }

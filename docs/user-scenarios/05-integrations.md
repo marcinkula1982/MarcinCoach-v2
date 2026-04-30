@@ -5,7 +5,7 @@ Plik obejmuje: Garmin (sync historii, auto-sync, send workout, MFA), Strava (OAu
 Realny stan 30.04.2026:
 - Garmin: history sync **partial-implemented** (smoke 26.04 dla 30 dni / 9 aktywności), auto-sync **missing**, send workout **implemented** (smoke 26.04, workout id 1548384239).
 - Garmin MFA: connector ścieżka istnieje (`GARMIN_MFA_CODE`), UI nie ma pola — **partial / risky**.
-- Strava: OAuth/callback/sync — backend lokalnie tak, produkcja **unknown / needs credentials**. Mapowanie pól partial (id, start, elapsed, distance, sport/type, HR avg/max).
+- Strava: OAuth/callback/sync — backend lokalnie tak, callback produkcyjny nie wymaga headerow sesji, frontend obsluguje powrot z OAuth; produkcja **blocked / needs credentials**. Mapowanie pol partial (id, start, elapsed, distance, sport/type, HR avg/max).
 - Polar: **missing**.
 - Suunto: oficjalne API Zone **missing**, tymczasowy Sports Tracker test bridge **partial/backend implemented**.
 - Coros: **missing** (P2, future), fallback FIT/TCX import.
@@ -300,7 +300,7 @@ User chce odłączyć Garmin (np. przed usunięciem konta MarcinCoach).
 
 **Typ:** happy path
 **Persona:** P-MULTI
-**Status:** unknown (backend lokalnie tak, produkcja needs credentials/smoke)
+**Status:** partial (backend lokalnie tak, produkcja needs credentials/smoke)
 **Priorytet:** P0
 
 ### Stan wejściowy
@@ -315,12 +315,14 @@ User w fazie 1 onboardingu klika "Strava".
 2. Backend redirects do `https://www.strava.com/oauth/authorize?...`.
 3. User na Stravie autoryzuje aplikację.
 4. Strava redirects do callback `https://api.coach.host89998.iqhs.pl/api/integrations/strava/callback?code=...`.
-5. Backend wymienia code na access_token.
-6. Backend pobiera historię.
+5. Backend wymienia code na access_token bez wymagania sesyjnych headerow frontendu.
+6. Backend wraca do frontendu z `?integration=strava&status=connected`.
+7. User uruchamia sync historii z Ustawienia -> Integracje.
 
 ### Oczekiwane API
 - `POST /api/integrations/strava/connect` → URL do Strava OAuth.
-- `GET /api/integrations/strava/callback?code=...` → exchange + sync.
+- `GET /api/integrations/strava/callback?code=...&state=...` → exchange + redirect do frontendu.
+- `POST /api/integrations/strava/sync` → sync 30 dni historii.
 
 ### Oczekiwane zmiany danych
 - `integration_accounts`: nowy wpis dla strava.
@@ -334,10 +336,10 @@ User w fazie 1 onboardingu klika "Strava".
 
 ### Testy / smoke
 - Manual smoke produkcyjny z realnym kontem Strava — **TODO przed launchem**.
-- Test backend: mock OAuth flow.
+- Test backend: mock OAuth flow, browser callback bez sesyjnych headerow, refresh wygaslego tokena.
 
 ### Uwagi produktowe
-**Status produkcyjny: unknown.** Zgodnie z `integrations.md` wymaga produkcyjnych credentials i smoke. Bez tego Strava jest na liście ale nie wiadomo czy działa end-to-end.
+**Status produkcyjny: blocked.** 2026-04-30 produkcyjne `.env` na IQHost nie ma jeszcze `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_REDIRECT_URI`, `STRAVA_SCOPES`, wiec live smoke czeka na konfiguracje aplikacji Strava.
 
 ---
 
@@ -345,14 +347,14 @@ User w fazie 1 onboardingu klika "Strava".
 
 **Typ:** happy path
 **Persona:** P-MULTI
-**Status:** unknown (produkcja needs credentials/smoke)
+**Status:** partial (backend/local test tak, produkcja needs credentials/smoke)
 **Priorytet:** P0
 
 ### Stan wejściowy
 User właśnie połączył Stravę.
 
 ### Oczekiwane zachowanie
-- Backend pobiera 30 dni aktywności przez Strava API.
+- Backend pobiera 30 dni aktywnosci przez Strava API.
 - Per aktywność: pobiera detale i zapisuje.
 
 ### Oczekiwane API
@@ -373,7 +375,7 @@ User właśnie połączył Stravę.
 - Duplikaty pomijane.
 
 ### Testy / smoke
-- Test backend: mock Strava API → import 5 aktywności.
+- Test backend: mock Strava API -> import i refresh tokena.
 - Manual smoke produkcyjny z realnym kontem Strava — TODO przed publicznym launchem.
 
 ### Uwagi produktowe
@@ -441,7 +443,7 @@ User na Stravie odrzuca część scope (np. nie zgadza się na "private activiti
 
 **Typ:** happy path (transparent)
 **Persona:** P-MULTI
-**Status:** partial (backend ma logikę, do potwierdzenia)
+**Status:** partial (backend ma logike i test, produkcja needs smoke)
 **Priorytet:** P0
 
 ### Stan wejściowy
@@ -459,7 +461,7 @@ Strava token wygasł (po 6h).
 - Jeśli refresh_token też wygasł — UI pokazuje "Połącz ponownie ze Stravą".
 
 ### Testy / smoke
-- Test backend: expired token + refresh.
+- Test backend: expired token + refresh (`IntegrationsParityTest`).
 
 ---
 

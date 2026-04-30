@@ -219,6 +219,7 @@ const App = () => {
   const [authRefreshToken, setAuthRefreshToken] = useState(0)
   const [planRefreshToken, setPlanRefreshToken] = useState(0)
   const [activeTab, setActiveTab] = useState<AppTabId>('dashboard')
+  const [integrationNotice, setIntegrationNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
   // Auth headers are injected by the axios interceptor in `src/api/client.ts`
 
@@ -238,6 +239,25 @@ const App = () => {
       if (identifierFromUrl) {
         setUsername(identifierFromUrl)
       }
+    }
+
+    const integration = params.get('integration')
+    const integrationStatus = params.get('status')
+    if (integration === 'strava') {
+      setActiveTab('settings')
+      setIntegrationNotice(
+        integrationStatus === 'connected'
+          ? {
+              type: 'ok',
+              text: 'Strava połączona. Możesz teraz uruchomić synchronizację historii.',
+            }
+          : {
+              type: 'err',
+              text: `Nie udało się połączyć Stravy: ${params.get('error') || 'spróbuj ponownie'}.`,
+            },
+      )
+      setAuthRefreshToken((prev) => prev + 1)
+      window.history.replaceState({}, '', window.location.pathname)
     }
   }, [])
 
@@ -1075,6 +1095,18 @@ const App = () => {
                     )
                   })}
                 </nav>
+
+                {integrationNotice && (
+                  <div
+                    className={`mb-6 rounded-lg px-4 py-3 text-sm ${
+                      integrationNotice.type === 'ok'
+                        ? 'bg-emerald-900/40 text-emerald-200'
+                        : 'bg-rose-900/40 text-rose-200'
+                    }`}
+                  >
+                    {integrationNotice.text}
+                  </div>
+                )}
 
                 {activeTab === 'dashboard' && (
                   <>

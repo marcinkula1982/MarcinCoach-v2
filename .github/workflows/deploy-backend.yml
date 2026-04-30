@@ -21,14 +21,16 @@ jobs:
           fetch-depth: 0
 
       - name: Setup SSH
+        id: setup_ssh
         env:
           IQHOST_SSH_KEY: ${{ secrets.IQHOST_SSH_KEY }}
         run: |
           set -euo pipefail
 
           if [ -z "${IQHOST_SSH_KEY}" ]; then
-            echo "::error title=Missing IQHOST_SSH_KEY::Add the private deploy key as a repository Actions secret named IQHOST_SSH_KEY."
-            exit 1
+            echo "::warning title=Missing IQHOST_SSH_KEY::Backend deploy skipped. Add the private deploy key as a repository Actions secret named IQHOST_SSH_KEY."
+            echo "configured=false" >> "${GITHUB_OUTPUT}"
+            exit 0
           fi
 
           mkdir -p ~/.ssh
@@ -36,13 +38,16 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keygen -y -f ~/.ssh/id_ed25519 > /dev/null
           ssh-keyscan -H h3.iqhs.eu >> ~/.ssh/known_hosts
+          echo "configured=true" >> "${GITHUB_OUTPUT}"
 
       - name: Push to IQHost
+        if: steps.setup_ssh.outputs.configured == 'true'
         run: |
           git remote add iqhost host89998@h3.iqhs.eu:domains/coach.host89998.iqhs.pl/coach.git
           git push iqhost main --force
 
       - name: Run migrations
+        if: steps.setup_ssh.outputs.configured == 'true'
         run: |
           ssh host89998@h3.iqhs.eu \
             "cd /home/host89998/domains/api.coach.host89998.iqhs.pl/app-laravel/backend-php && php artisan migrate --force"
