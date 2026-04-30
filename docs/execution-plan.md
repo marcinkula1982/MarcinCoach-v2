@@ -34,7 +34,7 @@ Nie zastępuje:
 
 | Kolejność | ID | Pri | Task | Scenariusze | Definition of done | Walidacja |
 |---:|---|---|---|---|---|---|
-| 37 | EP-038 | P0-MVP | Datowo świadoma analiza potreningowa plan vs wykonanie | US-PLAN-005, US-PLAN-006, US-PLAN-007, US-PLAN-008, US-PLAN-009, US-PLAN-010, US-PLAN-018, US-IMPORT-011 | Po loginie/imporcie/check-inie user widzi opisową analizę względem dat planu: dopasowanie treningu do sesji planu, stopień wykonania, odchylenia czas/intensywność/dystans, brakujące sesje między ostatnimi treningami oraz jasne rozróżnienie treningu historycznego od bieżącego planu | Do wykonania: backend testy plan-vs-actual, UI smoke import/login -> feedback -> plan, przypadki historyczny / dziś / luka między treningami |
+| 37 | EP-038 | P0-MVP | Datowo świadoma analiza potreningowa plan vs wykonanie | US-PLAN-005, US-PLAN-006, US-PLAN-007, US-PLAN-008, US-PLAN-009, US-PLAN-010, US-PLAN-018, US-IMPORT-011 | Po loginie/imporcie/check-inie user widzi opisową analizę względem dat planu: dopasowanie treningu do sesji planu, stopień wykonania, odchylenia czas/intensywność/dystans, brakujące sesje między ostatnimi treningami oraz jasne rozróżnienie treningu historycznego od bieżącego planu | **Backend done:** `PlanSnapshotService` podpięty do `WeeklyPlanController` + `RollingPlanController`; 13 testów `PlanSnapshotIntegrationTest`; 2 testy E2E `WorkoutsTest --filter=feedback` potwierdzają łańcuch snapshot→feedback. **Pozostaje:** UI smoke import/login -> feedback -> plan; przypadek luki między treningami w UI. |
 
 ## NEXT
 
