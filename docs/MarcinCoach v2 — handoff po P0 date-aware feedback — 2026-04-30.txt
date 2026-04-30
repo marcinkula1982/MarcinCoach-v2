@@ -1,0 +1,76 @@
+To jest aktualny handoff projektowy po 30.04.2026. 
+Traktować jako źródło kontekstu dla kolejnych sesji AI.
+Nie zastępuje kodu ani testów. 
+W razie sprzeczności źródłem prawdy jest aktualny kod repo oraz docs/status.md, docs/execution-plan.md, docs/roadmap.md i docs/integrations.md.
+
+MarcinCoach v2 — aktualny stan po 30.04.2026
+
+Repo:
+C:\Users\marci\Documents\GitHub\MarcinCoach-v2
+
+Aktualne źródła prawdy:
+- docs/status.md
+- docs/execution-plan.md
+- docs/roadmap.md
+- docs/integrations.md
+- docs/handoff-feedback-p0.md
+- docs/user-scenarios/
+- realny kod w src/ i backend-php/
+
+Nie używać jako źródła prawdy:
+- docs/archive/
+- stare raporty marcincoach_status_po_*
+- stare plany m3_m4_beyond_*
+
+Deploy:
+- Front: lokalnie npm run build, potem deploy-front.ps1.
+- Nie budować frontu na IQHost.
+- Backend: git push iqhost main.
+- Front: https://coach.host89998.iqhs.pl
+- API: https://api.coach.host89998.iqhs.pl/api
+- Healthcheck: https://api.coach.host89998.iqhs.pl/api/health
+
+Stan git/deploy:
+- GitHub main aktualny.
+- Backend wypchnięty na IQHost.
+- API healthcheck OK.
+- Front smoke OK.
+- Ostatnie testy lokalne: php artisan test → 358 passed / 1985 assertions.
+- npm run build → OK.
+
+Najważniejsze domknięcie:
+P0 datowo świadomy feedback potreningowy jest technicznie domknięty backendowo i wdrożony.
+Zrobione:
+- WorkoutPlanFeedbackService podpięty do TrainingFeedbackV2Service.
+- Stary kontrakt feedbacku zachowany.
+- Nowe pola dodane addytywnie:
+  dateRelation, planMatchStatus, executionScore, workoutDataConfidence, planMatchConfidence, coachFeedback, planVsExecution, missingSessions, riskFlags, planImpact.level/message, nextStep.
+- Fallback chroni endpoint przed 500.
+- confidence zachowuje legacy znaczenie ogólnej pewności, nie jest prostym aliasem planMatchConfidence.
+- PlanSnapshotService zapisuje snapshoty planu z WeeklyPlanController i RollingPlanController.
+- E2E testy potwierdzają łańcuch: plan → snapshot → workout → feedback.
+- Backend deploy na IQHost wykonany.
+
+Pozostaje przy EP-038:
+- UI smoke: login/import lub manual check-in → plan → trening → feedback.
+- Sprawdzenie w UI, czy feedback pokazuje plan-vs-execution sensownie.
+- Przypadek luki między treningami w UI.
+- Nie zaczynać nowych funkcji przed smoke.
+
+Ważna decyzja produktowa:
+MarcinCoach nie jest „AI coachem”. Backend jest silnikiem trenerskim, AI tylko eskalacją.
+Manual check-in bez integracji i bez pliku jest P0/core MVP.
+
+Aktualny pomysł na kolejny krok:
+Puścić audyt Opusem jako senior developer/system integrity audit:
+- urwane ścieżki danych,
+- backend bez frontu,
+- UI bez backendu,
+- martwy kod,
+- rozjazdy dokumentacja–kod,
+- plan-aware feedback,
+- manual check-in,
+- integracje,
+- test gaps,
+- ryzyka domeny treningowej.
+Audyt ma być bez zmian w kodzie, bez refaktoru, bez deployu.
