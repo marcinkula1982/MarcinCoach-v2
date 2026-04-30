@@ -13,8 +13,13 @@ class StravaOAuthService
         $clientId = (string) env('STRAVA_CLIENT_ID', '');
         $redirectUri = (string) env('STRAVA_REDIRECT_URI', '');
         $scopes = (string) env('STRAVA_SCOPES', 'activity:read_all,profile:read_all');
+
+        if ($clientId === '' || $redirectUri === '') {
+            return ['ok' => false, 'error' => 'STRAVA_NOT_CONFIGURED'];
+        }
+
         $state = bin2hex(random_bytes(16));
-        Cache::put($this->stateKey($userId, $state), '1', now()->addMinutes(10));
+        Cache::put($this->stateKey($state), ['userId' => $userId], now()->addMinutes(10));
 
         $url = 'https://www.strava.com/oauth/authorize?' . http_build_query([
             'client_id' => $clientId,
@@ -25,12 +30,17 @@ class StravaOAuthService
             'state' => $state,
         ]);
 
-        return ['url' => $url, 'state' => $state];
+        return ['ok' => true, 'url' => $url, 'state' => $state];
     }
 
-    public function handleCallback(int $userId, string $code, string $state): array
+    public function handleCallback(string $code, string $state): array
     {
-        if (!Cache::pull($this->stateKey($userId, $state))) {
+        $payload = Cache::pull($this->stateKey($state));
+        $userId = is_array($payload) && is_numeric($payload['userId'] ?? null)
+            ? (int) $payload['userId']
+            : null;
+
+        if ($userId === null) {
             return ['ok' => false, 'error' => 'INVALID_STATE'];
         }
 
@@ -65,7 +75,12 @@ class StravaOAuthService
         ];
         $account->save();
 
-        return ['ok' => true, 'accountId' => $account->id];
+        return ['ok' => true, 'accountId' => $account->id, 'userId' => $userId];
+    }
+
+    public function discardState(string $state): void
+    {
+        Cache::forget($this->stateKey($state));
     }
 
     public function getValidAccessToken(int $userId): ?string
@@ -105,8 +120,8 @@ class StravaOAuthService
         return $account->access_token;
     }
 
-    private function stateKey(int $userId, string $state): string
+    private function stateKey(string $state): string
     {
-        return sprintf('strava:oauth:state:%d:%s', $userId, $state);
+        return sprintf('strava:oauth:state:%s', $state);
     }
 }

@@ -1,5 +1,8 @@
 name: deploy-backend
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches:
@@ -18,10 +21,20 @@ jobs:
           fetch-depth: 0
 
       - name: Setup SSH
+        env:
+          IQHOST_SSH_KEY: ${{ secrets.IQHOST_SSH_KEY }}
         run: |
+          set -euo pipefail
+
+          if [ -z "${IQHOST_SSH_KEY}" ]; then
+            echo "::error title=Missing IQHOST_SSH_KEY::Add the private deploy key as a repository Actions secret named IQHOST_SSH_KEY."
+            exit 1
+          fi
+
           mkdir -p ~/.ssh
-          echo "${{ secrets.IQHOST_SSH_KEY }}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${IQHOST_SSH_KEY}" | sed 's/\r$//' > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 > /dev/null
           ssh-keyscan -H h3.iqhs.eu >> ~/.ssh/known_hosts
 
       - name: Push to IQHost
