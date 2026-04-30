@@ -1115,16 +1115,25 @@ const App = () => {
               aria-label="MarcinCoach workout workspace"
             >
               <div>
-                <div className="flex flex-col gap-1">
-                  <div className="text-xs uppercase tracking-[0.25em] text-indigo-300/80">
-                    Ten konkretny trening
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                  <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-lg shadow-black/20 sm:h-24 sm:w-24">
+                    <img
+                      src="/marcincoach-logo.png"
+                      alt="MarcinCoach logo"
+                      className="h-full w-full object-cover"
+                    />
                   </div>
-                  <h1 className="text-3xl font-bold leading-tight text-white sm:text-4xl">
-                    MarcinCoach
-                  </h1>
-                  <p className="text-sm text-slate-400">
-                    Treningi, plan tygodniowy i sygnały adaptacji w jednym miejscu.
-                  </p>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs uppercase tracking-[0.25em] text-indigo-300/80">
+                      Ten konkretny trening
+                    </div>
+                    <h1 className="text-3xl font-bold leading-tight text-white sm:text-4xl">
+                      MarcinCoach
+                    </h1>
+                    <p className="text-sm text-slate-400">
+                      Treningi, plan tygodniowy i sygnały adaptacji w jednym miejscu.
+                    </p>
+                  </div>
                 </div>
                 {(currentFileName || currentWorkoutDate) && (
                   <p className="mt-1 text-sm text-slate-400">
