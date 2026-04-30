@@ -34,7 +34,7 @@ Nie zastępuje:
 
 | Kolejność | ID | Pri | Task | Scenariusze | Definition of done | Walidacja |
 |---:|---|---|---|---|---|---|
-| 15 | EP-015 | P1 | Strava produkcyjny smoke + credentials | US-STRAVA-001, US-STRAVA-002, US-STRAVA-005 | OAuth i sync historii działają z realnym kontem na produkcji | produkcyjny smoke Strava, bez budowania frontu na IQHost |
+| - | - | - | Brak aktywnego taska w NOW | - | - | - |
 
 ## NEXT
 
@@ -108,3 +108,4 @@ Po zamknięciu aktualnego `NOW` przenieś tutaj kolejny pakiet z sekcji `LATER`.
 | 2026-04-30 | EP-012 | Pełny formularz startów/races w Profilu | US-RACE-001, US-RACE-002, US-RACE-003 | `RacesManager` w `ProfileEditSection.tsx`: dodaj/edytuj/usuń start z nazwą, datą, dystansem (preset + custom), priorytetem A/B/C i targetTime; zapis przez `PUT /api/me/profile` z pełną tablicą races; `php artisan test` -> 332 passed, 1784 assertions; `npm run build` -> OK; manual smoke CRUD nieuruchomiony; deploy nieuruchomiony |
 | 2026-04-30 | EP-013 | Profile Quality Score widoczny i użyteczny | US-ANALYSIS-008 | `ProfileQualityScore` w `ProfileEditSection.tsx`: score/100, pasek postępu, lista brakujących elementów z czytelnym opisem co uzupełnić; dane z `quality.breakdown` backendu; `php artisan test` -> 332 passed, 1784 assertions; `npm run build` -> OK; manual smoke nieuruchomiony; deploy nieuruchomiony |
 | 2026-04-30 | EP-014 | Globalny widok integracji w Ustawieniach | US-INTEGRATION-001, US-GARMIN-007, US-PRIVACY-002 | Dodano `GET /api/integrations/status` i `DELETE /api/integrations/{provider}` (usuwa `integration_accounts`); `IntegrationsSettingsSection.tsx` pokazuje Garmin/Strava/Polar/Suunto/Coros z real statusem, last sync, przyciskami sync/connect/disconnect, fallback info dla przyszłych integracji; `php artisan test tests\Feature\Api\IntegrationsParityTest.php` -> 7 passed, 51 assertions; `php artisan test` -> 332 passed, 1784 assertions; `npm run build` -> OK; UI smoke nieuruchomiony; deploy nieuruchomiony |
+| 2026-04-30 | EP-015 | Strava produkcyjny smoke + credentials | US-STRAVA-001, US-STRAVA-002, US-STRAVA-005 | Status taska: done jako smoke prep. Uszczelniono produkcyjny flow Strava: browser callback bez headerów sesji, powrót frontu `?integration=strava&status=connected`, sync historii 30 dni i refresh wygasłego tokena. Dowód: `php artisan test tests\Feature\Api\IntegrationsParityTest.php` -> 9 passed, 56 assertions; `php artisan test` -> 334 passed, 1789 assertions; `npm run build` -> OK. Produkcyjny live smoke pozostaje nieuruchomiony do czasu ustawienia credentials Stravy na IQHost. |
