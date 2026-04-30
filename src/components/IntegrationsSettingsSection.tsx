@@ -68,6 +68,17 @@ function formatLastSync(iso: string | null): string {
   }
 }
 
+function apiErrorMessage(error: any, fallback: string): string {
+  const code = error?.response?.data?.error
+  const message = error?.response?.data?.message
+
+  if (code === 'STRAVA_NOT_CONFIGURED') {
+    return 'Strava nie jest jeszcze skonfigurowana na serwerze: brakuje client id / secret.'
+  }
+
+  return code || message || error?.message || fallback
+}
+
 type CardProps = {
   meta: ProviderMeta
   status: IntegrationStatus | null
@@ -191,8 +202,9 @@ export default function IntegrationsSettingsSection({ onGarminSyncComplete }: Pr
         showMsg('ok', `Strava: zaimportowano ${result.imported}, pominiętych duplikatów ${result.deduped}.`)
       }
       await load()
-    } catch {
-      showMsg('err', `Błąd synchronizacji ${key}.`)
+    } catch (error: any) {
+      showMsg('err', apiErrorMessage(error, `Blad synchronizacji ${key}.`))
+      return
     } finally {
       setBusyProvider(null)
     }
@@ -205,8 +217,9 @@ export default function IntegrationsSettingsSection({ onGarminSyncComplete }: Pr
       await disconnectIntegration(key)
       showMsg('ok', `${key} odłączone. Twoje treningi pozostają w MarcinCoach.`)
       await load()
-    } catch {
-      showMsg('err', `Błąd odłączania ${key}.`)
+    } catch (error: any) {
+      showMsg('err', apiErrorMessage(error, `Blad odlaczania ${key}.`))
+      return
     } finally {
       setBusyProvider(null)
     }
@@ -221,8 +234,9 @@ export default function IntegrationsSettingsSection({ onGarminSyncComplete }: Pr
         return
       }
       showMsg('err', `Połączenie ${key} dostępne tylko przez onboarding lub konfigurację ręczną.`)
-    } catch {
-      showMsg('err', `Błąd połączenia ${key}.`)
+    } catch (error: any) {
+      showMsg('err', apiErrorMessage(error, `Blad polaczenia ${key}.`))
+      return
     } finally {
       setBusyProvider(null)
     }

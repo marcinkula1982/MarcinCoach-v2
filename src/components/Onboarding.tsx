@@ -81,6 +81,9 @@ const parseProfileConstraints = (raw: string | null | undefined): Record<string,
   }
 }
 
+const apiErrorCode = (error: any): string =>
+  typeof error?.response?.data?.error === 'string' ? error.response.data.error : ''
+
 export default function Onboarding({ onCompleted, initialProfile = null }: OnboardingProps) {
   const [phase, setPhase] = useState<'source' | 'questions'>('source')
   const [source, setSource] = useState<Source | null>(null)
@@ -186,6 +189,10 @@ export default function Onboarding({ onCompleted, initialProfile = null }: Onboa
 
       window.location.href = url
     } catch (error: any) {
+      if (apiErrorCode(error) === 'STRAVA_NOT_CONFIGURED') {
+        setSourceError('Strava nie jest jeszcze skonfigurowana na serwerze: brakuje client id / secret.')
+        return
+      }
       const message = error?.response?.data?.message || error?.message || 'Nie udało się połączyć Stravy.'
       setSourceError(message)
     } finally {
