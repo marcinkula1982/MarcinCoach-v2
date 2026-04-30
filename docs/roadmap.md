@@ -67,6 +67,12 @@ Nie robimy w MVP:
    - sprawdzic import wybranego eventu jako race A/B/C,
    - zakonczyc spike jasnym statusem: stabilne / kruche / niedostepne.
 
+## Infrastruktura / jednorazowe zadania
+
+- Dodac sekret `IQHOST_SSH_KEY` w GitHub → Settings → Secrets → Actions (klucz `C:\Users\marci\.ssh\id_ed25519`) — odblokowuje auto-deploy backendu po kazdy `git push origin main`.
+- Po pierwszym udanym deploy workflow: uruchomic `php artisan migrate --force` na IQHost lub poczekac az workflow zrobi to automatycznie.
+- Dodac favicon do `public/` i wgrac przez `deploy-front.ps1` — eliminuje `favicon.ico 404` w konsoli.
+
 ## Later
 
 - Smog/pogoda z lokalna precyzja lepsza niz samo miasto.

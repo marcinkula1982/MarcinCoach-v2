@@ -24,6 +24,7 @@ Każdy scenariusz ma status, więc dokument jest też mapą rzeczywistości — 
 | [it-consultation-scenarios.md](it-consultation-scenarios.md) | Scalony dokument konsultacyjny dla działu IT: schematy, decyzje, pełna mapa scenariuszy |
 | [coverage-matrix.md](coverage-matrix.md) | Macierz pokrycia: scenariusz × frontend × backend × test × smoke × status |
 | [gaps-and-next-steps.md](gaps-and-next-steps.md) | Czego brakuje, co blokuje MVP, rekomendowana kolejność wdrażania |
+| [../functional-schema.md](../functional-schema.md) | Odtworzony schemat funkcjonalny portalu: moduły, ekrany, przepływy, API i status MVP |
 
 ## Persony
 
