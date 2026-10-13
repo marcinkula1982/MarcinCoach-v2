@@ -98,4 +98,43 @@ class ManualCheckInServiceTest extends TestCase
         $this->assertDatabaseCount('manual_check_ins', 1);
         $this->assertDatabaseCount('workouts', 0);
     }
+
+    public function test_skipped_check_in_refreshes_training_week_actuals(): void
+    {
+        $service = app(ManualCheckInService::class);
+
+        // 2026-04-29 is a Wednesday -> week starts Monday 2026-04-27.
+        DB::table('training_weeks')->insert([
+            'user_id' => 1,
+            'week_start_date' => '2026-04-27',
+            'week_end_date' => '2026-05-03',
+            'planned_total_min' => 200,
+            'planned_quality_count' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $service->upsert(1, [
+            'plannedSessionDate' => '2026-04-29',
+            'status' => 'done',
+            'plannedDurationMin' => 40,
+            'durationMin' => 40,
+        ]);
+
+        $afterDone = DB::table('training_weeks')->where('user_id', 1)->where('week_start_date', '2026-04-27')->first();
+        $this->assertSame(40, (int) $afterDone->actual_total_min);
+        $this->assertSame(0, (int) $afterDone->goal_met);
+
+        $service->upsert(1, [
+            'plannedSessionDate' => '2026-04-29',
+            'status' => 'skipped',
+            'skipReason' => 'no_time',
+        ]);
+
+        $afterSkip = DB::table('training_weeks')->where('user_id', 1)->where('week_start_date', '2026-04-27')->first();
+        $this->assertSame(0, (int) $afterSkip->actual_total_min, 'skip must recompute week actuals after removing the synthetic workout');
+        $this->assertSame(0, (int) $afterSkip->actual_quality_count);
+        $this->assertSame(0, (int) $afterSkip->goal_met);
+        $this->assertDatabaseCount('workouts', 0);
+    }
 }

@@ -510,6 +510,169 @@ class PlanningParityTest extends TestCase
         }
     }
 
+    public function test_rolling_plan_reacts_to_skipped_long_run(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-21T12:00:00Z'));
+
+        try {
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => ['startTimeIso' => '2026-04-16T09:00:00Z', 'durationSec' => 3000, 'distanceM' => 8000, 'intensity' => 28],
+                'source' => 'manual',
+                'dedupe_key' => 'planning-skipped-long-run',
+            ]);
+            $this->putJson('/api/me/profile', [
+                'availability' => ['runningDays' => ['tue', 'thu', 'sun']],
+            ])->assertOk();
+
+            $baseline = $this->getJson('/api/rolling-plan?days=14');
+            $baseline->assertOk();
+            $baselineCodes = $baseline->json('appliedAdjustmentsCodes');
+            $this->assertNotContains('missed_workout_rebalance', $baselineCodes);
+            $this->assertNull($this->skipDrivenReduceLoad(), 'no skip-driven reduce_load before any check-in');
+
+            // Skipped long run (Sunday 2026-04-19) — 2 days before "now".
+            $this->postJson('/api/workouts/manual-check-in', [
+                'plannedSessionDate' => '2026-04-19',
+                'status' => 'skipped',
+                'plannedType' => 'long',
+                'plannedDurationMin' => 90,
+                'skipReason' => 'no_time',
+            ])->assertCreated();
+
+            $adaptation = app(\App\Services\TrainingSignalsService::class)->getSignalsForUser(1)['adaptation'];
+            $this->assertTrue($adaptation['missedKeyWorkout']);
+            $this->assertSame(1, $adaptation['skippedSessions7d']);
+
+            $afterOneSkip = $this->getJson('/api/rolling-plan?days=14');
+            $afterOneSkip->assertOk();
+            $codes = $afterOneSkip->json('appliedAdjustmentsCodes');
+            $this->assertContains('missed_workout_rebalance', $codes);
+            $this->assertNull($this->skipDrivenReduceLoad(), 'one skip must not trigger reduce_load');
+
+            // Makeup easy session lands on a non-running day (first rest day: Monday).
+            $plannedBaseline = count(array_filter($baseline->json('sessions'), fn ($s) => ($s['type'] ?? 'rest') !== 'rest'));
+            $plannedAfter = count(array_filter($afterOneSkip->json('sessions'), fn ($s) => ($s['type'] ?? 'rest') !== 'rest'));
+            $this->assertGreaterThan($plannedBaseline, $plannedAfter);
+            $mondays = array_values(array_filter($afterOneSkip->json('sessions'), fn ($s) => ($s['day'] ?? null) === 'mon'));
+            $this->assertNotEmpty($mondays);
+            $this->assertSame('easy', $mondays[0]['type']);
+            $this->assertSame(30, $mondays[0]['durationMin']);
+
+            // Adaptation payload stays internal.
+            $this->assertArrayNotHasKey('adaptation', $this->getJson('/api/training-context')->json('signals'));
+
+            // Second skip within 7 days -> reduce_load 15% joins the adjustments.
+            $this->postJson('/api/workouts/manual-check-in', [
+                'plannedSessionDate' => '2026-04-16',
+                'status' => 'skipped',
+                'plannedType' => 'easy',
+                'plannedDurationMin' => 40,
+                'skipReason' => 'no_time',
+            ])->assertCreated();
+
+            $this->assertSame(2, app(\App\Services\TrainingSignalsService::class)->getSignalsForUser(1)['adaptation']['skippedSessions7d']);
+            $afterTwoSkips = $this->getJson('/api/rolling-plan?days=14');
+            $afterTwoSkips->assertOk();
+            $this->assertContains('reduce_load', $afterTwoSkips->json('appliedAdjustmentsCodes'));
+            $this->assertContains('missed_workout_rebalance', $afterTwoSkips->json('appliedAdjustmentsCodes'));
+            $reduceLoad = $this->skipDrivenReduceLoad();
+            $this->assertNotNull($reduceLoad, 'two skips must produce a skip-driven reduce_load');
+            $this->assertGreaterThanOrEqual(15, (int) $reduceLoad['params']['reductionPct']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    /**
+     * reduce_load adjustment for user 1 whose decision basis includes skippedSessions7d, or null.
+     *
+     * @return array<string,mixed>|null
+     */
+    private function skipDrivenReduceLoad(): ?array
+    {
+        $context = app(\App\Services\TrainingContextService::class)->getContextForUser(1, 28);
+        $blockContext = is_array($context['blockContext'] ?? null) ? $context['blockContext'] : null;
+        $feedback = app(\App\Services\TrainingFeedbackV2Service::class)->getLatestFeedbackSignalsForUser(1);
+        $adjustments = app(\App\Services\TrainingAdjustmentsService::class)->generate($context, $feedback, $blockContext);
+
+        foreach ($adjustments['adjustments'] as $adj) {
+            if (($adj['code'] ?? null) !== 'reduce_load') {
+                continue;
+            }
+            $signals = $adj['decisionBasis']['signals'] ?? [];
+            if (is_array($signals) && in_array('skippedSessions7d', $signals, true)) {
+                return $adj;
+            }
+        }
+
+        return null;
+    }
+
+    public function test_rolling_plan_unchanged_for_user_without_check_ins(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-21T12:00:00Z'));
+
+        try {
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => ['startTimeIso' => '2026-04-19T09:00:00Z', 'durationSec' => 3000, 'distanceM' => 8000, 'intensity' => 28],
+                'source' => 'manual',
+                'dedupe_key' => 'planning-no-check-ins',
+            ]);
+            $this->putJson('/api/me/profile', [
+                'availability' => ['runningDays' => ['tue', 'thu', 'sun']],
+            ])->assertOk();
+
+            // New signals are neutral when there are no check-ins.
+            $adaptation = app(\App\Services\TrainingSignalsService::class)->getSignalsForUser(1)['adaptation'];
+            $this->assertFalse($adaptation['missedKeyWorkout']);
+            $this->assertSame(0, $adaptation['skippedSessions7d']);
+            $this->assertSame([], $adaptation['skipReasons7d']);
+
+            $rolling = $this->getJson('/api/rolling-plan?days=14');
+            $rolling->assertOk();
+            $codes = $rolling->json('appliedAdjustmentsCodes');
+            $this->assertNotContains('missed_workout_rebalance', $codes);
+            $this->assertNull($this->skipDrivenReduceLoad());
+            foreach ($rolling->json('sessions') as $session) {
+                if (($session['type'] ?? 'rest') === 'rest') {
+                    continue;
+                }
+                $this->assertContains($session['day'], ['tue', 'thu', 'sun']);
+            }
+
+            // Parity: the plan equals what the planner produces when the new
+            // adaptation keys are removed from the context entirely.
+            $this->getJson('/api/weekly-plan?days=28')->assertOk(); // warm memory
+            $viaApi = $this->getJson('/api/weekly-plan?days=28');
+            $viaApi->assertOk();
+
+            $context = app(\App\Services\TrainingContextService::class)->getContextForUser(1, 28);
+            unset($context['signals']['adaptation']['skippedSessions7d'], $context['signals']['adaptation']['skipReasons7d']);
+            $blockContext = is_array($context['blockContext'] ?? null) ? $context['blockContext'] : null;
+            $feedback = app(\App\Services\TrainingFeedbackV2Service::class)->getLatestFeedbackSignalsForUser(1);
+            $adjustments = app(\App\Services\TrainingAdjustmentsService::class)->generate($context, $feedback, $blockContext);
+            $legacyPlan = app(\App\Services\WeeklyPlanService::class)->generatePlan($context, $adjustments, $blockContext);
+            $legacySessions = array_values(array_map(function (array $s): array {
+                unset($s['techniqueFocus'], $s['surfaceHint']);
+                return $s;
+            }, $legacyPlan['sessions']));
+
+            // JSON round-trip on the service side so float/int representation matches the HTTP payload.
+            $normalize = static fn (array $value): array => json_decode(json_encode($value), true);
+            $this->assertSame($normalize($legacySessions), $viaApi->json('sessions'));
+            $this->assertSame($normalize($legacyPlan['summary']), $viaApi->json('summary'));
+            $this->assertSame(array_column($adjustments['adjustments'], 'code'), $viaApi->json('appliedAdjustmentsCodes'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_weekly_plan_persists_training_weeks_row_with_block_context(): void
     {
         Workout::create([

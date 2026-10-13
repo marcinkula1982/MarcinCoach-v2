@@ -178,6 +178,34 @@ class WeeklyPlanServiceTest extends TestCase
         $this->assertLessThanOrEqual(90, (int) $long[0]['durationMin']);
     }
 
+    public function test_missed_key_workout_caps_load_scale_at_one(): void
+    {
+        // weeklyLoad 80 vs rolling baseline 120 -> ratio 0.67 < 0.85 -> legacy loadScale 1.10.
+        $lowLoad = ['weeklyLoad' => 80.0, 'rolling4wLoad' => 480.0];
+
+        $baseline = $this->service->generatePlan($this->baseContext(['signals' => $lowLoad]), ['adjustments' => []]);
+        $baselineLong = array_values(array_filter($baseline['sessions'], fn ($s) => ($s['type'] ?? null) === 'long'))[0];
+        $this->assertSame(100, $baselineLong['durationMin']); // 90 * 1.10 = 99 -> 100
+
+        $capped = $this->service->generatePlan($this->baseContext([
+            'signals' => $lowLoad + ['adaptation' => ['missedKeyWorkout' => true]],
+        ]), ['adjustments' => []]);
+        $cappedLong = array_values(array_filter($capped['sessions'], fn ($s) => ($s['type'] ?? null) === 'long'))[0];
+        $this->assertSame(90, $cappedLong['durationMin']); // loadScale capped to 1.00
+
+        // Cap must not raise an already lower scale (ratio > 1.15 -> 0.90).
+        $highLoad = ['weeklyLoad' => 180.0, 'rolling4wLoad' => 480.0, 'adaptation' => ['missedKeyWorkout' => true]];
+        $reduced = $this->service->generatePlan($this->baseContext(['signals' => $highLoad]), ['adjustments' => []]);
+        $reducedLong = array_values(array_filter($reduced['sessions'], fn ($s) => ($s['type'] ?? null) === 'long'))[0];
+        $this->assertSame(80, $reducedLong['durationMin']);
+
+        // missedKeyWorkout=false keeps baseline.
+        $unchanged = $this->service->generatePlan($this->baseContext([
+            'signals' => $lowLoad + ['adaptation' => ['missedKeyWorkout' => false]],
+        ]), ['adjustments' => []]);
+        $this->assertSame($baseline['sessions'], $unchanged['sessions']);
+    }
+
     public function test_missed_workout_rebalance_skips_unavailable_days(): void
     {
         $adjustments = [

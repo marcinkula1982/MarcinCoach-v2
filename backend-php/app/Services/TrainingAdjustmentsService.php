@@ -218,6 +218,36 @@ class TrainingAdjustmentsService
             ];
         }
 
+        // Pakiet B / Zmiana 2: skipped manual check-ins in the last 7 days.
+        $skippedSessions7d = (int) ($adaptation['skippedSessions7d'] ?? 0);
+        if ($skippedSessions7d >= 2) {
+            $adjustments[] = [
+                'code' => 'reduce_load',
+                'severity' => 'medium',
+                'rationale' => 'Two or more planned sessions skipped in the last 7 days',
+                'evidence' => [['key' => 'skippedSessions7d', 'value' => $skippedSessions7d]],
+                'params' => ['reductionPct' => 15],
+                'adaptationType' => 'volume',
+                'confidence' => 'medium',
+                'decisionBasis' => ['signals' => ['skippedSessions7d']],
+            ];
+        }
+
+        $skipReasons7d = is_array($adaptation['skipReasons7d'] ?? null) ? $adaptation['skipReasons7d'] : [];
+        $skipReasons7d = array_map(fn ($r) => strtolower(trim((string) $r)), $skipReasons7d);
+        if (in_array('illness', $skipReasons7d, true)) {
+            $adjustments[] = [
+                'code' => 'recovery_focus',
+                'severity' => 'medium',
+                'rationale' => 'Session skipped due to illness in the last 7 days — one week of reduced load',
+                'evidence' => [['key' => 'skipReasons7d', 'value' => 'illness']],
+                'params' => ['replaceHardSessionWithEasy' => true, 'longRunReductionPct' => 20],
+                'adaptationType' => 'intensity',
+                'confidence' => 'medium',
+                'decisionBasis' => ['signals' => ['skipReason=illness']],
+            ];
+        }
+
         if (($adaptation['harderThanPlanned'] ?? false) === true) {
             $adjustments[] = [
                 'code' => 'harder_than_planned_guard',
@@ -316,6 +346,8 @@ class TrainingAdjustmentsService
                     'harderThanPlanned' => ($signals['adaptation']['harderThanPlanned'] ?? false),
                     'easierThanPlannedStreak' => (int) ($signals['adaptation']['easierThanPlannedStreak'] ?? 0),
                     'controlStartRecent' => ($signals['adaptation']['controlStartRecent'] ?? false),
+                    'skippedSessions7d' => (int) ($signals['adaptation']['skippedSessions7d'] ?? 0),
+                    'skipReasons7d' => $signals['adaptation']['skipReasons7d'] ?? [],
                 ],
                 'output' => [
                     'adjustmentCount' => count($normalized),

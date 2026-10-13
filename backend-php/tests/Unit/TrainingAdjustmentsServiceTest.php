@@ -276,6 +276,93 @@ class TrainingAdjustmentsServiceTest extends TestCase
         $this->assertContains('control_start_followup', $codes);
     }
 
+    // --- Pakiet B / Zmiana 2: skipped manual check-ins ---
+
+    public function test_two_skips_in_week_produce_reduce_load_15(): void
+    {
+        $ctx = $this->baseContext([
+            'signals' => ['adaptation' => ['skippedSessions7d' => 2, 'skipReasons7d' => ['no_time']]],
+        ]);
+
+        $result = $this->service->generate($ctx);
+
+        $this->assertCount(1, $result['adjustments']);
+        $adj = $result['adjustments'][0];
+        $this->assertSame('reduce_load', $adj['code']);
+        $this->assertSame(15, $adj['params']['reductionPct']);
+        $this->assertSame('medium', $adj['confidence']);
+        $this->assertSame('skippedSessions7d', $adj['evidence'][0]['key']);
+        $this->assertSame(2, $adj['evidence'][0]['value']);
+    }
+
+    public function test_single_skip_or_missing_signal_produces_no_reduce_load(): void
+    {
+        $one = $this->service->generate($this->baseContext([
+            'signals' => ['adaptation' => ['skippedSessions7d' => 1, 'skipReasons7d' => ['no_time']]],
+        ]));
+        $this->assertSame([], $one['adjustments']);
+
+        $none = $this->service->generate($this->baseContext([
+            'signals' => ['adaptation' => ['missedKeyWorkout' => false]],
+        ]));
+        $this->assertSame([], $none['adjustments']);
+    }
+
+    public function test_two_skips_merge_with_pain_keeping_max_reduction(): void
+    {
+        $ctx = $this->baseContext([
+            'signals' => ['adaptation' => ['skippedSessions7d' => 2]],
+            'profile' => ['health' => ['hasCurrentPain' => true]],
+        ]);
+
+        $result = $this->service->generate($ctx);
+
+        $reduceLoad = array_values(array_filter($result['adjustments'], fn ($a) => $a['code'] === 'reduce_load'));
+        $this->assertCount(1, $reduceLoad);
+        $this->assertSame(30, $reduceLoad[0]['params']['reductionPct']); // max(30 pain, 15 skips)
+        $this->assertSame('high', $reduceLoad[0]['severity']);
+        $this->assertSame('high', $reduceLoad[0]['confidence']);
+        $this->assertSame(['hasCurrentPain', 'skippedSessions7d'], $reduceLoad[0]['decisionBasis']['signals']);
+    }
+
+    public function test_two_skips_merge_with_fatigue_keeping_max_reduction(): void
+    {
+        $ctx = $this->baseContext([
+            'signals' => [
+                'flags' => ['fatigue' => true],
+                'adaptation' => ['skippedSessions7d' => 3],
+            ],
+        ]);
+
+        $result = $this->service->generate($ctx);
+
+        $reduceLoad = array_values(array_filter($result['adjustments'], fn ($a) => $a['code'] === 'reduce_load'));
+        $this->assertCount(1, $reduceLoad);
+        $this->assertSame(25, $reduceLoad[0]['params']['reductionPct']); // max(25 fatigue, 15 skips)
+    }
+
+    public function test_illness_skip_produces_recovery_focus(): void
+    {
+        $ctx = $this->baseContext([
+            'signals' => ['adaptation' => ['skippedSessions7d' => 1, 'skipReasons7d' => ['illness']]],
+        ]);
+
+        $result = $this->service->generate($ctx);
+
+        $this->assertCount(1, $result['adjustments']);
+        $adj = $result['adjustments'][0];
+        $this->assertSame('recovery_focus', $adj['code']);
+        $this->assertTrue($adj['params']['replaceHardSessionWithEasy']);
+        $this->assertSame(20, $adj['params']['longRunReductionPct']);
+        $this->assertSame('medium', $adj['confidence']);
+
+        // Non-illness reasons do not trigger recovery_focus.
+        $other = $this->service->generate($this->baseContext([
+            'signals' => ['adaptation' => ['skippedSessions7d' => 1, 'skipReasons7d' => ['no_time', 'weather']]],
+        ]));
+        $this->assertSame([], $other['adjustments']);
+    }
+
     // --- M3/M4 beyond current scope: Etap E ---
 
     public function test_every_adjustment_carries_adaptation_type_and_confidence(): void

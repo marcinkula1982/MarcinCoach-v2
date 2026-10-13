@@ -73,6 +73,9 @@ class ManualCheckInService
                 $this->deleteSyntheticWorkout($checkIn);
                 $checkIn->workout_id = null;
                 $checkIn->save();
+                // A skip removes the synthetic workout, so week actuals must be recomputed
+                // (same refresh as in the done/modified branch via syncDerivedWorkoutData).
+                $this->refreshWeekActuals($checkIn);
             } else {
                 $workout = $this->upsertSyntheticWorkout($checkIn, $payload);
                 $checkIn->workout_id = $workout->id;
@@ -228,6 +231,11 @@ class ManualCheckInService
         $this->upsertManualPlanCompliance((int) $workout->id, $checkIn);
         app(TrainingAlertsV1Service::class)->upsertForWorkout((int) $workout->id);
 
+        $this->refreshWeekActuals($checkIn);
+    }
+
+    private function refreshWeekActuals(ManualCheckIn $checkIn): void
+    {
         $weekStart = CarbonImmutable::parse($checkIn->planned_session_date)->startOfWeek()->toDateString();
         app(PlanMemoryService::class)->updateWeekActuals((int) $checkIn->user_id, $weekStart);
     }

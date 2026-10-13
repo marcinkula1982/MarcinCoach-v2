@@ -47,6 +47,12 @@ class WeeklyPlanService
             $loadScale = 0.85;
         }
 
+        // missedKeyWorkout cap — a skipped key session blocks progression this week (no scale above 1.00)
+        $missedKeyWorkout = (bool) ($context['signals']['adaptation']['missedKeyWorkout'] ?? false);
+        if ($missedKeyWorkout && $loadScale > 1.00) {
+            $loadScale = 1.00;
+        }
+
         $sessions = [];
         foreach (self::WEEK_DAYS as $day) {
             $sessions[] = [

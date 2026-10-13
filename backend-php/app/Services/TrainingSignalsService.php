@@ -8,6 +8,9 @@ use Illuminate\Support\Facades\DB;
 
 class TrainingSignalsService
 {
+    /** Planned session types whose skip counts as a missed key workout. */
+    private const KEY_SESSION_TYPES = ['long', 'quality', 'threshold', 'intervals', 'fartlek', 'tempo'];
+
     /**
      * @deprecated F7: new planning, alerts and feedback-v2 paths should use
      * UserTrainingAnalysisService. This method remains for the public
@@ -322,11 +325,12 @@ class TrainingSignalsService
 
     /**
      * @param  array<string,mixed>|null  $lastWorkout
-     * @return array{missedKeyWorkout:bool,harderThanPlanned:bool,easierThanPlannedStreak:int,controlStartRecent:bool}
+     * @return array{missedKeyWorkout:bool,harderThanPlanned:bool,easierThanPlannedStreak:int,controlStartRecent:bool,skippedSessions7d:int,skipReasons7d:array<int,string>}
      */
     private function buildAdaptationSignals(int $userId, array $filteredRows, Carbon $windowEnd, ?array $lastWorkout): array
     {
-        $missedKeyWorkout = $this->hasMissedKeyWorkout($userId, $windowEnd);
+        $skipped = $this->skippedCheckInsLast7d($userId, $windowEnd);
+        $missedKeyWorkout = $this->hasMissedKeyWorkout($userId, $windowEnd) || $skipped['keySessionSkipped'];
         $workoutIds = array_values(array_map(
             fn (array $row) => (int) ($row['id'] ?? 0),
             array_filter($filteredRows, fn (array $row) => isset($row['id']))
@@ -384,6 +388,47 @@ class TrainingSignalsService
             'harderThanPlanned' => $harderThanPlanned,
             'easierThanPlannedStreak' => $easierStreak,
             'controlStartRecent' => $controlStartRecent,
+            'skippedSessions7d' => $skipped['count'],
+            'skipReasons7d' => $skipped['reasons'],
+        ];
+    }
+
+    /**
+     * Skipped manual check-ins with planned_session_date in the last 7 days
+     * (inclusive) counted back from the end of the signals window.
+     *
+     * @return array{count:int,reasons:array<int,string>,keySessionSkipped:bool}
+     */
+    private function skippedCheckInsLast7d(int $userId, Carbon $windowEnd): array
+    {
+        $to = $windowEnd->copy()->toDateString();
+        $from = $windowEnd->copy()->subDays(7)->toDateString();
+
+        $rows = DB::table('manual_check_ins')
+            ->where('user_id', $userId)
+            ->where('status', 'skipped')
+            ->whereBetween('planned_session_date', [$from, $to])
+            ->get(['planned_type', 'skip_reason']);
+
+        $count = 0;
+        $reasons = [];
+        $keySessionSkipped = false;
+        foreach ($rows as $row) {
+            $count++;
+            $type = strtolower(trim((string) ($row->planned_type ?? '')));
+            if (in_array($type, self::KEY_SESSION_TYPES, true)) {
+                $keySessionSkipped = true;
+            }
+            $reason = strtolower(trim((string) ($row->skip_reason ?? '')));
+            if ($reason !== '' && ! in_array($reason, $reasons, true)) {
+                $reasons[] = $reason;
+            }
+        }
+
+        return [
+            'count' => $count,
+            'reasons' => $reasons,
+            'keySessionSkipped' => $keySessionSkipped,
         ];
     }
 
