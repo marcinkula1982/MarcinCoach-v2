@@ -1,6 +1,6 @@
 # MarcinCoach v2 - schemat funkcjonalny portalu
 
-Stan: 2026-04-28.
+Stan: 2026-10-13 (aktualizacja statusów po audycie kodu; pierwotna wersja 2026-04-28).
 Status dokumentu: odtworzony schemat funkcjonalny na podstawie aktywnych dokumentów i aktualnego kodu.
 
 Ten dokument opisuje **co portal ma robić z perspektywy użytkownika i systemu**. Nie jest wireframe'em, nie jest listą zadań developerskich i nie zastępuje scenariuszy użytkownika. Ma być mapą, do której można wrócić przy decyzjach produktowych, konsultacji IT i planowaniu kolejnych pakietów MVP.
@@ -85,10 +85,10 @@ flowchart TD
 
 | Rola / stan | Co widzi | Co może zrobić | Status |
 |---|---|---|---|
-| Anonim | ekran logowania | zalogować się | login działa; rejestracja UI i reset hasła są brakujące |
+| Anonim | ekran logowania / rejestracji / resetu hasła | zalogować się, założyć konto, zresetować hasło | zaimplementowane (`src/App.tsx`, `POST /api/auth/register`, `forgot-password`, `reset-password`); brak zmiany hasła po zalogowaniu |
 | Zalogowany nowy użytkownik | onboarding | wybrać źródło danych, odpowiedzieć na pytania, pominąć | częściowo gotowe |
-| Użytkownik z danymi | dashboard / plan / historia | importować, synchronizować, odświeżać plan, oglądać historię | częściowo gotowe |
-| Użytkownik bez danych | plan startowy i manualny flow | docelowo: check-in, skip, RPE, ból, notatka | manual check-in P0 missing/partial |
+| Użytkownik z danymi | dashboard / plan / historia / profil / ustawienia | importować, synchronizować, odświeżać plan, oglądać historię, edytować profil i starty | zaimplementowane bazowo; GPX/FIT z UI brak |
+| Użytkownik bez danych | plan startowy i manualny flow | check-in: wykonane / zmienione / pominięte, czas, RPE, ból, notatka | zaimplementowane (`ManualCheckInDialog.tsx`, `POST /api/workouts/manual-check-in`); pominięcie nie wpływa jeszcze na generator planu |
 | Użytkownik Garmin | integracja Garmin | połączyć konto, zsynchronizować aktywności, wysłać trening do urządzenia | MVP działa, MFA/auto-sync brak |
 | Użytkownik Strava | OAuth Strava | połączyć i synchronizować aktywności | backend partial/unknown, potrzebny prod smoke |
 | Użytkownik Polar/Suunto/Coros | docelowo API sportowe; tymczasowo upload plików | połączyć API po wdrożeniu albo wgrać FIT/TCX/GPX | API planowane; fallback plikowy partial |
@@ -102,28 +102,33 @@ flowchart TD
 
 | Ekran / sekcja | Plik frontendowy | Funkcja | Status |
 |---|---|---|---|
-| Logowanie w nagłówku | `src/App.tsx` | login, logout, status API | login działa; brak rejestracji i resetu w UI |
+| Logowanie / rejestracja / reset hasła | `src/App.tsx`, `src/api/auth.ts` | login, logout, rejestracja, "Nie pamiętam hasła", reset z tokenem z URL, komunikat wygasłej sesji | zaimplementowane; brak zmiany hasła dla zalogowanego usera |
+| Zakładki aplikacji | `src/App.tsx` | Dashboard / Plan / Historia / Profil / Ustawienia | zaimplementowane |
+| Profil | `src/components/ProfileEditSection.tsx` | cele, dni treningowe, maxSessionMin, nawierzchnia, ból, sprzęt, starty A/B/C, Profile Quality Score, disclaimer medyczny | zaimplementowane |
+| Manual check-in | `src/components/ManualCheckInDialog.tsx` | Wykonane / Zmienione / Nie zrobiłem, czas, dystans, RPE, samopoczucie, ból, notatka, powód pominięcia | zaimplementowane |
+| Feedback po treningu | `src/components/WorkoutFeedbackPanel.tsx` | praise, deviations, conclusions, planImpact, confidence, metryki | zaimplementowane |
+| Integracje | `src/components/IntegrationsSettingsSection.tsx` | status Garmin/Strava/Polar/Suunto/Coros, connect/sync/disconnect, powrót z OAuth Strava | zaimplementowane; brak formularza "Powiadom nas" |
 | Onboarding | `src/components/Onboarding.tsx` | wybór źródła, Garmin/Strava/TCX/manual, pytania, skip | działa częściowo |
 | Podsumowanie onboardingu | `src/components/OnboardingSummaryCard.tsx` | faktowe podsumowanie profilu po onboardingu | działa częściowo |
 | Analiza treningowa | `src/components/AnalyticsSummary.tsx` | podsumowanie danych i profilu | działa częściowo |
 | Garmin | `src/components/GarminSection.tsx` | connect, status, sync zakresu dat | działa MVP |
 | Rolling/weekly plan | `src/components/WeeklyPlanSection.tsx` | rolling plan 14 dni, refresh, cross-training prompt, wysyłka do Garmin | działa częściowo |
 | AI plan | `src/components/AiPlanSection.tsx` | dodatkowa sekcja planu AI/stub | nie jest core engine MVP |
-| Upload i metryki TCX | `src/App.tsx`, `src/utils/tcxParser.ts` | wybór TCX, parsowanie, metryki, RPE, zgodność z planem | działa dla TCX |
+| Upload i metryki TCX | `src/App.tsx`, `src/utils/tcxParser.ts` | wybór TCX, parsowanie, metryki, RPE, zgodność z planem | działa dla TCX; inputy plików akceptują tylko `.tcx`, GPX/FIT z UI brak (backend parsuje je po rozszerzeniu) |
 | Historia treningów | `src/components/WorkoutsList.tsx` | lista, podgląd, usuwanie | działa częściowo |
 
 ### 4.2 Docelowa nawigacja MVP
 
-Aktualnie portal jest bardziej jednym dashboardem niż aplikacją z zakładkami. Docelowo, zgodnie z roadmapą, nawigacja powinna rozdzielić obszary:
+Zakładki Dashboard / Plan / Historia / Profil / Ustawienia są zaimplementowane w `src/App.tsx`. Poniższa tabela opisuje docelową zawartość; elementy oznaczone "brak" nie są jeszcze w kodzie:
 
 | Zakładka | Zawartość | Dlaczego potrzebna |
 |---|---|---|
-| Dashboard | plan na dziś, alerty, ostatni feedback, szybki check-in | pierwszy ekran po logowaniu |
-| Plan | rolling plan 14 dni, szczegóły sesji, refresh, wysyłka do Garmin | główne miejsce pracy z planem |
-| Treningi | historia, upload TCX/GPX/FIT, feedback dla treningu | porządek wokół danych treningowych |
-| Profil | cele, starty, dostępność, zdrowie, quality score, powrót do onboardingu | user musi móc poprawić dane |
-| Integracje | Garmin, Strava, Polar, Suunto, Coros, brakująca aplikacja | zarządzanie źródłami danych i docelowymi API sportowymi |
-| Konto / Prywatność | hasło, zgody, export danych, usunięcie konta | wymagane przed publicznym launchem |
+| Dashboard | ostatni feedback, check-in przy sesji planu (jest); dedykowany widok "plan na dziś" i alerty (brak) | pierwszy ekran po logowaniu |
+| Plan | rolling plan 14 dni, szczegóły sesji, refresh, wysyłka do Garmin (jest); ręczna edycja sesji (brak) | główne miejsce pracy z planem |
+| Historia | lista treningów, upload TCX, feedback dla treningu (jest); upload GPX/FIT (brak) | porządek wokół danych treningowych |
+| Profil | cele, starty, dostępność, zdrowie, quality score, powrót do onboardingu (jest) | user musi móc poprawić dane |
+| Ustawienia / Integracje | Garmin, Strava, Polar, Suunto, Coros (jest); formularz "Powiadom nas" o brakującej aplikacji (brak) | zarządzanie źródłami danych i docelowymi API sportowymi |
+| Konto / Prywatność | zmiana hasła, zgody, export danych, usunięcie konta (brak) | wymagane przed publicznym launchem |
 
 ---
 
@@ -163,7 +168,7 @@ Status: połączenie i sync Garmina smoke'owane 26.04. MFA UI i auto-sync nadal 
 5. Użytkownik uzupełnia cel, datę startu, dni treningowe i ból/kontuzję.
 6. System buduje analizę, confidence i rolling plan.
 
-Status: TCX działa w UI i backendzie. GPX/FIT są backendowo obsługiwane, ale UI nadal jest partial/missing.
+Status: TCX działa w UI i backendzie. GPX/FIT są backendowo parsowane po rozszerzeniu pliku, ale UI ich nie przyjmuje (brak; task EP-018), a FIT nie ma testu na realnym pliku.
 
 ### 5.3 Użytkownik bez danych
 
@@ -179,7 +184,7 @@ flowchart TD
   H --> I["Korekta kolejnego planu"]
 ```
 
-Status: onboarding manualny i plan low-data działają częściowo. Manual check-in po treningu jest P0 i wymaga osobnego dopięcia modelu/API/UI.
+Status: onboarding manualny i plan low-data działają częściowo. Manual check-in po treningu jest zaimplementowany (model `manual_check_ins`, `POST /api/workouts/manual-check-in`, `ManualCheckInDialog.tsx`, smoke `MvpSmokeTest`). Pominięcie jest zapisywane, ale generator planu jeszcze go nie czyta.
 
 ### 5.4 Po treningu z importem
 
@@ -198,11 +203,11 @@ Status: onboarding manualny i plan low-data działają częściowo. Manual check
    - confidence i metryki.
 7. Plan jest odświeżany.
 
-Status: backend feedbacku istnieje. UX feedbacku i auto-refresh planu po imporcie są nadal lukami.
+Status: zaimplementowane. Backend feedbacku, panel `WorkoutFeedbackPanel.tsx` i frontendowy auto-refresh rolling planu po uploadzie TCX, duplikacie, Garmin sync i check-inie są w kodzie. Auto-refresh nie jest jeszcze podpięty po Strava sync ani po usunięciu treningu.
 
 ### 5.5 Manual check-in po zaplanowanym treningu
 
-To jest brakująca pętla MVP.
+Status: zaimplementowane (EP-007/EP-008). Diagram poniżej opisuje działający przepływ; otwarta pozostaje część "skipped → plan impact".
 
 ```mermaid
 flowchart TD
@@ -233,11 +238,13 @@ Minimalne pola manual check-in:
 - notatka użytkownika,
 - powód pominięcia dla `skipped`.
 
-Otwarte decyzje:
-- czy check-in ma być rekordem w `workouts`,
-- czy osobną tabelą `planned_session_checkins`,
-- jak idempotentnie wiązać check-in z sesją z rolling planu,
-- czy po check-inie frontend wywołuje `POST /api/rolling-plan`, czy robi to backend.
+Podjęte decyzje (stan kodu):
+- check-in jest rekordem w osobnej tabeli `manual_check_ins`; statusy `done`/`modified` tworzą dodatkowo syntetyczny workout `MANUAL_CHECK_IN` bez `tcxRaw`, `skipped` nie tworzy treningu 0 km,
+- idempotencja działa per dzień albo dzień + `plannedSessionId`,
+- po check-inie frontend ponownie pobiera `GET /api/rolling-plan?days=14` (token odświeżenia); backend nie regeneruje planu sam.
+
+Otwarte:
+- generator planu (`WeeklyPlanService`, `RollingPlanController`, `PlanMemoryService`) nie czyta jeszcze check-inów ze statusem `skipped`; wpływ pominięcia na plan jest pośredni (ból z check-inu ustawia `has_current_pain`).
 
 ---
 
@@ -245,14 +252,14 @@ Otwarte decyzje:
 
 | Moduł | Encje / dane | Odpowiedzialność | Status |
 |---|---|---|---|
-| Auth | user, session token, username | login, logout, token sesji, wygasanie | działa; brak resetu hasła |
+| Auth | user, session token, username, `password_reset_tokens` | login, logout, rejestracja, reset hasła, token sesji, globalny interceptor 401/403 | zaimplementowane; brak zmiany hasła dla zalogowanego usera |
 | Profil | `user_profiles`, typed JSON, `primaryRace`, `paceZones` | cele, zdrowie, dostępność, starty, jakość profilu | backend mocny, UI partial |
 | Import treningów | `workouts`, `workout_raw_tcx`, `workout_import_events` | upload, dedupe, parsery TCX/GPX/FIT | TCX/GPX ok, FIT wymaga fixture |
 | Analiza | training analysis snapshots, summary | load, intensity, confidence, profile quality | backend gotowy, UI partial |
 | Plan | `training_weeks`, plan memory, rolling plan | weekly/rolling plan, adaptacje, cross-training | backend gotowy, UX partial |
-| Feedback | workout feedback, compliance, alerts | deterministyczny feedback po treningu | backend gotowy, UX missing/partial |
-| Integracje | `integration_accounts`, `integration_sync_runs` | Garmin/Strava/Polar/Suunto/Coros connect/sync/status | Garmin MVP, Strava unknown/prod smoke, Polar/Suunto/Coros planowane |
-| Manual check-in | do zaprojektowania | wykonane/zmienione/pominięte bez pliku | P0 missing/partial |
+| Feedback | workout feedback, compliance, alerts, `plan_snapshots` | deterministyczny feedback po treningu, plan-vs-actual | zaimplementowane (backend + `WorkoutFeedbackPanel.tsx`); alerty nie są pokazywane w UI |
+| Integracje | `integration_accounts`, `integration_sync_runs` | Garmin/Strava/Polar/Suunto/Coros connect/sync/status/disconnect | Garmin MVP (bez MFA/auto-sync), Strava backend gotowy bez credentials produkcyjnych, Suunto test bridge, Polar/Coros planowane; "Powiadom nas" brak |
+| Manual check-in | `manual_check_ins` + syntetyczny workout `MANUAL_CHECK_IN` | wykonane/zmienione/pominięte bez pliku | zaimplementowane; `skipped` nie wpływa jeszcze na generator planu |
 | Prywatność | user consents, export, delete | RODO, zgody, prawo do danych | missing przed publicznym launchem |
 | Monitoring | healthcheck, smoke E2E | pewność produkcji | healthcheck działa, smoke automation partial |
 
@@ -265,13 +272,15 @@ Otwarte decyzje:
 | Obszar | Endpoint |
 |---|---|
 | Health | `GET /api/health` |
-| Auth | `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout` |
+| Auth | `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/forgot-password`, `POST /api/auth/reset-password` |
 | Konto | `GET /api/me` |
 | Profil | `GET /api/me/profile`, `PUT /api/me/profile` |
 | Analiza | `GET /api/me/training-analysis`, `GET /api/me/onboarding-summary` |
 | Plan | `GET /api/rolling-plan?days=14`, `POST /api/rolling-plan`, `GET /api/weekly-plan` |
 | Workouts | `GET /api/workouts`, `GET /api/workouts/{id}`, `POST /api/workouts/upload`, `POST /api/workouts/import`, `PATCH /api/workouts/{id}/meta`, `DELETE /api/workouts/{id}` |
 | Feedback | `POST /api/workouts/{id}/feedback/generate`, `GET /api/workouts/{id}/feedback` |
+| Manual check-in | `POST /api/workouts/manual-check-in` (status `done`/`modified`/`skipped`) |
+| Integracje (wspólne) | `GET /api/integrations/status`, `DELETE /api/integrations/{provider}`, `POST /api/integrations/suunto/sports-tracker/sync` |
 | Sygnały | `GET /api/workouts/{id}/signals`, `GET /api/workouts/{id}/compliance`, `GET /api/workouts/{id}/alerts-v1` |
 | Garmin | `POST /api/integrations/garmin/connect`, `GET /api/integrations/garmin/status`, `POST /api/integrations/garmin/sync`, `POST /api/integrations/garmin/workouts/send` |
 | Strava | `POST /api/integrations/strava/connect`, `GET /api/integrations/strava/callback`, `POST /api/integrations/strava/sync` |
@@ -281,18 +290,15 @@ Otwarte decyzje:
 
 | Funkcja | Proponowany kontrakt / obszar |
 |---|---|
-| Manual check-in | `POST /api/workouts/manual-check-in` albo `POST /api/planned-sessions/{id}/check-in` |
-| Pominięcie treningu | ten sam check-in z `status=skipped` albo osobny `POST /api/planned-sessions/{id}/skip` |
-| Reset hasła | `POST /api/auth/forgot-password`, `POST /api/auth/reset-password` |
-| Zmiana hasła | `POST /api/me/password` |
-| Revoke integracji | `DELETE /api/integrations/{provider}` albo provider-specific endpointy |
+| Zmiana hasła (brak) | `POST /api/me/password` |
+| Ręczna edycja sesji planu (brak) | `PATCH /api/rolling-plan/sessions/{id}` albo podobny |
 | Polar API | `POST /api/integrations/polar/connect`, `POST /api/integrations/polar/sync` |
 | Suunto API | `POST /api/integrations/suunto/connect`, `POST /api/integrations/suunto/sync` |
 | Coros API | `POST /api/integrations/coros/connect`, `POST /api/integrations/coros/sync` |
-| Zgody | `POST /api/consents`, `GET /api/me/consents` |
-| Export danych | `POST /api/me/data-export`, `GET /api/me/data-export/{id}` |
-| Usunięcie konta | `DELETE /api/me` |
-| Brakująca aplikacja | `POST /api/integration-requests` |
+| Zgody (brak) | `POST /api/consents`, `GET /api/me/consents` |
+| Export danych (brak) | `POST /api/me/data-export`, `GET /api/me/data-export/{id}` |
+| Usunięcie konta (brak; `DELETE /api/workouts` kasuje tylko treningi) | `DELETE /api/me` |
+| Brakująca aplikacja "Powiadom nas" (brak) | `POST /api/integration-requests` |
 
 ---
 
@@ -300,23 +306,25 @@ Otwarte decyzje:
 
 | Moduł | Status | Priorytet dalszych prac |
 |---|---|---|
-| Login i sesja | działa, ale 401 UX partial | P0/P1 w Pakiecie 0 |
-| Rejestracja UI | backend istnieje, UI missing | P0 |
-| Reset hasła | missing | P0 |
+| Login i sesja | zaimplementowane; globalny interceptor 401/403 w `src/api/client.ts` | utrzymać |
+| Rejestracja UI | zaimplementowane (`src/App.tsx`, `POST /api/auth/register`) | manual smoke produkcyjny |
+| Reset hasła | zaimplementowane (API, mail, UI) | SMTP produkcyjny NIEZWERYFIKOWANY |
+| Zmiana hasła po zalogowaniu | brak | P1 |
 | Onboarding | działa częściowo | P0/P1 |
 | Upload TCX | działa | utrzymać |
-| Upload GPX/FIT w UI | backend jest, UI missing | P1 |
+| Upload GPX/FIT w UI | backend parsuje, UI brak (accept tylko `.tcx`) | P1 (EP-018) |
 | Garmin connect/sync/send | działa MVP | MFA/auto-sync P1 |
-| Strava | partial/unknown | prod smoke P0/P1 |
+| Strava | backend + testy OAuth gotowe, callback w UI jest; credentials produkcyjne brak | prod smoke P0/P1 |
+| Suunto | tymczasowy Sports Tracker test bridge (backend, domyślnie wyłączony) | oficjalne API później |
 | Polar API | planowane | po stabilizacji MVP/integracji bazowych |
-| Suunto API | planowane | po stabilizacji MVP/integracji bazowych |
 | Coros API | planowane | dodać do listy docelowych API sportowych |
-| Rolling plan 14 dni | działa | UX i refresh hardening |
-| Feedback po treningu | backend działa, UI missing/partial | P0 |
-| Manual check-in | missing/partial | P0 core MVP |
-| Profil i starty | backend działa, UI partial | P0/P1 |
-| Privacy/RODO | missing | P0 przed publicznym launch |
-| Smoke/monitoring | healthcheck działa, automatyka partial | P0 |
+| "Powiadom nas" o brakującej aplikacji | brak (brak endpointu i tabeli `integration_requests`) | P1 |
+| Rolling plan 14 dni | działa; auto-refresh po imporcie/check-inie z frontu | ręczna edycja sesji i widok "dziś" brak |
+| Feedback po treningu | zaimplementowane (backend + `WorkoutFeedbackPanel.tsx`) | alerty w UI brak |
+| Manual check-in | zaimplementowane (model, API, UI, smoke) | `skipped` → wpływ na plan P0 |
+| Profil i starty | zaimplementowane (`ProfileEditSection.tsx`, races CRUD, quality score) | pokazanie wpływu startu na taper/peak |
+| Privacy/RODO | brak (zgody, export, usunięcie konta, audit log); disclaimer medyczny tylko w Profilu | P0 przed publicznym launch |
+| Smoke/monitoring | healthcheck działa; lokalny API smoke `MvpSmokeTest`; brak produkcyjnego smoke i monitoringu | P0 |
 
 ---
 
@@ -349,27 +357,26 @@ MVP publiczny wymaga dodatkowo:
 
 ## 10. Najważniejsze luki P0
 
+Zamknięte od wersji 2026-04-28: reset hasła, rejestracja UI, feedback UX, manual check-in, globalny 401 (szczegóły w `docs/status.md`).
+
 | Luka | Dlaczego blokuje | Najbliższy krok |
 |---|---|---|
-| Reset hasła | użytkownik może trwale stracić dostęp | SMTP + backend + UI |
-| Rejestracja UI | nowy user nie założy konta samodzielnie | formularz rejestracji |
-| Feedback UX | bez tego portal jest logiem, nie coachem | widok `praise/deviations/conclusions/planImpact` |
-| Manual check-in | brak ścieżki dla użytkownika bez danych | model/API/UI check-in |
-| Pominięcie treningu | plan nie rozumie realnego życia usera | skipped session state |
-| Globalny 401 | wygasła sesja daje niespójne błędy | jeden mechanizm logout/redirect |
-| Smoke E2E | nie wiadomo czy produkcja działa całościowo | skrypt i cron/GitHub Action |
-| RODO public launch | blokuje otwarcie na realnych userów w UE | pakiet prawny + funkcje danych |
+| Pominięcie treningu → plan | `skipped` jest zapisywane, ale generator planu go nie czyta | konsument `manual_check_ins` w `PlanMemoryService`/`WeeklyPlanService` |
+| Smoke E2E produkcji | jedyny smoke to lokalny PHPUnit `MvpSmokeTest`; brak monitoringu healthchecka | skrypt uderzający w produkcję + cron/GitHub Action |
+| Upload GPX/FIT w UI | fallback plikowy dla Polar/Suunto/Coros nie działa z UI; brak fixture `.fit` | EP-018 + EP-021 |
+| Strava produkcyjnie | brak credentials na IQHost (wg `docs/status.md`, 2026-04-30) | ustawić `STRAVA_*` w `.env` i wykonać live smoke |
+| RODO public launch | brak zgód, exportu, usunięcia konta, audit logu | pakiet prawny + funkcje danych |
 
 ---
 
 ## 11. Kolejność wdrażania wynikająca ze schematu
 
-1. **Higiena i monitoring**: globalny 401, smoke produkcyjny, healthcheck monitoring.
-2. **Auth dla nowych użytkowników**: rejestracja UI, reset hasła, zmiana hasła.
-3. **Pętla treningowa MVP**: feedback UX, auto-refresh planu, manual check-in i skip.
-4. **Profil i nawigacja**: zakładki, profil, starty, powrót do onboardingu.
-5. **RODO przed publicznym launch**: zgody, export, delete, disclaimer, audit.
-6. **Integracje i jakość danych**: Strava prod, Garmin auto-sync/MFA, GPX/FIT UI, korekta sportu.
+1. **Higiena i monitoring**: globalny 401 (zrobione), smoke produkcyjny i healthcheck monitoring (brak).
+2. **Auth dla nowych użytkowników**: rejestracja UI i reset hasła (zrobione), zmiana hasła po zalogowaniu (brak).
+3. **Pętla treningowa MVP**: feedback UX, auto-refresh planu, manual check-in (zrobione); `skipped` → plan impact (brak).
+4. **Profil i nawigacja**: zakładki, profil, starty, powrót do onboardingu (zrobione).
+5. **RODO przed publicznym launch**: zgody, export, delete, audit (brak); disclaimer tylko w Profilu.
+6. **Integracje i jakość danych**: Strava prod credentials, Garmin auto-sync/MFA, GPX/FIT UI, korekta sportu, "Powiadom nas" (brak).
 
 ---
 

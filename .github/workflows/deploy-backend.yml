@@ -20,6 +20,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+
+      - name: Install backend dependencies
+        working-directory: backend-php
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run backend tests (gate before deploy)
+        working-directory: backend-php
+        run: php artisan test
+
       - name: Setup SSH
         id: setup_ssh
         env:

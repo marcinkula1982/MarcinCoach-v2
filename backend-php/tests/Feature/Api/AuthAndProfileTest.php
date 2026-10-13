@@ -222,10 +222,13 @@ class AuthAndProfileTest extends TestCase
 
     public function test_profile_accepts_minimal_data_first_onboarding_payload(): void
     {
+        // Data startu wzgledem "teraz", zeby primaryRace nie wygasl wraz z uplywem czasu.
+        $raceDate = now()->addMonths(6)->toDateString();
+
         $response = $this->putJson('/api/me/profile', [
             'goals' => 'przebiec 10 km ponizej 50 minut',
             'races' => [
-                ['date' => '2026-10-11', 'distanceKm' => 10.0, 'priority' => 'A'],
+                ['date' => $raceDate, 'distanceKm' => 10.0, 'priority' => 'A'],
             ],
             'availability' => [
                 'runningDays' => ['mon', 'wed', 'fri', 'sun'],

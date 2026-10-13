@@ -480,6 +480,17 @@ class PlanningParityTest extends TestCase
 
     public function test_m4_easier_streak_applies_progression_adjustment_code(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-04-21T12:00:00Z'));
+
+        try {
+            $this->runM4EasierStreakScenario();
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    private function runM4EasierStreakScenario(): void
+    {
         $w1 = Workout::create([
             'user_id' => 1,
             'action' => 'save',

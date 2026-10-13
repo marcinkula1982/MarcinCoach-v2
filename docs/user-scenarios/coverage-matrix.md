@@ -167,7 +167,7 @@ Wartości w kolumnach FE / BE / Test / Smoke:
 | US-PRIVACY-002 | Odłączenie integracji (revoke) | P0 | ✓ | ✓ | ✓ | ✗ | partial |
 | US-PRIVACY-003 | Export danych | P0 | ✗ | ✗ | ✗ | ✗ | missing |
 | US-PRIVACY-004 | Usunięcie konta i danych | P0 | ✗ | ✗ | ✗ | ✗ | missing |
-| US-PRIVACY-005 | Granica info treningowa/medyczna | P0 | ✗ | — | ✗ | ✗ | missing |
+| US-PRIVACY-005 | Granica info treningowa/medyczna | P0 | ~ | — | ✗ | ✗ | partial |
 | US-PRIVACY-006 | Dane zdrowotne jako wrażliwe | P0 | ? | ? | ✗ | ✗ | unknown |
 | US-PRIVACY-007 | Audit log zgód | P0 | — | ✗ | ✗ | ✗ | missing |
 | US-PRIVACY-008 | Sprostowanie / edycja danych | P1 | ✓ | ✓ | ~ | ✗ | implemented |
