@@ -450,6 +450,66 @@ class PlanningParityTest extends TestCase
         }
     }
 
+    public function test_rolling_plan_unchanged_for_user_without_unavailable_days(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-21T12:00:00Z'));
+
+        try {
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => ['startTimeIso' => '2026-04-19T09:00:00Z', 'durationSec' => 3000, 'distanceM' => 8000, 'intensity' => 28],
+                'source' => 'manual',
+                'dedupe_key' => 'planning-no-unavailable-days',
+            ]);
+
+            // Non-alphabetical, non-week order on purpose: order must survive the new projection.
+            $runningDays = ['sun', 'tue', 'thu'];
+
+            $this->putJson('/api/me/profile', [
+                'availability' => ['runningDays' => $runningDays],
+            ])->assertOk();
+
+            // Warm plan memory so both compared calls see the same training_weeks state.
+            $this->getJson('/api/rolling-plan?days=14')->assertOk();
+
+            $before = $this->getJson('/api/rolling-plan?days=14');
+            $before->assertOk();
+
+            $context = $this->getJson('/api/training-context');
+            $context->assertOk();
+            $this->assertSame($runningDays, $context->json('profile.runningDays'));
+            $this->assertSame([], $context->json('profile.availability.unavailableDays'));
+            $this->assertFalse($context->json('profile.availability.unavailableDaysConflict'));
+
+            // Explicit empty unavailableDays must be a no-op.
+            $this->putJson('/api/me/profile', [
+                'availability' => ['unavailableDays' => []],
+            ])->assertOk();
+
+            $after = $this->getJson('/api/rolling-plan?days=14');
+            $after->assertOk();
+
+            $this->assertSame($before->json('sessions'), $after->json('sessions'));
+            $this->assertSame($before->json('summary'), $after->json('summary'));
+            $this->assertSame($before->json('rationale'), $after->json('rationale'));
+            $this->assertSame($before->json('appliedAdjustmentsCodes'), $after->json('appliedAdjustmentsCodes'));
+            $this->assertNotContains('unavailableDays pominięte: konflikt z runningDays', $after->json('rationale'));
+
+            // Running sessions land only on the configured running days.
+            foreach ($after->json('sessions') as $session) {
+                $type = (string) ($session['type'] ?? 'rest');
+                if ($type === 'rest' || $type === 'cross_training') {
+                    continue;
+                }
+                $this->assertContains($session['day'], $runningDays, 'Running session outside runningDays');
+            }
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_weekly_plan_persists_training_weeks_row_with_block_context(): void
     {
         Workout::create([

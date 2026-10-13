@@ -164,8 +164,11 @@ class WeeklyPlanService
 
             if ($code === 'missed_workout_rebalance' && (bool) ($adj['params']['addMakeupEasySession'] ?? false)) {
                 $makeupDuration = max(15, (int) ($adj['params']['makeupDurationMin'] ?? 30));
+                // Makeup session must not land on a day the user marked as unavailable.
+                // When unavailableDays conflict with runningDays they are ignored (same as in UserProfileService).
+                $makeupBlockedDays = $this->resolveUnavailableDays($context);
                 foreach ($sessions as &$s) {
-                    if (($s['type'] ?? null) === 'rest') {
+                    if (($s['type'] ?? null) === 'rest' && !in_array((string) ($s['day'] ?? ''), $makeupBlockedDays, true)) {
                         $s['type'] = 'easy';
                         $s['durationMin'] = $this->roundToFive($makeupDuration);
                         $s['intensityHint'] = 'Z1-Z2';
@@ -366,6 +369,10 @@ class WeeklyPlanService
             ],
         ];
 
+        if (($context['profile']['availability']['unavailableDaysConflict'] ?? false) === true) {
+            $output['rationale'][] = 'unavailableDays pominięte: konflikt z runningDays';
+        }
+
         if (is_array($blockContext) && !empty($blockContext)) {
             $output['blockContext'] = [
                 'block_type' => (string) ($blockContext['block_type'] ?? ''),
@@ -496,6 +503,33 @@ class WeeklyPlanService
     private function roundToFive(float $minutes): int
     {
         return (int) (round($minutes / 5) * 5);
+    }
+
+    /**
+     * Days the planner must not use for extra sessions. Empty when the profile
+     * has no unavailableDays or when they conflict with runningDays (then ignored).
+     *
+     * @param array<string,mixed> $context
+     * @return array<int,string>
+     */
+    private function resolveUnavailableDays(array $context): array
+    {
+        $availability = $context['profile']['availability'] ?? null;
+        if (!is_array($availability)) {
+            return [];
+        }
+        if (($availability['unavailableDaysConflict'] ?? false) === true) {
+            return [];
+        }
+        $days = $availability['unavailableDays'] ?? [];
+        if (!is_array($days)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            $days,
+            fn ($d) => is_string($d) && in_array($d, self::WEEK_DAYS, true)
+        ));
     }
 
     /**

@@ -23,7 +23,7 @@ class UserProfileService
      *   shoes:array{avoidZeroDrop:bool},
      *   hrZones:array{z1:array{0:int,1:int},z2:array{0:int,1:int},z3:array{0:int,1:int},z4:array{0:int,1:int},z5:array{0:int,1:int}},
      *   primaryRace:array{date:string,distanceKm:float,priority:string|null}|null,
-     *   availability:array{runningDays:array<int,string>,maxSessionMin:int|null},
+     *   availability:array{runningDays:array<int,string>,unavailableDays:array<int,string>,unavailableDaysConflict:bool,maxSessionMin:int|null},
      *   health:array{hasCurrentPain:bool},
      *   equipment:array{hasHrSensor:bool},
      *   quality:array{score:int,hasPrimaryRace:bool,hasMaxSessionMin:bool,hasHealth:bool,hasEquipment:bool,hasHrZones:bool}
@@ -45,7 +45,12 @@ class UserProfileService
             ],
             // M1 beyond minimum defaults
             'primaryRace' => null,
-            'availability' => ['runningDays' => ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], 'maxSessionMin' => null],
+            'availability' => [
+                'runningDays' => ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
+                'unavailableDays' => [],
+                'unavailableDaysConflict' => false,
+                'maxSessionMin' => null,
+            ],
             'health' => ['hasCurrentPain' => false],
             'equipment' => ['hasHrSensor' => false],
             'paceZones' => null,
@@ -67,6 +72,19 @@ class UserProfileService
 
         // runningDays: prefer availability_json.runningDays (new canonical source), fallback to preferred_run_days
         $runningDays = $this->resolveRunningDays($profile, $defaults['runningDays']);
+
+        // unavailableDays: subtract from runningDays. If that would leave no running day,
+        // ignore unavailableDays (legacy behaviour) and flag the conflict for the planner rationale.
+        $unavailableDays = $this->resolveUnavailableDays($profile);
+        $unavailableDaysConflict = false;
+        if (count($unavailableDays) > 0) {
+            $effectiveRunningDays = array_values(array_diff($runningDays, $unavailableDays));
+            if (count($effectiveRunningDays) > 0) {
+                $runningDays = $effectiveRunningDays;
+            } else {
+                $unavailableDaysConflict = true;
+            }
+        }
 
         // surfaces: preferred_surface string (e.g. TRAIL/ROAD/ASPHALT)
         $surfaces = $defaults['surfaces'];
@@ -128,6 +146,8 @@ class UserProfileService
             : (isset($avail['maxSessionMin']) && is_numeric($avail['maxSessionMin']) ? (int) $avail['maxSessionMin'] : null);
         $availability = [
             'runningDays' => $runningDays,
+            'unavailableDays' => $unavailableDays,
+            'unavailableDaysConflict' => $unavailableDaysConflict,
             'maxSessionMin' => $maxSessionMin,
         ];
 
@@ -245,6 +265,26 @@ class UserProfileService
         }
 
         return $defaultDays;
+    }
+
+    /**
+     * Normalized availability_json.unavailableDays: valid day codes only, de-duplicated, list-indexed.
+     *
+     * @return array<int,string>
+     */
+    private function resolveUnavailableDays(UserProfile $profile): array
+    {
+        $validDayNames = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+        $avail = is_array($profile->availability_json) ? $profile->availability_json : [];
+        if (!isset($avail['unavailableDays']) || !is_array($avail['unavailableDays'])) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter(
+            $avail['unavailableDays'],
+            fn ($d) => is_string($d) && in_array($d, $validDayNames, true)
+        )));
     }
 
     /**

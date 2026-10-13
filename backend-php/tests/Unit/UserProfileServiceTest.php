@@ -69,6 +69,59 @@ class UserProfileServiceTest extends TestCase
         $this->assertSame(['mon', 'wed', 'fri'], $result['runningDays']);
     }
 
+    // --- Pakiet B / Zmiana 1: availability.unavailableDays ---
+
+    public function test_running_days_exclude_unavailable_days(): void
+    {
+        UserProfile::create([
+            'user_id' => 1,
+            'availability_json' => [
+                'runningDays' => ['mon', 'wed', 'fri', 'sun'],
+                'unavailableDays' => ['sun', 'sat'],
+            ],
+        ]);
+
+        $result = $this->svc->getConstraintsForUser(1);
+
+        $this->assertSame(['mon', 'wed', 'fri'], $result['runningDays']);
+        $this->assertSame(['mon', 'wed', 'fri'], $result['availability']['runningDays']);
+        $this->assertSame(['sun', 'sat'], $result['availability']['unavailableDays']);
+        $this->assertFalse($result['availability']['unavailableDaysConflict']);
+    }
+
+    public function test_unavailable_days_ignored_when_they_remove_all_running_days(): void
+    {
+        UserProfile::create([
+            'user_id' => 1,
+            'availability_json' => [
+                'runningDays' => ['tue', 'thu'],
+                'unavailableDays' => ['tue', 'thu'],
+            ],
+        ]);
+
+        $result = $this->svc->getConstraintsForUser(1);
+
+        // Legacy behaviour preserved: runningDays untouched, conflict flagged for the planner rationale.
+        $this->assertSame(['tue', 'thu'], $result['runningDays']);
+        $this->assertSame(['tue', 'thu'], $result['availability']['runningDays']);
+        $this->assertSame(['tue', 'thu'], $result['availability']['unavailableDays']);
+        $this->assertTrue($result['availability']['unavailableDaysConflict']);
+    }
+
+    public function test_profile_without_unavailable_days_exposes_empty_list_and_same_running_days_order(): void
+    {
+        UserProfile::create([
+            'user_id' => 1,
+            'availability_json' => ['runningDays' => ['sun', 'tue', 'thu']],
+        ]);
+
+        $result = $this->svc->getConstraintsForUser(1);
+
+        $this->assertSame(['sun', 'tue', 'thu'], $result['runningDays']);
+        $this->assertSame([], $result['availability']['unavailableDays']);
+        $this->assertFalse($result['availability']['unavailableDaysConflict']);
+    }
+
     public function test_running_days_uses_default_when_both_empty(): void
     {
         UserProfile::create(['user_id' => 1]);

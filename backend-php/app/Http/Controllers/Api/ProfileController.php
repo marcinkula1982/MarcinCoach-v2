@@ -58,6 +58,8 @@ class ProfileController extends Controller
             'availability' => ['sometimes', 'nullable', 'array'],
             'availability.runningDays' => ['sometimes', 'array'],
             'availability.runningDays.*' => ['in:mon,tue,wed,thu,fri,sat,sun'],
+            'availability.unavailableDays' => ['sometimes', 'array'],
+            'availability.unavailableDays.*' => ['in:mon,tue,wed,thu,fri,sat,sun'],
             'availability.maxSessionMin' => ['sometimes', 'integer', 'min:15', 'max:300'],
 
             'health' => ['sometimes', 'nullable', 'array'],

@@ -410,6 +410,44 @@ class AuthAndProfileTest extends TestCase
         $get->assertJsonPath('availability.runningDays', ['tue', 'thu', 'sat']);
     }
 
+    public function test_profile_persists_availability_unavailable_days(): void
+    {
+        $put = $this->putJson('/api/me/profile', [
+            'availability' => [
+                'runningDays' => ['mon', 'wed', 'fri'],
+                'unavailableDays' => ['sat', 'sun'],
+                'maxSessionMin' => 60,
+            ],
+        ]);
+
+        $put->assertOk();
+        $put->assertJsonPath('availability.unavailableDays', ['sat', 'sun']);
+
+        $get = $this->getJson('/api/me/profile');
+        $get->assertOk();
+        $get->assertJsonPath('availability.runningDays', ['mon', 'wed', 'fri']);
+        $get->assertJsonPath('availability.unavailableDays', ['sat', 'sun']);
+
+        // Partial update of another availability key must not drop unavailableDays.
+        $partial = $this->putJson('/api/me/profile', [
+            'availability' => ['maxSessionMin' => 75],
+        ]);
+        $partial->assertOk();
+        $partial->assertJsonPath('availability.unavailableDays', ['sat', 'sun']);
+        $partial->assertJsonPath('availability.maxSessionMin', 75);
+
+        // Planner-facing projection subtracts unavailableDays from runningDays.
+        $context = $this->getJson('/api/training-context');
+        $context->assertOk();
+        $context->assertJsonPath('profile.runningDays', ['mon', 'wed', 'fri']);
+        $context->assertJsonPath('profile.availability.unavailableDays', ['sat', 'sun']);
+
+        // Invalid day code is rejected.
+        $this->putJson('/api/me/profile', [
+            'availability' => ['unavailableDays' => ['funday']],
+        ])->assertStatus(422);
+    }
+
     public function test_profile_partial_json_sections_preserve_existing_keys(): void
     {
         $this->putJson('/api/me/profile', [

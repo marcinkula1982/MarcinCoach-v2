@@ -178,6 +178,56 @@ class WeeklyPlanServiceTest extends TestCase
         $this->assertLessThanOrEqual(90, (int) $long[0]['durationMin']);
     }
 
+    public function test_missed_workout_rebalance_skips_unavailable_days(): void
+    {
+        $adjustments = [
+            'adjustments' => [
+                ['code' => 'missed_workout_rebalance', 'params' => ['addMakeupEasySession' => true, 'makeupDurationMin' => 30]],
+            ],
+        ];
+
+        // NOTE: baseContext() uses array_replace_recursive, which merges list arrays by index,
+        // so the profile is assigned explicitly instead of being passed as an override.
+        $profileFor = static fn (array $unavailableDays, bool $conflict = false): array => [
+            'runningDays' => ['tue', 'thu', 'sun'],
+            'surfaces' => ['avoidAsphalt' => false],
+            'availability' => [
+                'runningDays' => ['tue', 'thu', 'sun'],
+                'unavailableDays' => $unavailableDays,
+                'unavailableDaysConflict' => $conflict,
+            ],
+        ];
+
+        // Baseline (no unavailableDays): first rest day in week order is Monday.
+        $baselineContext = $this->baseContext();
+        $baselineContext['profile'] = $profileFor([]);
+        $baseline = $this->service->generatePlan($baselineContext, $adjustments);
+        $baselineByDay = array_column($baseline['sessions'], null, 'day');
+        $this->assertSame('easy', $baselineByDay['mon']['type']);
+        $this->assertSame(30, $baselineByDay['mon']['durationMin']);
+
+        // With mon/wed unavailable: makeup goes to the first allowed rest day (Friday).
+        $planContext = $this->baseContext();
+        $planContext['profile'] = $profileFor(['mon', 'wed']);
+        $plan = $this->service->generatePlan($planContext, $adjustments);
+        $byDay = array_column($plan['sessions'], null, 'day');
+
+        $this->assertSame('rest', $byDay['mon']['type']);
+        $this->assertSame('rest', $byDay['wed']['type']);
+        $this->assertSame('easy', $byDay['fri']['type']);
+        $this->assertSame(30, $byDay['fri']['durationMin']);
+        $this->assertSame('rest', $byDay['sat']['type']);
+
+        // Conflict flag means unavailableDays are ignored -> behaves like baseline.
+        $conflictContext = $this->baseContext();
+        $conflictContext['profile'] = $profileFor(['mon', 'wed'], true);
+        $conflict = $this->service->generatePlan($conflictContext, $adjustments);
+        $conflictByDay = array_column($conflict['sessions'], null, 'day');
+        $this->assertSame('easy', $conflictByDay['mon']['type']);
+        $this->assertContains('unavailableDays pominięte: konflikt z runningDays', $conflict['rationale']);
+        $this->assertNotContains('unavailableDays pominięte: konflikt z runningDays', $plan['rationale']);
+    }
+
     // --- M1 beyond minimum: maxSessionMin cap ---
 
     public function test_max_session_min_caps_all_session_durations(): void
