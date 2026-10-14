@@ -90,6 +90,7 @@ class WeeklyPlanService
             }
         }
 
+        $makeupSkippedNoFutureDay = false;
         foreach (($adjustments['adjustments'] ?? []) as $adj) {
             $code = (string) ($adj['code'] ?? '');
             if ($code === 'reduce_load') {
@@ -173,15 +174,31 @@ class WeeklyPlanService
                 // Makeup session must not land on a day the user marked as unavailable.
                 // When unavailableDays conflict with runningDays they are ignored (same as in UserProfileService).
                 $makeupBlockedDays = $this->resolveUnavailableDays($context);
+                // Makeup session must not land in the past. todayIso (Y-m-d) is optional:
+                // without it the behaviour is unchanged (no date filter).
+                $todayIso = is_string($context['todayIso'] ?? null) && $context['todayIso'] !== '' ? $context['todayIso'] : null;
+                $makeupPlaced = false;
                 foreach ($sessions as &$s) {
-                    if (($s['type'] ?? null) === 'rest' && !in_array((string) ($s['day'] ?? ''), $makeupBlockedDays, true)) {
-                        $s['type'] = 'easy';
-                        $s['durationMin'] = $this->roundToFive($makeupDuration);
-                        $s['intensityHint'] = 'Z1-Z2';
-                        break;
+                    if (($s['type'] ?? null) !== 'rest' || in_array((string) ($s['day'] ?? ''), $makeupBlockedDays, true)) {
+                        continue;
                     }
+                    if ($todayIso !== null) {
+                        $dayIndex = array_search((string) ($s['day'] ?? 'mon'), self::WEEK_DAYS, true);
+                        $dayIso = $weekStart->addDays($dayIndex === false ? 0 : (int) $dayIndex)->toDateString();
+                        if ($dayIso < $todayIso) {
+                            continue;
+                        }
+                    }
+                    $s['type'] = 'easy';
+                    $s['durationMin'] = $this->roundToFive($makeupDuration);
+                    $s['intensityHint'] = 'Z1-Z2';
+                    $makeupPlaced = true;
+                    break;
                 }
                 unset($s);
+                if (!$makeupPlaced && $todayIso !== null) {
+                    $makeupSkippedNoFutureDay = true;
+                }
             }
 
             if ($code === 'harder_than_planned_guard') {
@@ -377,6 +394,10 @@ class WeeklyPlanService
 
         if (($context['profile']['availability']['unavailableDaysConflict'] ?? false) === true) {
             $output['rationale'][] = 'unavailableDays pominięte: konflikt z runningDays';
+        }
+
+        if ($makeupSkippedNoFutureDay) {
+            $output['rationale'][] = 'makeup pominięty: brak wolnego dnia w przyszłości';
         }
 
         if (is_array($blockContext) && !empty($blockContext)) {

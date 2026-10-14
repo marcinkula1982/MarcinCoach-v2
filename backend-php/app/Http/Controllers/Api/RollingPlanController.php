@@ -82,12 +82,27 @@ class RollingPlanController extends Controller
         $feedbackSignals = $this->feedbackV2Service->getLatestFeedbackSignalsForUser($userId);
         $adjustments = $this->adjustmentsService->generate($context, $feedbackSignals, $blockContext);
 
+        // "Today" for the planner (UTC date of generatedAtIso) — makeup sessions must not land in the past.
+        $todayIso = CarbonImmutable::parse((string) $context['generatedAtIso'])->utc()->toDateString();
+        $context['todayIso'] = $todayIso;
+
         $currentPlan = $this->weeklyPlanService->generatePlan($context, $adjustments, $blockContext);
         $nextContext = $context;
         $nextContext['generatedAtIso'] = CarbonImmutable::parse((string) $context['generatedAtIso'])->addDays(7)->toISOString();
+        $nextContext['todayIso'] = $todayIso;
         $nextBlockContext = $this->shiftBlockContext($blockContext);
         $nextContext['blockContext'] = $nextBlockContext;
-        $nextPlan = $this->weeklyPlanService->generatePlan($nextContext, $adjustments, $nextBlockContext);
+        // One-off reactions to a missed key workout apply to the current week only:
+        // no second makeup session and no loadScale cap in the next week.
+        if (isset($nextContext['signals']['adaptation']) && is_array($nextContext['signals']['adaptation'])) {
+            $nextContext['signals']['adaptation']['missedKeyWorkout'] = false;
+        }
+        $nextAdjustments = $adjustments;
+        $nextAdjustments['adjustments'] = array_values(array_filter(
+            is_array($adjustments['adjustments'] ?? null) ? $adjustments['adjustments'] : [],
+            fn ($a) => (string) ($a['code'] ?? '') !== 'missed_workout_rebalance',
+        ));
+        $nextPlan = $this->weeklyPlanService->generatePlan($nextContext, $nextAdjustments, $nextBlockContext);
 
         $this->rememberWeek($userId, $currentPlan, $blockContext ?? []);
         $this->rememberWeek($userId, $nextPlan, $nextBlockContext ?? []);

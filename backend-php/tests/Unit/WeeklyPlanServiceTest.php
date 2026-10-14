@@ -206,6 +206,87 @@ class WeeklyPlanServiceTest extends TestCase
         $this->assertSame($baseline['sessions'], $unchanged['sessions']);
     }
 
+    // --- D1: makeup session must not land in the past ---
+
+    /**
+     * baseContext() generatedAtIso 2026-04-24 (Fri) -> week Mon 2026-04-20 .. Sun 2026-04-26.
+     * runningDays tue/thu/sun -> rest days: mon(20), wed(22), fri(24), sat(25).
+     */
+    private function makeupContext(?string $todayIso): array
+    {
+        $context = $this->baseContext();
+        $context['profile'] = [
+            'runningDays' => ['tue', 'thu', 'sun'],
+            'surfaces' => ['avoidAsphalt' => false],
+        ];
+        if ($todayIso !== null) {
+            $context['todayIso'] = $todayIso;
+        }
+
+        return $context;
+    }
+
+    private function makeupAdjustments(): array
+    {
+        return [
+            'adjustments' => [
+                ['code' => 'missed_workout_rebalance', 'params' => ['addMakeupEasySession' => true, 'makeupDurationMin' => 30]],
+            ],
+        ];
+    }
+
+    public function test_missed_workout_rebalance_skips_days_before_today(): void
+    {
+        // Today = Thursday 23.04 -> mon(20) and wed(22) are past, fri(24) is the first future rest day.
+        $plan = $this->service->generatePlan($this->makeupContext('2026-04-23'), $this->makeupAdjustments());
+        $byDay = array_column($plan['sessions'], null, 'day');
+
+        $this->assertSame('rest', $byDay['mon']['type']);
+        $this->assertSame('rest', $byDay['wed']['type']);
+        $this->assertSame('easy', $byDay['fri']['type']);
+        $this->assertSame(30, $byDay['fri']['durationMin']);
+        $this->assertSame('Z1-Z2', $byDay['fri']['intensityHint']);
+        $this->assertSame('rest', $byDay['sat']['type']);
+        $this->assertNotContains('makeup pominięty: brak wolnego dnia w przyszłości', $plan['rationale']);
+
+        // Today itself is allowed: today = Wednesday 22.04 -> makeup on wed.
+        $todayPlan = $this->service->generatePlan($this->makeupContext('2026-04-22'), $this->makeupAdjustments());
+        $todayByDay = array_column($todayPlan['sessions'], null, 'day');
+        $this->assertSame('rest', $todayByDay['mon']['type']);
+        $this->assertSame('easy', $todayByDay['wed']['type']);
+        $this->assertSame('rest', $todayByDay['fri']['type']);
+    }
+
+    public function test_missed_workout_rebalance_without_future_rest_day_adds_nothing(): void
+    {
+        // Today = Sunday 26.04 -> every rest day of the week is in the past.
+        $plan = $this->service->generatePlan($this->makeupContext('2026-04-26'), $this->makeupAdjustments());
+        $noAdjustment = $this->service->generatePlan($this->makeupContext('2026-04-26'), ['adjustments' => []]);
+
+        $this->assertSame($noAdjustment['sessions'], $plan['sessions']);
+        foreach (['mon', 'wed', 'fri', 'sat'] as $day) {
+            $this->assertSame('rest', array_column($plan['sessions'], null, 'day')[$day]['type']);
+        }
+        $this->assertContains('makeup pominięty: brak wolnego dnia w przyszłości', $plan['rationale']);
+        $this->assertNotContains('makeup pominięty: brak wolnego dnia w przyszłości', $noAdjustment['rationale']);
+    }
+
+    public function test_missed_workout_rebalance_without_today_iso_behaves_as_before(): void
+    {
+        $plan = $this->service->generatePlan($this->makeupContext(null), $this->makeupAdjustments());
+        $byDay = array_column($plan['sessions'], null, 'day');
+
+        // No date filter: first rest day in week order (Monday) gets the makeup, even though it is "past".
+        $this->assertSame('easy', $byDay['mon']['type']);
+        $this->assertSame(30, $byDay['mon']['durationMin']);
+        $this->assertSame('rest', $byDay['wed']['type']);
+        $this->assertNotContains('makeup pominięty: brak wolnego dnia w przyszłości', $plan['rationale']);
+
+        // Empty string is treated as "no todayIso".
+        $emptyPlan = $this->service->generatePlan($this->makeupContext(''), $this->makeupAdjustments());
+        $this->assertSame($plan['sessions'], $emptyPlan['sessions']);
+    }
+
     public function test_missed_workout_rebalance_skips_unavailable_days(): void
     {
         $adjustments = [

@@ -552,14 +552,19 @@ class PlanningParityTest extends TestCase
             $this->assertContains('missed_workout_rebalance', $codes);
             $this->assertNull($this->skipDrivenReduceLoad(), 'one skip must not trigger reduce_load');
 
-            // Makeup easy session lands on a non-running day (first rest day: Monday).
+            // Makeup easy session lands on the first FUTURE rest day. "Now" is Tuesday 2026-04-21,
+            // so Monday 2026-04-20 (past) must stay rest and Wednesday 2026-04-22 gets the makeup.
             $plannedBaseline = count(array_filter($baseline->json('sessions'), fn ($s) => ($s['type'] ?? 'rest') !== 'rest'));
             $plannedAfter = count(array_filter($afterOneSkip->json('sessions'), fn ($s) => ($s['type'] ?? 'rest') !== 'rest'));
-            $this->assertGreaterThan($plannedBaseline, $plannedAfter);
-            $mondays = array_values(array_filter($afterOneSkip->json('sessions'), fn ($s) => ($s['day'] ?? null) === 'mon'));
-            $this->assertNotEmpty($mondays);
-            $this->assertSame('easy', $mondays[0]['type']);
-            $this->assertSame(30, $mondays[0]['durationMin']);
+            $this->assertSame($plannedBaseline + 1, $plannedAfter);
+            $byDate = array_column($afterOneSkip->json('sessions'), null, 'dateIso');
+            $this->assertSame('rest', $byDate['2026-04-20']['type']);
+            $this->assertSame('easy', $byDate['2026-04-22']['type']);
+            $this->assertSame(30, $byDate['2026-04-22']['durationMin']);
+            // Second week: no repeated makeup — all non-running days stay rest.
+            foreach (['2026-04-27', '2026-04-29', '2026-05-01', '2026-05-02'] as $restDate) {
+                $this->assertSame('rest', $byDate[$restDate]['type'], "unexpected makeup on {$restDate}");
+            }
 
             // Adaptation payload stays internal.
             $this->assertArrayNotHasKey('adaptation', $this->getJson('/api/training-context')->json('signals'));
@@ -609,6 +614,68 @@ class PlanningParityTest extends TestCase
         }
 
         return null;
+    }
+
+    public function test_rolling_plan_makeup_session_only_in_current_week_and_not_in_past(): void
+    {
+        // Saturday 2026-04-25: rest days mon/wed/fri of this week are in the past, sat is "today".
+        Carbon::setTestNow(Carbon::parse('2026-04-25T12:00:00Z'));
+
+        try {
+            Workout::create([
+                'user_id' => 1,
+                'action' => 'save',
+                'kind' => 'training',
+                'summary' => ['startTimeIso' => '2026-04-16T09:00:00Z', 'durationSec' => 3000, 'distanceM' => 8000, 'intensity' => 28],
+                'source' => 'manual',
+                'dedupe_key' => 'planning-makeup-current-week',
+            ]);
+            $this->putJson('/api/me/profile', [
+                'availability' => ['runningDays' => ['tue', 'thu', 'sun']],
+            ])->assertOk();
+
+            // Skipped long run on Sunday 2026-04-19 (within the last 7 days).
+            $this->postJson('/api/workouts/manual-check-in', [
+                'plannedSessionDate' => '2026-04-19',
+                'status' => 'skipped',
+                'plannedType' => 'long',
+                'plannedDurationMin' => 90,
+                'skipReason' => 'no_time',
+            ])->assertCreated();
+
+            $plan = $this->getJson('/api/rolling-plan?days=14');
+            $plan->assertOk();
+            $this->assertContains('missed_workout_rebalance', $plan->json('appliedAdjustmentsCodes'));
+
+            $byDate = array_column($plan->json('sessions'), null, 'dateIso');
+            // Past rest days untouched.
+            $this->assertSame('rest', $byDate['2026-04-20']['type']);
+            $this->assertSame('rest', $byDate['2026-04-22']['type']);
+            $this->assertSame('rest', $byDate['2026-04-24']['type']);
+            // Today is allowed -> makeup on Saturday 2026-04-25.
+            $this->assertSame('easy', $byDate['2026-04-25']['type']);
+            $this->assertSame(30, $byDate['2026-04-25']['durationMin']);
+            $this->assertSame(0, (int) $byDate['2026-04-25']['weekIndex']);
+            // Next week: no makeup at all.
+            foreach (['2026-04-27', '2026-04-29', '2026-05-01', '2026-05-02'] as $restDate) {
+                $this->assertSame('rest', $byDate[$restDate]['type'], "unexpected makeup on {$restDate}");
+                $this->assertSame(1, (int) $byDate[$restDate]['weekIndex']);
+            }
+            $makeups = array_filter($plan->json('sessions'), fn ($s) => ($s['intensityHint'] ?? null) === 'Z1-Z2');
+            $this->assertCount(1, $makeups);
+            $this->assertNotContains('makeup pominięty: brak wolnego dnia w przyszłości', $plan->json('rationale'));
+
+            // Sunday 2026-04-26: no future rest day left in the current week -> nothing added, rationale explains.
+            Carbon::setTestNow(Carbon::parse('2026-04-26T12:00:00Z'));
+            $sundayPlan = $this->getJson('/api/rolling-plan?days=14');
+            $sundayPlan->assertOk();
+            $this->assertContains('missed_workout_rebalance', $sundayPlan->json('appliedAdjustmentsCodes'));
+            $sundayMakeups = array_filter($sundayPlan->json('sessions'), fn ($s) => ($s['intensityHint'] ?? null) === 'Z1-Z2');
+            $this->assertCount(0, $sundayMakeups);
+            $this->assertContains('makeup pominięty: brak wolnego dnia w przyszłości', $sundayPlan->json('rationale'));
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_rolling_plan_unchanged_for_user_without_check_ins(): void
