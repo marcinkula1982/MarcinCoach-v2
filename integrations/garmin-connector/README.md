@@ -4,7 +4,7 @@ This service is a thin adapter around [`python-garminconnect`](https://github.co
 
 Important: this is an unofficial Garmin Connect connector. It logs in as a user and uses Garmin Connect endpoints, not the official Garmin Activity API.
 
-Required library version: `garminconnect>=0.3.17`. The previously pinned `0.3.3` stopped working around 2026-06, because Garmin began rejecting old cached tokens (`401 Token is not active`) and `0.3.3` never fell back to a fresh login. Versions `>=0.3.17` discard rejected tokens and log in again automatically.
+Required library version: `garminconnect>=0.3.17`. The previously pinned `0.3.3` stopped working around 2026-06, because Garmin began rejecting old cached tokens and `0.3.3` never fell back to a fresh login. After upgrading to `>=0.3.17`, sync works.
 
 ## Endpoints
 - `POST /v1/garmin/connect/start`
