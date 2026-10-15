@@ -459,6 +459,105 @@ class WorkoutsTest extends TestCase
         ]);
     }
 
+    public function test_import_dedupes_same_activity_from_another_source(): void
+    {
+        // Garmin sync stored the run first.
+        $garmin = Workout::create([
+            'user_id' => 1,
+            'action' => 'import',
+            'kind' => 'training',
+            'summary' => ['startTimeIso' => '2026-10-11T08:30:00Z', 'durationSec' => 3600, 'distanceM' => 10000],
+            'source' => 'GARMIN',
+            'source_activity_id' => 'garmin-run-1',
+            'dedupe_key' => 'GARMIN:garmin-run-1',
+        ]);
+
+        // Manual upload of the same run: +3 min, +2% duration, -1% distance.
+        $response = $this->postJson('/api/workouts/import', [
+            'source' => 'manual',
+            'startTimeIso' => '2026-10-11T08:33:00Z',
+            'durationSec' => 3672,
+            'distanceM' => 9900,
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJson(['id' => $garmin->id, 'created' => false]);
+
+        $this->assertDatabaseCount('workouts', 1);
+        $this->assertDatabaseHas('workout_import_events', [
+            'workout_id' => $garmin->id,
+            'source' => 'MANUAL_UPLOAD',
+            'status' => 'DEDUPED',
+        ]);
+    }
+
+    public function test_import_does_not_dedupe_different_activity_from_another_source(): void
+    {
+        Workout::create([
+            'user_id' => 1,
+            'action' => 'import',
+            'kind' => 'training',
+            'summary' => ['startTimeIso' => '2026-10-11T08:30:00Z', 'durationSec' => 3600, 'distanceM' => 10000],
+            'source' => 'GARMIN',
+            'source_activity_id' => 'garmin-run-2',
+            'dedupe_key' => 'GARMIN:garmin-run-2',
+        ]);
+
+        // Same morning, but 15 minutes later: a different session.
+        $response = $this->postJson('/api/workouts/import', [
+            'source' => 'manual',
+            'startTimeIso' => '2026-10-11T08:45:00Z',
+            'durationSec' => 3600,
+            'distanceM' => 10000,
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJson(['created' => true]);
+        $this->assertDatabaseCount('workouts', 2);
+    }
+
+    public function test_external_import_dedupes_strava_activity_against_garmin_workout(): void
+    {
+        $garmin = Workout::create([
+            'user_id' => 1,
+            'action' => 'import',
+            'kind' => 'training',
+            'summary' => ['startTimeIso' => '2026-10-11T08:30:00Z', 'durationSec' => 3600, 'distanceM' => 10000],
+            'source' => 'GARMIN',
+            'source_activity_id' => 'garmin-run-3',
+            'dedupe_key' => 'GARMIN:garmin-run-3',
+        ]);
+
+        $stats = app(\App\Services\ExternalWorkoutImportService::class)->importActivities(1, 'strava', [
+            [
+                'sourceActivityId' => '9001',
+                'startTimeIso' => '2026-10-11T08:31:00Z',
+                'durationSec' => 3650,
+                'distanceM' => 10150,
+                'activityType' => 'Run',
+            ],
+            [
+                // Evening run the same day: not a duplicate.
+                'sourceActivityId' => '9002',
+                'startTimeIso' => '2026-10-11T17:00:00Z',
+                'durationSec' => 1800,
+                'distanceM' => 5000,
+                'activityType' => 'Run',
+            ],
+        ]);
+
+        $this->assertSame(['fetched' => 2, 'imported' => 1, 'deduped' => 1, 'failed' => 0], $stats);
+        $this->assertDatabaseCount('workouts', 2);
+        $this->assertDatabaseMissing('workouts', ['source' => 'STRAVA', 'source_activity_id' => '9001']);
+        $this->assertDatabaseHas('workouts', ['source' => 'STRAVA', 'source_activity_id' => '9002']);
+        $this->assertDatabaseHas('workout_import_events', [
+            'workout_id' => $garmin->id,
+            'source' => 'STRAVA',
+            'source_activity_id' => '9001',
+            'status' => 'DEDUPED',
+        ]);
+    }
+
     public function test_import_creates_updated_event_for_tcx_upsert(): void
     {
         $tcxXml1 = '<?xml version="1.0" encoding="UTF-8"?>

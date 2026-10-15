@@ -7,6 +7,7 @@ use App\Models\Workout;
 use App\Models\WorkoutImportEvent;
 use App\Models\WorkoutRawTcx;
 use App\Services\Analysis\ActivityImpactService;
+use App\Services\CrossSourceWorkoutDedupeService;
 use App\Services\FitParsingService;
 use App\Services\GpxParsingService;
 use App\Services\PlanComplianceService;
@@ -88,6 +89,34 @@ class WorkoutsController extends Controller
             unset($enriched['startTimeIso'], $enriched['durationSec'], $enriched['distanceM'], $enriched['original'], $enriched['trimmed']);
             $summary = array_merge($enriched, $summary);
         }
+        // Cross-source fuzzy dedupe only for persisted saves (previews never dedupe).
+        if ((string) $validated['action'] === 'save') {
+            $crossSourceMatch = app(CrossSourceWorkoutDedupeService::class)
+                ->findMatch($userId, WorkoutSourceContract::MANUAL_UPLOAD, $startTimeIso, $durationSec, max($distanceM, 0));
+            if ($crossSourceMatch) {
+                WorkoutImportEvent::create([
+                    'workout_id' => $crossSourceMatch->id,
+                    'source' => WorkoutSourceContract::MANUAL_UPLOAD,
+                    'source_activity_id' => null,
+                    'tcx_hash' => hash('sha256', (string) $validated['tcxRaw']),
+                    'status' => 'DEDUPED',
+                    'imported_at' => now(),
+                ]);
+
+                return response()->json([
+                    'id' => $crossSourceMatch->id,
+                    'userId' => $userId,
+                    'action' => $crossSourceMatch->action,
+                    'kind' => $crossSourceMatch->kind,
+                    'summary' => $crossSourceMatch->summary ?? [],
+                    'raceMeta' => $crossSourceMatch->race_meta,
+                    'workoutMeta' => $crossSourceMatch->workout_meta,
+                    'createdAt' => $crossSourceMatch->created_at?->toIso8601String(),
+                    'deduped' => true,
+                ]);
+            }
+        }
+
         $dedupeKey = $this->generateDedupeKey(WorkoutSourceContract::MANUAL_UPLOAD, null, $startTimeIso, max($durationSec, 1), max($distanceM, 0));
 
         $workout = Workout::create([
@@ -415,6 +444,26 @@ class WorkoutsController extends Controller
                         'created' => false,
                     ], 200);
                 }
+            }
+
+            // Cross-source fuzzy dedupe: the same activity already stored from another
+            // source (e.g. Garmin sync, then manual TCX upload). First wins, log DEDUPED.
+            $crossSourceMatch = app(CrossSourceWorkoutDedupeService::class)
+                ->findMatch($userId, $source, (string) $startTimeIso, (int) $durationSec, (int) $distanceM);
+            if ($crossSourceMatch) {
+                WorkoutImportEvent::create([
+                    'workout_id' => $crossSourceMatch->id,
+                    'source' => $source,
+                    'source_activity_id' => $sourceActivityId,
+                    'tcx_hash' => $tcxHash,
+                    'status' => 'DEDUPED',
+                    'imported_at' => now(),
+                ]);
+
+                return response()->json([
+                    'id' => $crossSourceMatch->id,
+                    'created' => false,
+                ], 200);
             }
 
             // Generate dedupe_key

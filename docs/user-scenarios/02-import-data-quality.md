@@ -185,6 +185,8 @@ User wgrał już ten sam plik TCX kiedyś.
 ### Uwagi produktowe
 Decyzja: jak zachować się gdy duplikat ma inne metadane (np. user dodał race meta). Sugestia: backend nadpisuje metadane jeśli nowy upload je zawiera, ale nie tworzy duplikatu data.
 
+2026-10-15: duplikat z **innego źródła** (np. Garmin sync + Strava sync albo + upload TCX tego samego biegu) jest wykrywany przez `CrossSourceWorkoutDedupeService`: start ≤10 min (UTC), czas ≤5%, dystans ≤3%; zostaje pierwszy wpis, nowy dostaje tylko zdarzenie `DEDUPED`. Progi są założeniem startowym (NIEZWERYFIKOWANE na danych produkcyjnych). Priorytet źródeł (np. Garmin > TCX) nie jest rozstrzygnięty.
+
 ---
 
 ## US-IMPORT-005 — Upload pliku z innego sportu (Wrong Sport)

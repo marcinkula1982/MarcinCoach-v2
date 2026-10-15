@@ -14,6 +14,7 @@ class ExternalWorkoutImportService
         private readonly ?TrainingSignalsService $trainingSignalsService = null,
         private readonly ?PlanComplianceService $planComplianceService = null,
         private readonly ?TrainingAlertsV1Service $trainingAlertsV1Service = null,
+        private readonly ?CrossSourceWorkoutDedupeService $crossSourceDedupeService = null,
     ) {}
 
     /**
@@ -52,6 +53,24 @@ class ExternalWorkoutImportService
                 $deduped++;
                 WorkoutImportEvent::create([
                     'workout_id' => $existing->id,
+                    'source' => $canonicalSource,
+                    'source_activity_id' => $sourceActivityId,
+                    'tcx_hash' => null,
+                    'status' => 'DEDUPED',
+                    'imported_at' => now(),
+                ]);
+
+                continue;
+            }
+
+            // Cross-source fuzzy dedupe: same user, different source, same activity
+            // within tolerance (see CrossSourceWorkoutDedupeService). First wins.
+            $crossSourceMatch = ($this->crossSourceDedupeService ?? new CrossSourceWorkoutDedupeService)
+                ->findMatch($userId, $canonicalSource, $startTimeIso, $durationSec, $distanceM);
+            if ($crossSourceMatch) {
+                $deduped++;
+                WorkoutImportEvent::create([
+                    'workout_id' => $crossSourceMatch->id,
                     'source' => $canonicalSource,
                     'source_activity_id' => $sourceActivityId,
                     'tcx_hash' => null,
