@@ -15,7 +15,7 @@ type Summary = {
     }
   }
   byWeek: Array<{
-    week: string
+    weekStart: string
     workouts: number
     distanceKm: number
     durationMin: number
@@ -117,8 +117,10 @@ export default function AnalyticsSummary({ refreshToken = 0 }: AnalyticsSummaryP
   let unplannedPct: number | null = null
 
   // Posortowane tygodnie – kanoniczna kolejność zarówno dla logiki trendu,
-  // jak i dla renderowanej tabeli tygodni.
-  const weeksSorted = [...byWeek].sort((a, b) => String(a.week).localeCompare(String(b.week)))
+  // jak i dla renderowanej tabeli tygodni. Backend zwraca weekStart (poniedziałek Y-m-d).
+  const weeksSorted = [...byWeek].sort((a, b) =>
+    String(a.weekStart).localeCompare(String(b.weekStart)),
+  )
   const lastWeek = weeksSorted.length >= 1 ? weeksSorted[weeksSorted.length - 1] : null
   const prevWeek = weeksSorted.length >= 2 ? weeksSorted[weeksSorted.length - 2] : null
 
@@ -128,8 +130,24 @@ export default function AnalyticsSummary({ refreshToken = 0 }: AnalyticsSummaryP
   const prevMin = prevWeek?.durationMin ?? 0
   const deltaKmPct = prevKm > 0 ? ((lastKm - prevKm) / prevKm) * 100 : null
   const volumeJump = deltaKmPct !== null && deltaKmPct > 30
-  const trendBadge =
-    deltaKmPct === null ? '—' : deltaKmPct > 0 ? '▲' : deltaKmPct < 0 ? '▼' : '—'
+
+  const formatWeekLabel = (weekStart: string): string => {
+    if (!weekStart || weekStart.length < 10) return weekStart || '—'
+    const start = new Date(`${weekStart.slice(0, 10)}T00:00:00Z`)
+    if (Number.isNaN(start.getTime())) return weekStart
+    const end = new Date(start)
+    end.setUTCDate(end.getUTCDate() + 6)
+    const fmt = (d: Date) =>
+      `${String(d.getUTCDate()).padStart(2, '0')}.${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+    return `${fmt(start)}–${fmt(end)}`
+  }
+
+  const weekTrend = (km: number, prevKmValue: number | null): string => {
+    if (prevKmValue === null) return '–'
+    if (km > prevKmValue) return '▲'
+    if (km < prevKmValue) return '▼'
+    return '–'
+  }
 
   const focusText = (() => {
     if (totalWorkouts === 0) {
@@ -158,7 +176,7 @@ export default function AnalyticsSummary({ refreshToken = 0 }: AnalyticsSummaryP
     if (lastWeek && prevWeek) {
       const pct =
         deltaKmPct === null ? '—' : `${deltaKmPct >= 0 ? '+' : ''}${deltaKmPct.toFixed(0)}%`
-      s2 = `Ostatni tydzień ${String(lastWeek.week)}: ${lastKm.toFixed(1)} km vs ${prevKm.toFixed(
+      s2 = `Ostatni tydzień ${formatWeekLabel(lastWeek.weekStart)}: ${lastKm.toFixed(1)} km vs ${prevKm.toFixed(
         1,
       )} km (${pct}); ${lastMin.toFixed(0)} min vs ${prevMin.toFixed(0)} min.`
     }
@@ -261,17 +279,18 @@ export default function AnalyticsSummary({ refreshToken = 0 }: AnalyticsSummaryP
             </tr>
           </thead>
           <tbody>
-            {weeksSorted.map((w) => (
-              <tr key={w.week} className="border-t border-slate-700">
-                <td className="p-2">{w.week}</td>
-                <td className="p-2 text-right">{w.workouts}</td>
-                <td className="p-2 text-right">{w.distanceKm.toFixed(1)}</td>
-                <td className="p-2 text-right">{w.durationMin.toFixed(0)}</td>
-                <td className="p-2 text-center">
-                  {lastWeek && w.week === lastWeek.week ? trendBadge : ''}
-                </td>
-              </tr>
-            ))}
+            {weeksSorted.map((w, index) => {
+              const prevKmValue = index > 0 ? weeksSorted[index - 1].distanceKm : null
+              return (
+                <tr key={w.weekStart} className="border-t border-slate-700">
+                  <td className="p-2">{formatWeekLabel(w.weekStart)}</td>
+                  <td className="p-2 text-right">{w.workouts}</td>
+                  <td className="p-2 text-right">{w.distanceKm.toFixed(1)}</td>
+                  <td className="p-2 text-right">{w.durationMin.toFixed(0)}</td>
+                  <td className="p-2 text-center">{weekTrend(w.distanceKm, prevKmValue)}</td>
+                </tr>
+              )
+            })}
             {weeksSorted.length === 0 && (
               <tr className="border-t border-slate-700">
                 <td className="p-2 text-slate-400" colSpan={5}>

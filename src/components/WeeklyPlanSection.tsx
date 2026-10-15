@@ -718,7 +718,7 @@ export default function WeeklyPlanSection({
                             </div>
                           ) : (
                             <span className="text-xs text-slate-500">
-                              {date && date > todayIso() ? 'Po treningu' : 'â€“'}
+                              {date && date > todayIso() ? 'Po treningu' : '–'}
                             </span>
                           )}
                         </td>

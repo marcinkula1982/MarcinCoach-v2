@@ -38,6 +38,14 @@ const WorkoutsList = ({
   const [deletingAll, setDeletingAll] = useState(false)
   const safeWorkouts = Array.isArray(workouts) ? workouts : []
 
+  const sortedWorkouts = useMemo(() => {
+    return [...safeWorkouts].sort((a, b) => {
+      const da = getWorkoutDate(a) ?? ''
+      const db = getWorkoutDate(b) ?? ''
+      return db.localeCompare(da)
+    })
+  }, [safeWorkouts])
+
   const totals = useMemo(() => {
     const totalWorkouts = safeWorkouts.length
     const totalDistanceKm = safeWorkouts.reduce(
@@ -97,7 +105,7 @@ const WorkoutsList = ({
       </div>
 
       <div className="space-y-3">
-        {safeWorkouts.map((w) => {
+        {sortedWorkouts.map((w) => {
           const distanceM = w.summary.trimmed?.distanceM ?? w.summary.original?.distanceM ?? 0
           const durationSec = w.summary.trimmed?.durationSec ?? w.summary.original?.durationSec ?? 0
           const distanceKm = (distanceM / 1000).toFixed(2)
@@ -119,7 +127,7 @@ const WorkoutsList = ({
             </div>
           )
         })}
-        {safeWorkouts.length === 0 && (
+        {sortedWorkouts.length === 0 && (
           <div className="rounded-lg border border-dashed border-slate-700 bg-slate-900/30 px-4 py-3 text-sm text-slate-300">Brak zapisanych treningow.</div>
         )}
       </div>
