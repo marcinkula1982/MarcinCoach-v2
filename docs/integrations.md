@@ -44,6 +44,8 @@ Onboarding data-first:
 
 To potwierdza, ze `python-garminconnect` w obecnej integracji obsluguje nie tylko sync aktywnosci do MarcinCoach, ale tez upload zaplanowanego treningu do Garmin Connect i przypisanie go do kalendarza. Nadal jest to nieoficjalna sciezka Garmin Connect, wiec utrzymujemy jawne ryzyka auth/MFA/rate limit/regulaminu.
 
+Wymagana wersja biblioteki: `garminconnect>=0.3.17`. Wczesniej przypieta wersja `0.3.3` przestala dzialac ok. 06.2026, bo Garmin zaczal odrzucac stare tokeny (`401 Token is not active`), a `0.3.3` nie robila wtedy swiezego logowania. Wersje `>=0.3.17` same odrzucaja niewazne tokeny i loguja sie ponownie.
+
 ## Strava - produkcyjny setup
 
 Stan 2026-04-30:
