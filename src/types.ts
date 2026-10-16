@@ -41,6 +41,11 @@ export type WorkoutSummary = {
   trimmed?: Metrics | null
   totalPoints: number
   selectedPoints: number
+  name?: string | null
+  provider?: string | null
+  hr?: { avgBpm?: number | null } | null
+  distanceM?: number | null
+  durationSec?: number | null
 }
 
 export type SaveWorkoutPayload = {

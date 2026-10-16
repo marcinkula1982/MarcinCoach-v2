@@ -222,6 +222,8 @@ const App = () => {
   const [activeTab, setActiveTab] = useState<AppTabId>('dashboard')
   const [integrationNotice, setIntegrationNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
+  const refreshAnalytics = useCallback(() => setDataRefreshToken((p) => p + 1), [])
+
   // Auth headers are injected by the axios interceptor in `src/api/client.ts`
 
   useEffect(() => {
@@ -693,6 +695,7 @@ const App = () => {
           setNote('')
           setSaveSuccess('WorkoutMeta zaktualizowane')
           refreshRollingPlan()
+          refreshAnalytics()
           await loadWorkoutFeedback(currentWorkoutId, { generateIfMissing: true })
           return
         } catch (error: any) {
@@ -722,6 +725,7 @@ const App = () => {
         setNote('')
         setSaveSuccess('Trening zapisany w bazie')
         refreshRollingPlan()
+        refreshAnalytics()
         await loadWorkoutFeedback(workoutId, { generateIfMissing: true })
       } catch (error: any) {
         if (error?.response?.status === 409) {
@@ -729,6 +733,7 @@ const App = () => {
           setSaveError(null)
           await loadWorkouts()
           refreshRollingPlan()
+          refreshAnalytics()
           return
         }
         const msg = error?.response?.data?.message || error?.message || String(error)
@@ -805,6 +810,7 @@ const App = () => {
     try {
       await deleteWorkout(id)
       setWorkouts((prev) => prev.filter((w) => String(w.id) !== id))
+      refreshAnalytics()
       if (currentWorkoutId === id) {
         setCurrentWorkoutId(null)
         setCurrentWorkoutDate(null)
@@ -822,6 +828,7 @@ const App = () => {
     try {
       await deleteAllWorkouts()
       setWorkouts([])
+      refreshAnalytics()
       setCurrentWorkoutId(null)
       setCurrentWorkoutDate(null)
       setCurrentFileName(null)
@@ -843,6 +850,7 @@ const App = () => {
     async (result: ManualCheckInResponse) => {
       await loadWorkouts()
       refreshRollingPlan()
+      refreshAnalytics()
 
       const { checkIn } = result
       setCurrentFile(null)
@@ -872,7 +880,7 @@ const App = () => {
       setCurrentWorkoutId(null)
       setWorkoutFeedback(null)
     },
-    [loadWorkoutFeedback, loadWorkouts, refreshRollingPlan],
+    [loadWorkoutFeedback, loadWorkouts, refreshAnalytics, refreshRollingPlan],
   )
 
   const handleGenerateFeedback = useCallback(() => {
@@ -1183,6 +1191,7 @@ const App = () => {
             <WeeklyPlanSection
               refreshToken={rollingPlanRefreshToken}
               onManualCheckInSaved={handleManualCheckInSaved}
+              workouts={workouts}
             />
 
             <AiPlanSection refreshToken={authRefreshToken} />
@@ -1473,6 +1482,7 @@ const App = () => {
                     <WeeklyPlanSection
                       refreshToken={rollingPlanRefreshToken}
                       onManualCheckInSaved={handleManualCheckInSaved}
+                      workouts={workouts}
                     />
                     <AiPlanSection refreshToken={authRefreshToken} />
                     {currentWorkoutId && (

@@ -1,9 +1,13 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { hasStoredSession } from '../api/client'
-import { fetchRollingPlan, generateRollingPlan } from '../api/workouts'
+import { fetchRollingPlan, generateRollingPlan, getWorkoutDate } from '../api/workouts'
 import { garminSendWorkout } from '../api/garmin'
 import ManualCheckInDialog from './ManualCheckInDialog'
-import type { ManualCheckInResponse, ManualCheckInStatus } from '../api/workouts'
+import type {
+  ManualCheckInResponse,
+  ManualCheckInStatus,
+  WorkoutListItem,
+} from '../api/workouts'
 import type {
   CrossTrainingIntensity,
   CrossTrainingPromptPreference,
@@ -142,6 +146,80 @@ const garminWorkoutName = (session: PlannedSession, date: string) => {
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
+const localDateKey = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+const localTodayKey = () => localDateKey(new Date())
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+const utcDayMs = (iso: string): number => Date.parse(`${iso.slice(0, 10)}T00:00:00Z`)
+
+const sessionWeekIndex = (plan: WeeklyPlan, session: PlannedSession): number => {
+  if (typeof session.weekIndex === 'number') return session.weekIndex
+  const date = session.dateIso ?? resolveSessionDate(plan.weekStartIso, session.day)
+  if (!date) return 0
+  const diffDays = (utcDayMs(date) - utcDayMs(plan.weekStartIso)) / DAY_MS
+  if (Number.isNaN(diffDays)) return 0
+  return diffDays < 7 ? 0 : 1
+}
+
+const weekRangeLabel = (weekStartIso: string, weekIndex: number): string => {
+  const startMs = utcDayMs(weekStartIso)
+  if (Number.isNaN(startMs)) return ''
+  const fmt = (ms: number) => {
+    const d = new Date(ms)
+    return `${String(d.getUTCDate()).padStart(2, '0')}.${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+  }
+  const first = startMs + weekIndex * 7 * DAY_MS
+  return `${fmt(first)}–${fmt(first + 6 * DAY_MS)}`
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  GARMIN: 'Garmin',
+  STRAVA: 'Strava',
+  MANUAL_CHECK_IN: 'Check-in',
+}
+
+const formatClock = (totalSec: number): string => {
+  const sec = Math.max(0, Math.round(totalSec))
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`
+}
+
+const describeCompletedWorkout = (workout: WorkoutListItem): string => {
+  const summary = workout.summary ?? ({} as WorkoutListItem['summary'])
+  const metrics = summary.trimmed ?? summary.original ?? null
+  const distanceM = metrics?.distanceM ?? summary.distanceM ?? 0
+  const durationSec = metrics?.durationSec ?? summary.durationSec ?? 0
+
+  const start = new Date(getWorkoutDate(workout))
+  const time = Number.isNaN(start.getTime())
+    ? '--:--'
+    : `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`
+  const label =
+    summary.name || PROVIDER_LABELS[String(summary.provider ?? '').toUpperCase()] || 'Trening'
+
+  const parts = [
+    `✓ ${time}`,
+    label,
+    `${(distanceM / 1000).toFixed(2)} km`,
+    formatClock(durationSec),
+  ]
+  if (distanceM > 0) {
+    parts.push(`${formatClock(durationSec / (distanceM / 1000))} /km`)
+  }
+  const avgBpm = summary.hr?.avgBpm
+  if (typeof avgBpm === 'number' && avgBpm > 0) {
+    parts.push(`${Math.round(avgBpm)} bpm`)
+  }
+  return parts.join(' · ')
+}
+
 const defaultDurationForSport = (sportKind: CrossTrainingSport) => {
   if (sportKind === 'bike') return 30
   if (sportKind === 'strength') return 60
@@ -171,6 +249,7 @@ const hasWorkoutBlocks = (session: PlannedSession) =>
 type WeeklyPlanSectionProps = {
   refreshToken?: number
   onManualCheckInSaved?: (response: ManualCheckInResponse) => void | Promise<void>
+  workouts?: WorkoutListItem[]
 }
 
 type ActiveManualCheckIn = {
@@ -196,6 +275,7 @@ const checkInStatusLabel = (status: ManualCheckInStatus) => {
 export default function WeeklyPlanSection({
   refreshToken = 0,
   onManualCheckInSaved,
+  workouts = [],
 }: WeeklyPlanSectionProps) {
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan | null>(null)
   const [weeklyPlanLoading, setWeeklyPlanLoading] = useState(false)
@@ -213,6 +293,25 @@ export default function WeeklyPlanSection({
   const [manualCheckInStatuses, setManualCheckInStatuses] = useState<
     Record<string, { status: ManualCheckInStatus; workoutId: number | null }>
   >({})
+  const [activeWeek, setActiveWeek] = useState<0 | 1>(0)
+
+  const workoutsByDate = useMemo(() => {
+    const map = new Map<string, WorkoutListItem[]>()
+    for (const workout of workouts) {
+      const start = new Date(getWorkoutDate(workout))
+      if (Number.isNaN(start.getTime())) continue
+      const key = localDateKey(start)
+      const list = map.get(key) ?? []
+      list.push(workout)
+      map.set(key, list)
+    }
+    for (const list of map.values()) {
+      list.sort(
+        (a, b) => new Date(getWorkoutDate(a)).getTime() - new Date(getWorkoutDate(b)).getTime(),
+      )
+    }
+    return map
+  }, [workouts])
 
   const loadWeeklyPlan = async () => {
     setWeeklyPlanLoading(true)
@@ -575,6 +674,29 @@ export default function WeeklyPlanSection({
             </div>
           )}
 
+          <div className="flex flex-wrap gap-2" role="tablist" aria-label="Tydzień planu">
+            {([0, 1] as const).map((weekIdx) => {
+              const isActive = activeWeek === weekIdx
+              return (
+                <button
+                  key={weekIdx}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => setActiveWeek(weekIdx)}
+                  className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                    isActive
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  {weekIdx === 0 ? 'Ten tydzień' : 'Następny tydzień'}{' '}
+                  {weekRangeLabel(weeklyPlan.weekStartIso, weekIdx)}
+                </button>
+              )
+            })}
+          </div>
+
           {/* Sessions table */}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -591,7 +713,17 @@ export default function WeeklyPlanSection({
                 </tr>
               </thead>
               <tbody>
-                {weeklyPlan.sessions.map((session, idx) => {
+                {(() => {
+                  const today = localTodayKey()
+                  const visible = weeklyPlan.sessions
+                    .map((session, idx) => ({ session, idx }))
+                    .filter(({ session }) => sessionWeekIndex(weeklyPlan, session) === activeWeek)
+                  const lastIdxByDate = new Map<string, number>()
+                  for (const { session, idx } of visible) {
+                    const d = sessionDate(weeklyPlan, session)
+                    if (d) lastIdxByDate.set(d.slice(0, 10), idx)
+                  }
+                  return visible.map(({ session, idx }) => {
                   const key = sendKey(session, idx)
                   const status = sendStatuses[key]
                   const sendable = isSendableSession(session)
@@ -603,10 +735,17 @@ export default function WeeklyPlanSection({
                   const manualKey = date ? manualCheckInKey(session, date, idx) : key
                   const manualStatus = manualCheckInStatuses[manualKey]
                   const canCheckIn = canManualCheckIn(session, date)
+                  const dateKey = date ? date.slice(0, 10) : null
+                  const isPast = dateKey !== null && dateKey < today
+                  const pastClass = isPast ? ' opacity-60 [&>td]:text-slate-500' : ''
+                  const completed =
+                    dateKey !== null && dateKey <= today && lastIdxByDate.get(dateKey) === idx
+                      ? workoutsByDate.get(dateKey) ?? []
+                      : []
 
                   return (
                     <Fragment key={key}>
-                      <tr className="border-b border-slate-800/50 hover:bg-slate-800/30">
+                      <tr className={`border-b border-slate-800/50 hover:bg-slate-800/30${pastClass}`}>
                         <td className="py-2 px-3 text-white font-medium">
                           <div>{dayToPl(session.day)}</div>
                           {date && <div className="text-xs font-normal text-slate-500">{date}</div>}
@@ -754,9 +893,23 @@ export default function WeeklyPlanSection({
                           </td>
                         </tr>
                       )}
+                      {completed.map((workout) => (
+                        <tr
+                          key={`${key}-done-${workout.id}`}
+                          className={`border-b border-slate-800/50 bg-emerald-950/20${pastClass}`}
+                        >
+                          <td
+                            colSpan={8}
+                            className={`py-1.5 px-3 text-xs ${isPast ? 'text-slate-500' : 'text-emerald-200'}`}
+                          >
+                            {describeCompletedWorkout(workout)}
+                          </td>
+                        </tr>
+                      ))}
                     </Fragment>
                   )
-                })}
+                  })
+                })()}
               </tbody>
             </table>
           </div>

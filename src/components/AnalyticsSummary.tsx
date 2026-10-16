@@ -149,6 +149,18 @@ export default function AnalyticsSummary({ refreshToken = 0 }: AnalyticsSummaryP
   const deltaKmPct = prevKm > 0 ? ((lastKm - prevKm) / prevKm) * 100 : null
   const volumeJump = deltaKmPct !== null && deltaKmPct > 30
 
+  const lastWeekInProgress = (() => {
+    const key = String(lastWeek?.weekStart ?? '').slice(0, 10)
+    const startMs = Date.parse(`${key}T00:00:00Z`)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key) || Number.isNaN(startMs)) return false
+    const weekEndKey = new Date(startMs + 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    const now = new Date()
+    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+      now.getDate(),
+    ).padStart(2, '0')}`
+    return todayKey <= weekEndKey
+  })()
+
   const formatWeekLabel = (weekStart: string): string => {
     if (!weekStart || weekStart.length < 10) return weekStart || '—'
     const start = new Date(`${weekStart.slice(0, 10)}T00:00:00Z`)
@@ -191,7 +203,11 @@ export default function AnalyticsSummary({ refreshToken = 0 }: AnalyticsSummaryP
   const wnioskiText = (() => {
     const s1 = `W okresie: ${totalWorkouts} treningów, ${totalKm.toFixed(1)} km, ${totalMin.toFixed(0)} min.`
     let s2 = ''
-    if (lastWeek && prevWeek) {
+    if (lastWeek && prevWeek && lastWeekInProgress) {
+      s2 = `Bieżący tydzień ${formatWeekLabel(lastWeek.weekStart)} (w toku): ${lastKm.toFixed(
+        1,
+      )} km, ${lastMin.toFixed(0)} min; poprzedni: ${prevKm.toFixed(1)} km, ${prevMin.toFixed(0)} min.`
+    } else if (lastWeek && prevWeek) {
       const pct =
         deltaKmPct === null ? '—' : `${deltaKmPct >= 0 ? '+' : ''}${deltaKmPct.toFixed(0)}%`
       s2 = `Ostatni tydzień ${formatWeekLabel(lastWeek.weekStart)}: ${lastKm.toFixed(1)} km vs ${prevKm.toFixed(
@@ -309,7 +325,11 @@ export default function AnalyticsSummary({ refreshToken = 0 }: AnalyticsSummaryP
                   <td className="p-2 text-right">{w.workouts}</td>
                   <td className="p-2 text-right">{w.distanceKm.toFixed(1)}</td>
                   <td className="p-2 text-right">{w.durationMin.toFixed(0)}</td>
-                  <td className="p-2 text-center">{weekTrend(w.distanceKm, prevKmValue)}</td>
+                  <td className="p-2 text-center whitespace-nowrap">
+                    {lastWeekInProgress && index === weeksSorted.length - 1
+                      ? 'w toku'
+                      : weekTrend(w.distanceKm, prevKmValue)}
+                  </td>
                 </tr>
               )
             })}
