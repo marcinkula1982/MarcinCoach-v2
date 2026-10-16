@@ -218,6 +218,7 @@ const App = () => {
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false)
   const [authRefreshToken, setAuthRefreshToken] = useState(0)
   const [planRefreshToken, setPlanRefreshToken] = useState(0)
+  const [dataRefreshToken, setDataRefreshToken] = useState(0)
   const [activeTab, setActiveTab] = useState<AppTabId>('dashboard')
   const [integrationNotice, setIntegrationNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
@@ -835,6 +836,7 @@ const App = () => {
   const handleGarminSyncComplete = useCallback(async () => {
     await loadWorkouts()
     refreshRollingPlan()
+    setDataRefreshToken((prev) => prev + 1)
   }, [loadWorkouts, refreshRollingPlan])
 
   const handleManualCheckInSaved = useCallback(
@@ -1169,9 +1171,9 @@ const App = () => {
               </div>
             )}
 
-            <OnboardingSummaryCard refreshToken={authRefreshToken} />
+            <OnboardingSummaryCard refreshToken={authRefreshToken + dataRefreshToken} />
 
-            <AnalyticsSummary refreshToken={authRefreshToken} />
+            <AnalyticsSummary refreshToken={authRefreshToken + dataRefreshToken} />
 
             <GarminSection
               refreshToken={authRefreshToken}

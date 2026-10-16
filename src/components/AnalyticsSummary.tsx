@@ -42,6 +42,18 @@ type Summary = {
   }>
 }
 
+function isAdjacentWeek(prevWeekStart: string, weekStart: string): boolean {
+  const prevKey = String(prevWeekStart ?? '').slice(0, 10)
+  const weekKey = String(weekStart ?? '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(prevKey) || !/^\d{4}-\d{2}-\d{2}$/.test(weekKey)) {
+    return false
+  }
+  const prevMs = Date.parse(`${prevKey}T00:00:00Z`)
+  const weekMs = Date.parse(`${weekKey}T00:00:00Z`)
+  if (Number.isNaN(prevMs) || Number.isNaN(weekMs)) return false
+  return weekMs - prevMs === 7 * 24 * 60 * 60 * 1000
+}
+
 interface AnalyticsSummaryProps {
   refreshToken?: number
 }
@@ -122,7 +134,13 @@ export default function AnalyticsSummary({ refreshToken = 0 }: AnalyticsSummaryP
     String(a.weekStart).localeCompare(String(b.weekStart)),
   )
   const lastWeek = weeksSorted.length >= 1 ? weeksSorted[weeksSorted.length - 1] : null
-  const prevWeek = weeksSorted.length >= 2 ? weeksSorted[weeksSorted.length - 2] : null
+  const candidatePrevWeek = weeksSorted.length >= 2 ? weeksSorted[weeksSorted.length - 2] : null
+  const prevWeek =
+    lastWeek &&
+    candidatePrevWeek &&
+    isAdjacentWeek(candidatePrevWeek.weekStart, lastWeek.weekStart)
+      ? candidatePrevWeek
+      : null
 
   const lastKm = lastWeek?.distanceKm ?? 0
   const prevKm = prevWeek?.distanceKm ?? 0
@@ -280,7 +298,11 @@ export default function AnalyticsSummary({ refreshToken = 0 }: AnalyticsSummaryP
           </thead>
           <tbody>
             {weeksSorted.map((w, index) => {
-              const prevKmValue = index > 0 ? weeksSorted[index - 1].distanceKm : null
+              const previous = index > 0 ? weeksSorted[index - 1] : null
+              const prevKmValue =
+                previous && isAdjacentWeek(previous.weekStart, w.weekStart)
+                  ? previous.distanceKm
+                  : null
               return (
                 <tr key={w.weekStart} className="border-t border-slate-700">
                   <td className="p-2">{formatWeekLabel(w.weekStart)}</td>
