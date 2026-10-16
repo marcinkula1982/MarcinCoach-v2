@@ -2794,13 +2794,14 @@ XML;
             $sessionDateIso  = (string) $plannedSession['dateIso'];  // e.g. '2026-04-27'
             $plannedDuration = max(30, (int) ($plannedSession['durationMin'] ?? 40));
 
-            // Step 4: Create a workout on the exact planned date with matching effort.
+            // Step 4: Create a workout on the exact planned date with matching effort,
+            // after the plan was generated (12:00), so the snapshot is a valid basis.
             $workout = Workout::create([
                 'user_id'    => 1,
                 'action'     => 'save',
                 'kind'       => 'training',
                 'summary'    => [
-                    'startTimeIso'     => $sessionDateIso . 'T10:00:00Z',
+                    'startTimeIso'     => $sessionDateIso . 'T18:00:00Z',
                     'durationSec'      => $plannedDuration * 60,
                     'movingTimeSec'    => $plannedDuration * 60,
                     'distanceM'        => $plannedDuration * 165,
@@ -2945,7 +2946,8 @@ XML;
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'window_start_iso' => $windowStart,
             'window_end_iso' => $windowEnd,
-            'created_at' => now(),
+            // Plans are judged only if they existed before the workout.
+            'created_at' => Carbon::parse($dateIso)->subDay()->startOfDay(),
         ]);
     }
 }

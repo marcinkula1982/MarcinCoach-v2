@@ -1,7 +1,7 @@
 # MarcinCoach v2 - execution plan
 
 Status dokumentu: aktywna lista wykonawcza.
-Stan: 2026-04-30.
+Stan: 2026-10-16.
 
 Ten plik odpowiada na pytanie: **co robimy po kolei**.
 
@@ -34,7 +34,7 @@ Nie zastępuje:
 
 | Kolejność | ID | Pri | Task | Scenariusze | Definition of done | Walidacja |
 |---:|---|---|---|---|---|---|
-| 37 | EP-038 | P0-MVP | Datowo świadoma analiza potreningowa plan vs wykonanie | US-PLAN-005, US-PLAN-006, US-PLAN-007, US-PLAN-008, US-PLAN-009, US-PLAN-010, US-PLAN-018, US-IMPORT-011 | Po loginie/imporcie/check-inie user widzi opisową analizę względem dat planu: dopasowanie treningu do sesji planu, stopień wykonania, odchylenia czas/intensywność/dystans, brakujące sesje między ostatnimi treningami oraz jasne rozróżnienie treningu historycznego od bieżącego planu | **Backend done:** `PlanSnapshotService` podpięty do `WeeklyPlanController` + `RollingPlanController`; 13 testów `PlanSnapshotIntegrationTest`; 2 testy E2E `WorkoutsTest --filter=feedback` potwierdzają łańcuch snapshot→feedback. **Pozostaje:** UI smoke import/login -> feedback -> plan; przypadek luki między treningami w UI. |
+| 37 | EP-038 | P0-MVP | Datowo świadoma analiza potreningowa plan vs wykonanie | US-PLAN-005, US-PLAN-006, US-PLAN-007, US-PLAN-008, US-PLAN-009, US-PLAN-010, US-PLAN-018, US-IMPORT-011 | Po loginie/imporcie/check-inie user widzi opisową analizę względem dat planu: dopasowanie treningu do sesji planu, stopień wykonania, odchylenia czas/intensywność/dystans, brakujące sesje między ostatnimi treningami oraz jasne rozróżnienie treningu historycznego od bieżącego planu | **Backend (część):** `PlanSnapshotService` podpięty do `WeeklyPlanController` + `RollingPlanController`; 13 testów `PlanSnapshotIntegrationTest`; E2E `WorkoutsTest --filter=feedback`. **2026-10-16:** `WorkoutPlanFeedbackService` nie scala nakładających się snapshotów: na datę wybiera jedną wersję (`created_at` DESC, potem `id` DESC), tylko snapshot istniejący przed startem treningu; `missingSessions` tylko daty ściśle między poprzednim a ocenianym biegiem; `overload_risk` bez bólu nie mówi o objawach. `hasPlan` tylko gdy snapshot obejmuje dzień treningu (jawny rest ≠ brak planu); sesje z sąsiednich dni nie robią `unplanned`, a pasująca zaległa jednostka nadal jest `missed_related`. `php artisan test tests/Unit/WorkoutPlanFeedbackServiceTest.php tests/Feature/Api/WorkoutsTest.php --filter=feedback` -> 28 passed, 261 assertions; `php artisan test` -> 416 passed, 2371 assertions. **Pozostaje:** UI smoke import/login -> feedback -> plan; przypadek luki między treningami w UI. Całego EP-038 nie zamykać bez smoke. |
 
 ## NEXT
 

@@ -140,11 +140,49 @@ class WorkoutPlanFeedbackService
             return $this->emptyPlan();
         }
 
-        $start = $actual['date']->copy()->subDays(3)->startOfDay();
-        $end = $actual['date']->copy()->endOfDay();
-        $snapshotPlan = $this->snapshotPlan((int) $workout->user_id, $start, $end, $actual['date']);
+        $workoutStart = $actual['date'];
+        $actualDateIso = (string) $actual['dateIso'];
+        $firstDay = $workoutStart->copy()->subDays(3)->startOfDay();
+        $snapshots = $this->loadSnapshots((int) $workout->user_id, $firstDay->toDateString(), $actualDateIso);
+        if ($snapshots === []) {
+            return $this->emptyPlan();
+        }
 
-        return $snapshotPlan;
+        // Each day is judged against the version that existed on that day; the
+        // workout's own day only against versions created before the workout started.
+        $sessions = [];
+        $windowSnapshot = null;
+        $hasPlanForWorkoutDay = false;
+        for ($day = $firstDay->copy(); $day->toDateString() <= $actualDateIso; $day->addDay()) {
+            $dateIso = $day->toDateString();
+            $availableAt = $dateIso === $actualDateIso ? $workoutStart : $day->copy()->endOfDay();
+            $snapshot = $this->snapshotForDate($snapshots, $dateIso, $availableAt);
+            if ($snapshot === null) {
+                continue;
+            }
+            if ($dateIso === $actualDateIso) {
+                $hasPlanForWorkoutDay = true;
+                $windowSnapshot = $snapshot;
+            } else {
+                $windowSnapshot ??= $snapshot;
+            }
+            foreach ($this->snapshotSessionsOn($snapshot, $dateIso) as $session) {
+                $sessions[] = $session;
+            }
+        }
+
+        if ($windowSnapshot === null) {
+            return $this->emptyPlan();
+        }
+
+        return $this->planFromSessions(
+            $sessions,
+            'plan_snapshots',
+            $actual,
+            $windowSnapshot['windowStartIso'],
+            $windowSnapshot['windowEndIso'],
+            $hasPlanForWorkoutDay,
+        );
     }
 
     /**
@@ -152,7 +190,7 @@ class WorkoutPlanFeedbackService
      * @param array<string,mixed> $actual
      * @return array<string,mixed>
      */
-    private function planFromSessions(array $sessions, string $source, array $actual, ?string $windowStart, ?string $windowEnd): array
+    private function planFromSessions(array $sessions, string $source, array $actual, ?string $windowStart, ?string $windowEnd, ?bool $hasPlan = null): array
     {
         $actualDate = (string) ($actual['dateIso'] ?? '');
         $exact = [];
@@ -179,7 +217,7 @@ class WorkoutPlanFeedbackService
         }
 
         return [
-            'hasPlan' => count($sessions) > 0,
+            'hasPlan' => $hasPlan ?? count($sessions) > 0,
             'source' => $source,
             'windowStartIso' => $windowStart,
             'windowEndIso' => $windowEnd,
@@ -217,23 +255,6 @@ class WorkoutPlanFeedbackService
         $planned = null;
         $matchedPlanDateIso = null;
         $durationRatio = null;
-
-        if (! $plan['hasPlan']) {
-            $status = $legacyDateRelation === 'historical' ? 'historical' : 'no_plan';
-            return $this->assessment(
-                $status,
-                null,
-                'low',
-                $status === 'historical'
-                    ? 'Trening jest historyczny i nie ma planu obowiązującego dla tej daty.'
-                    : 'Dla daty treningu nie ma zapisanego planu, więc nie oceniam wykonania względem założeń.',
-                null,
-                $actualPublic,
-                [],
-                null,
-                null,
-            );
-        }
 
         $exactRun = $this->firstRunningSession($plan['exactSessions']);
         if ($exactRun !== null) {
@@ -333,6 +354,23 @@ class WorkoutPlanFeedbackService
                 $differences,
                 (string) $candidate['dateIso'],
                 $comparison['durationRatio'],
+            );
+        }
+
+        if (! $plan['hasPlan']) {
+            $status = $legacyDateRelation === 'historical' ? 'historical' : 'no_plan';
+            return $this->assessment(
+                $status,
+                null,
+                'low',
+                $status === 'historical'
+                    ? 'Trening jest historyczny i nie ma planu obowiązującego dla tej daty.'
+                    : 'Dla daty treningu nie ma zapisanego planu, więc nie oceniam wykonania względem założeń.',
+                null,
+                $actualPublic,
+                [],
+                null,
+                null,
             );
         }
 
@@ -540,7 +578,10 @@ class WorkoutPlanFeedbackService
     private function planImpact(array $assessment, array $missingSessions, array $riskFlags): array
     {
         $status = (string) ($assessment['planMatchStatus'] ?? 'unknown');
-        $hasHighRisk = count(array_filter($riskFlags, fn ($flag) => ($flag['level'] ?? '') === 'high')) > 0;
+        $highRiskCodes = array_column(
+            array_filter($riskFlags, fn ($flag) => ($flag['level'] ?? '') === 'high'),
+            'code',
+        );
         if ($status === 'historical') {
             return [
                 'level' => 'none',
@@ -553,10 +594,22 @@ class WorkoutPlanFeedbackService
                 'message' => 'Brak zapisanego planu dla tej daty, więc nie wyciągam decyzji planistycznej z tej jednostki.',
             ];
         }
-        if ($hasHighRisk) {
+        if (in_array('pain_flag', $highRiskCodes, true)) {
             return [
                 'level' => 'high',
                 'message' => 'Priorytetem jest ostrożność: kolejna jednostka powinna być lekka lub skrócona, jeśli objawy się utrzymają.',
+            ];
+        }
+        if (in_array('overload_risk', $highRiskCodes, true)) {
+            return [
+                'level' => 'high',
+                'message' => 'Sygnał obciążenia: suma ostatnich treningów jest wysoka, więc kolejna jednostka powinna być lekka lub skrócona, bez dokładania intensywności.',
+            ];
+        }
+        if ($highRiskCodes !== []) {
+            return [
+                'level' => 'high',
+                'message' => 'Priorytetem jest ostrożność: kolejna jednostka powinna być lekka lub skrócona.',
             ];
         }
         if (count($missingSessions) > 0) {
@@ -1091,51 +1144,102 @@ class WorkoutPlanFeedbackService
     }
 
     /**
-     * @return array<string,mixed>
+     * Snapshots of one user whose window may cover a date in [$fromDate, $toDate],
+     * newest version first (created_at DESC, id DESC).
+     *
+     * @return list<array{id:int,createdAt:Carbon,windowStartIso:string,windowEndIso:string,windowStartDate:?string,windowEndDate:?string,sessions:list<array<string,mixed>>}>
      */
-    private function snapshotPlan(int $userId, Carbon $start, Carbon $end, Carbon $workoutDate): array
+    private function loadSnapshots(int $userId, string $fromDate, string $toDate): array
     {
+        // Date-prefix bounds: '~' sorts after every character used in ISO timestamps.
         $rows = DB::table('plan_snapshots')
             ->where('user_id', $userId)
-            ->where('window_end_iso', '>=', $start->copy()->utc()->toISOString())
-            ->where('window_start_iso', '<=', $end->copy()->utc()->toISOString())
-            ->orderByDesc('created_at')
+            ->where('window_end_iso', '>=', $fromDate)
+            ->where('window_start_iso', '<=', $toDate.'~')
             ->get();
 
-        $sessions = [];
-        $seen = [];
-        $windowStart = null;
-        $windowEnd = null;
+        $snapshots = [];
         foreach ($rows as $row) {
-            $snapshot = json_decode((string) $row->snapshot_json, true);
-            if (! is_array($snapshot)) {
+            $createdAt = $this->carbonOrNull($row->created_at ?? null);
+            if (! $createdAt instanceof Carbon) {
                 continue;
             }
-            $rowSessions = $this->sessionsFromSnapshot($snapshot, 'plan_snapshots');
-            foreach ($rowSessions as $session) {
-                $dateIso = (string) ($session['dateIso'] ?? '');
-                if ($dateIso === '') {
-                    continue;
-                }
-                $key = $dateIso.'|'.($session['id'] ?? '').'|'.($session['type'] ?? '').'|'.($session['durationMin'] ?? '');
-                if (isset($seen[$key])) {
-                    continue;
-                }
-                $seen[$key] = true;
-                $sessions[] = $session;
+            $decoded = json_decode((string) $row->snapshot_json, true);
+            if (! is_array($decoded)) {
+                continue;
             }
-            $windowStart ??= (string) $row->window_start_iso;
-            $windowEnd ??= (string) $row->window_end_iso;
+            $snapshots[] = [
+                'id' => (int) $row->id,
+                'createdAt' => $createdAt,
+                'windowStartIso' => (string) $row->window_start_iso,
+                'windowEndIso' => (string) $row->window_end_iso,
+                'windowStartDate' => $this->dateString($row->window_start_iso),
+                'windowEndDate' => $this->dateString($row->window_end_iso),
+                'sessions' => $this->sessionsFromSnapshot($decoded, 'plan_snapshots'),
+            ];
         }
 
-        if ($sessions === []) {
-            return $this->emptyPlan();
+        usort($snapshots, function (array $a, array $b): int {
+            $byCreated = $b['createdAt']->getTimestamp() <=> $a['createdAt']->getTimestamp();
+
+            return $byCreated !== 0 ? $byCreated : $b['id'] <=> $a['id'];
+        });
+
+        return $snapshots;
+    }
+
+    /**
+     * The single plan version in force for $dateIso: the newest snapshot that
+     * covers the date and already existed at $availableAt.
+     *
+     * @param list<array<string,mixed>> $snapshots
+     * @return array<string,mixed>|null
+     */
+    private function snapshotForDate(array $snapshots, string $dateIso, Carbon $availableAt): ?array
+    {
+        foreach ($snapshots as $snapshot) {
+            if ($snapshot['createdAt']->greaterThan($availableAt)) {
+                continue;
+            }
+            if (! $this->snapshotCoversDate($snapshot, $dateIso)) {
+                continue;
+            }
+
+            return $snapshot;
         }
 
-        return $this->planFromSessions($sessions, 'plan_snapshots', [
-            'date' => $workoutDate,
-            'dateIso' => $workoutDate->toDateString(),
-        ], $windowStart, $windowEnd);
+        return null;
+    }
+
+    /**
+     * @param array<string,mixed> $snapshot
+     */
+    private function snapshotCoversDate(array $snapshot, string $dateIso): bool
+    {
+        $start = $snapshot['windowStartDate'];
+        $end = $snapshot['windowEndDate'];
+        if ($start === null || $end === null) {
+            $dates = array_column($snapshot['sessions'], 'dateIso');
+            if ($dates === []) {
+                return false;
+            }
+            $start ??= min($dates);
+            $end ??= max($dates);
+        }
+
+        return $start <= $dateIso && $dateIso <= $end;
+    }
+
+    /**
+     * @param array<string,mixed> $snapshot
+     * @return list<array<string,mixed>>
+     */
+    private function snapshotSessionsOn(array $snapshot, string $dateIso): array
+    {
+        return array_values(array_filter(
+            $snapshot['sessions'],
+            fn (array $session): bool => ($session['dateIso'] ?? null) === $dateIso,
+        ));
     }
 
     /**
@@ -1262,29 +1366,41 @@ class WorkoutPlanFeedbackService
             return [];
         }
 
-        $planned = $this->snapshotPlan((int) $workout->user_id, $start, $end, $actual['date'])['sessions'] ?? [];
-        if (! is_array($planned) || $planned === []) {
+        $userId = (int) $workout->user_id;
+        $snapshots = $this->loadSnapshots($userId, $start->toDateString(), $end->toDateString());
+        if ($snapshots === []) {
             return [];
         }
-        $actualDates = $this->actualRunDates((int) $workout->user_id, $start, $end);
+        $actualDates = $this->actualRunDates($userId, $start, $end);
+        $actualDateIso = (string) $actual['dateIso'];
+        $todayIso = Carbon::now()->toDateString();
         $missing = [];
-        foreach ($planned as $session) {
-            if (! $this->isRunningSession($session)) {
+        for ($day = $start->copy(); $day->lessThanOrEqualTo($end); $day->addDay()) {
+            $dateIso = $day->toDateString();
+            if ($dateIso >= $actualDateIso || $dateIso > $todayIso) {
+                break;
+            }
+            if (isset($actualDates[$dateIso])) {
                 continue;
             }
-            $dateIso = (string) ($session['dateIso'] ?? '');
-            if ($dateIso === '' || isset($actualDates[$dateIso])) {
+            $snapshot = $this->snapshotForDate($snapshots, $dateIso, $day->copy()->endOfDay());
+            if ($snapshot === null) {
                 continue;
             }
-            $type = (string) ($session['type'] ?? 'easy');
-            $duration = (int) ($session['durationMin'] ?? 0);
-            $missing[] = [
-                'dateIso' => $dateIso,
-                'type' => $type,
-                'durationMin' => $duration,
-                'status' => 'missing_or_not_imported',
-                'message' => "W planie była jednostka {$type} {$duration} min na {$dateIso}, ale nie ma jej w danych; to może być brak importu albo pominięcie.",
-            ];
+            foreach ($this->snapshotSessionsOn($snapshot, $dateIso) as $session) {
+                if (! $this->isRunningSession($session)) {
+                    continue;
+                }
+                $type = (string) ($session['type'] ?? 'easy');
+                $duration = (int) ($session['durationMin'] ?? 0);
+                $missing[] = [
+                    'dateIso' => $dateIso,
+                    'type' => $type,
+                    'durationMin' => $duration,
+                    'status' => 'missing_or_not_imported',
+                    'message' => "W planie była jednostka {$type} {$duration} min na {$dateIso}, ale nie ma jej w danych; to może być brak importu albo pominięcie.",
+                ];
+            }
         }
 
         return $missing;
