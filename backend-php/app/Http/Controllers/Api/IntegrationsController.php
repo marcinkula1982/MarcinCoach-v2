@@ -14,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 
 class IntegrationsController extends Controller
@@ -101,11 +102,29 @@ class IntegrationsController extends Controller
 
         $res = Http::withToken($token)->timeout(45)->get('https://www.strava.com/api/v3/athlete/activities', $params);
         if (!$res->successful()) {
+            // Only locally defined diagnostics: upstream bodies may contain secrets.
+            $diagnostics = [
+                'syncRunId' => $syncRun->id,
+                'upstreamStatus' => $res->status(),
+                'reason' => match ($res->status()) {
+                    401 => 'STRAVA_UNAUTHORIZED',
+                    403 => 'STRAVA_FORBIDDEN',
+                    429 => 'STRAVA_RATE_LIMITED',
+                    default => 'STRAVA_HTTP_ERROR',
+                },
+            ];
             $syncRun->status = 'failed';
             $syncRun->error_code = 'STRAVA_SYNC_FAILED';
+            $syncRun->meta = $diagnostics;
             $syncRun->finished_at = now();
             $syncRun->save();
-            return response()->json(['message' => 'Strava sync failed'], 502);
+            Log::warning('Strava activities request failed', $diagnostics);
+
+            return response()->json([
+                'message' => 'Strava sync failed',
+                'error' => 'STRAVA_SYNC_FAILED',
+                ...$diagnostics,
+            ], 502);
         }
         $rows = is_array($res->json()) ? $res->json() : [];
         $activities = array_values(array_map(function ($a) {

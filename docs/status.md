@@ -170,6 +170,10 @@ Wszystkie pozostale dokumenty `.md` / `.txt` z poprzedniego katalogu `docs/` ora
 
 ## Aktualna kolejnosc dalszych prac
 
+### 2026-10-16 — STRAVA-DIAG (US-STRAVA-002)
+
+Dodano bezpieczna diagnostyke nieudanej odpowiedzi HTTP na pobieranie aktywnosci Stravy: `upstreamStatus`, lokalny `reason` (401/403/429/inny HTTP) i `syncRunId` w odpowiedzi API, logu warning i `integration_sync_runs.meta`. Status aplikacji pozostaje 502. Nie zapisujemy surowej odpowiedzi, tokenow ani naglowkow. Test `IntegrationsParityTest.php`: 10 passed, 96 assertions, w tym 401/403/429/503 oraz kontrola, ze diagnostyka zawiera tylko dozwolone pola. Deploy i produkcyjny smoke nieuruchomione; przyczyna awarii NIEZWERYFIKOWANA.
+
 Operacyjna kolejnosc dalszych prac jest w `docs/execution-plan.md`.
 
 Ten plik (`docs/status.md`) zostaje dziennikiem wykonanych funkcjonalnosci i walidacji. Nie utrzymujemy tutaj drugiej listy TODO, zeby nie rozjechala sie z execution planem.

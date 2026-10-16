@@ -77,6 +77,12 @@ Po zamknięciu aktualnego `NOW` przenieś tutaj kolejny pakiet z sekcji `LATER`.
 
 ## DONE - baseline przed tym planem
 
+### 2026-10-16 — STRAVA-DIAG — wykonane lokalnie
+
+- Scenariusz: US-STRAVA-002. Dodano `upstreamStatus`, lokalny kod `reason` i `syncRunId` do odpowiedzi bledu sync, logu warning i meta przebiegu. Bez surowej odpowiedzi Stravy, tokenow i naglowkow.
+- Weryfikacja: `php artisan test tests/Feature/Api/IntegrationsParityTest.php` — 10 passed, 96 assertions; przypadki 401/403/429/503 i kontrola zawartosci diagnostyki.
+- Deploy nieuruchomiony. Przyczyna produkcyjnego 502 nadal NIEZWERYFIKOWANA; diagnostyka nie oznacza naprawy synchronizacji.
+
 | Data | ID | Obszar | Co jest domknięte | Dowód |
 |---|---|---|---|---|
 | 2026-04-26 | DONE-001 | Produkcja | Front i backend odpowiadają na IQHost | `https://coach.host89998.iqhs.pl`, `/api/health` |

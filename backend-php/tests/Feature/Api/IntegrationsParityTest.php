@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 class IntegrationsParityTest extends TestCase
@@ -128,6 +129,52 @@ class IntegrationsParityTest extends TestCase
             && $request['grant_type'] === 'refresh_token'
             && $request['refresh_token'] === 'refresh-old'
         );
+    }
+
+    public function test_strava_sync_failure_reports_status_without_exposing_upstream_content(): void
+    {
+        \App\Models\IntegrationAccount::create([
+            'user_id' => 1,
+            'provider' => 'strava',
+            'access_token' => 'secret-access-token',
+            'refresh_token' => 'secret-refresh-token',
+            'access_token_expires_at' => now()->addHour(),
+            'status' => 'connected',
+        ]);
+        Log::spy();
+        $sequence = Http::sequence();
+        foreach ([401, 403, 429, 503] as $status) {
+            $sequence->push([
+                'message' => 'secret-access-token',
+                'errors' => [['code' => 'secret-refresh-token']],
+            ], $status);
+        }
+        Http::fake(['https://www.strava.com/api/v3/athlete/activities*' => $sequence]);
+
+        foreach ([401 => 'STRAVA_UNAUTHORIZED', 403 => 'STRAVA_FORBIDDEN',
+            429 => 'STRAVA_RATE_LIMITED', 503 => 'STRAVA_HTTP_ERROR'] as $status => $reason) {
+            $response = $this->postJson('/api/integrations/strava/sync');
+            $response->assertStatus(502)
+                ->assertJsonPath('error', 'STRAVA_SYNC_FAILED')
+                ->assertJsonPath('upstreamStatus', $status)
+                ->assertJsonPath('reason', $reason);
+            $diagnostics = [
+                'syncRunId' => $response->json('syncRunId'),
+                'upstreamStatus' => $status,
+                'reason' => $reason,
+            ];
+            $run = \App\Models\IntegrationSyncRun::findOrFail($diagnostics['syncRunId']);
+            $this->assertSame('failed', $run->status);
+            $this->assertSame('STRAVA_SYNC_FAILED', $run->error_code);
+            $this->assertSame($diagnostics, $run->meta);
+            $this->assertNotNull($run->finished_at);
+            $this->assertSame([
+                'message' => 'Strava sync failed',
+                'error' => 'STRAVA_SYNC_FAILED',
+                ...$diagnostics,
+            ], $response->json());
+            Log::shouldHaveReceived('warning')->with('Strava activities request failed', $diagnostics)->once();
+        }
     }
 
     public function test_garmin_connect_sync_and_status_contract(): void
