@@ -216,6 +216,15 @@ export default function GarminSection({ refreshToken, onSyncComplete }: Props) {
                 <span>Pobrano: <strong>{syncResult.fetched}</strong></span>
                 <span>Dodano: <strong>{syncResult.imported}</strong></span>
                 <span>Duplikaty: <strong>{syncResult.deduped}</strong></span>
+                  {syncResult.tcxEnriched !== undefined && (
+                    <span>Uzupełniono z TCX: <strong>{syncResult.tcxEnriched}</strong></span>
+                  )}
+                  {(syncResult.tcxFailed ?? 0) > 0 && (
+                    <span className="text-amber-300">Nie udało się uzupełnić danych: <strong>{syncResult.tcxFailed}</strong>. Podsumowania zachowane; spróbuj ponownie.</span>
+                  )}
+                  {(syncResult.tcxPending ?? 0) > 0 && (
+                    <span className="text-amber-300">Dane do uzupełnienia: <strong>{syncResult.tcxPending}</strong>. Uruchom synchronizację ponownie.</span>
+                  )}
                 {syncResult.failed > 0 && (
                   <span className="text-amber-300">Błędy: <strong>{syncResult.failed}</strong></span>
                 )}

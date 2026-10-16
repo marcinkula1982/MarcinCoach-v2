@@ -188,6 +188,7 @@ class IntegrationsParityTest extends TestCase
                 'status' => 'connected',
             ], 200),
             'https://connector.local/v1/garmin/sync' => Http::response([
+                'connectorMode' => 'stub',
                 'items' => [
                     [
                         'sourceActivityId' => 'garmin-activity-1',

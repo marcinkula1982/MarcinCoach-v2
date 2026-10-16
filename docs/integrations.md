@@ -32,6 +32,10 @@ Onboarding data-first:
 
 ## Garmin - status live
 
+2026-10-16 — lokalnie dodano pobieranie TCX przy sync (GARMIN-TCX-01). Dotyczy nowych i istniejacych wpisow GARMIN; parser i serwis uzupelnienia TCX sa wspolne, niezalezne od dostawcy. Zapis XML i przeliczenie metryk/pipeline v1/v2 sa transakcyjne. API zwraca `tcxEnriched`, `tcxFailed`, `tcxPending`; front pokazuje te liczniki. Maks. 5 pobran na sync, z budzetem rozpoczynania pobran 20 s i timeoutem 10 s na plik; kolejny sync tego samego zakresu uzupelnia pozostale. Bledy pobrania/parsa zachowuja dotychczasowy trening. Gotowe pliki nie sa pobierane ponownie; stub nie pobiera plikow.
+
+Przed live smoke wymagana migracja `2026_10_16_000000_expand_workout_raw_tcx_xml` (`php artisan migrate --force` w `app-laravel` po deployu backendu): LONGTEXT zamiast limitu TEXT ok. 64 KiB. Hook Git nie uruchamia migracji. Front: lokalny build i `deploy-front.ps1`. Testy: 405 passed / 2316 assertions; build OK. Produkcyjne pobieranie, migracja MySQL i nowe dane po sync: NIEZWERYFIKOWANE. Siedem nowych miar nie jest jeszcze zaimplementowanych w tym etapie.
+
 2026-04-26 potwierdzono end-to-end live smoke wysylki zaplanowanego treningu do Garmin Connect:
 
 - endpoint connectora: `POST /v1/garmin/workouts`,

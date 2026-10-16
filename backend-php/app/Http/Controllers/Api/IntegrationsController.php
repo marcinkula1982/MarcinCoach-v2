@@ -212,13 +212,17 @@ class IntegrationsController extends Controller
         }
         $activities = is_array($result['payload']['items'] ?? null) ? $result['payload']['items'] : [];
         $stats = $this->externalWorkoutImportService->importActivities($userId, 'garmin', $activities);
-        $syncRun->status = $stats['failed'] > 0 ? 'partial' : 'success';
+        $tcxStats = ($result['payload']['connectorMode'] ?? null) === 'stub'
+            ? ['tcxEnriched' => 0, 'tcxFailed' => 0, 'tcxPending' => 0]
+            : app(\App\Services\GarminTcxSyncService::class)->sync($userId, $activities);
+        $stats = array_merge($stats, $tcxStats);
+        $syncRun->status = $stats['failed'] > 0 || $stats['tcxFailed'] > 0 || $stats['tcxPending'] > 0 ? 'partial' : 'success';
         $syncRun->fetched_count = $stats['fetched'];
         $syncRun->imported_count = $stats['imported'];
         $syncRun->deduped_count = $stats['deduped'];
         $syncRun->failed_count = $stats['failed'];
         $syncRun->finished_at = now();
-        $syncRun->meta = $result['payload'];
+        $syncRun->meta = array_merge($result['payload'], $tcxStats);
         $syncRun->save();
         IntegrationAccount::query()->updateOrCreate(
             ['user_id' => $userId, 'provider' => 'garmin'],

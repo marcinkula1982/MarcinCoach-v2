@@ -8,6 +8,28 @@ use Illuminate\Support\Facades\Http;
 
 class GarminConnectorService
 {
+    /** Fetch raw TCX separately from activity summaries. Never return upstream bodies on failure. */
+    public function downloadTcx(int $userId, string $activityId): array
+    {
+        $baseUrl = rtrim((string) env('GARMIN_CONNECTOR_BASE_URL', ''), '/');
+        if ($baseUrl === '') {
+            return ['ok' => false, 'error' => 'GARMIN_CONNECTOR_NOT_CONFIGURED'];
+        }
+        try {
+            $response = Http::timeout(10)->connectTimeout(5)->withHeaders($this->headers())
+                ->get($baseUrl . '/v1/garmin/activities/' . rawurlencode($activityId) . '/download', [
+                    'userRef' => (string) $userId,
+                    'format' => 'tcx',
+                ]);
+        } catch (ConnectionException) {
+            return ['ok' => false, 'error' => 'GARMIN_TCX_UNREACHABLE'];
+        }
+
+        return $response->successful()
+            ? ['ok' => true, 'xml' => $response->body()]
+            : ['ok' => false, 'error' => 'GARMIN_TCX_HTTP_ERROR', 'upstreamStatus' => $response->status()];
+    }
+
     /**
      * @return array{ok:bool,payload:array<string,mixed>}
      */

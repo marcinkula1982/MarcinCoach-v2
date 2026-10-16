@@ -24,6 +24,9 @@ export interface GarminSyncResponse {
   imported: number
   deduped: number
   failed: number
+  tcxEnriched?: number
+  tcxFailed?: number
+  tcxPending?: number
 }
 
 export interface GarminWorkoutSendResponse {

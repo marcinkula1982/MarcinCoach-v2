@@ -170,6 +170,12 @@ Wszystkie pozostale dokumenty `.md` / `.txt` z poprzedniego katalogu `docs/` ora
 
 ## Aktualna kolejnosc dalszych prac
 
+### 2026-10-16 — GARMIN-TCX-01 (US-GARMIN-004, US-IMPORT-002)
+
+Zamknieto lokalny etap pobierania TCX przy synchronizacji Garmina: wspolny parser TCX i niezalezny od dostawcy `TcxWorkoutEnrichmentService` uzupelniaja rowniez treningi juz w bazie, bez duplikatow i bez ponownego pobrania zapisanego pliku. Zachowujemy importowane sumy, przyciecie i metadane; brak probek HR nie usuwa sredniej dostawcy. Zapis XML, podsumowania i przeliczenie pipeline v1/v2 sa transakcyjne. Bledy TCX nie usuwaja podsumowan. Front pokazuje osobne liczniki TCX i prosbe o ponowienie, gdy zostaly oczekujace pliki (do 5 pobran na sync, budzet rozpoczynania pobran 20 s, timeout pobrania 10 s). Cross-source duplikatow nie nadpisujemy; stub nie pobiera plikow. Wspolny builder zapisuje tez `laps`.
+
+Weryfikacja: `php artisan test --compact` — **405 passed, 2316 assertions**; `npm run build` — OK. Dziewiec testow Garmin TCX obejmuje nowe/stare wpisy, idempotencje, retry, niepoprawny/niepasujacy XML, limit partii, stub, wspolny mechanizm dla manual upload, duzy plik, rollback pipeline i brak HR. Migracja LONGTEXT wymaga `php artisan migrate --force` na IQHost po deployu backendu; migracje i duzy plik sprawdzono lokalnie na SQLite, MySQL/live NIEZWERYFIKOWANE. Front wymaga lokalnego build + `deploy-front.ps1`. Nic nie wdrozono. Siedem nowych miar nadal czeka na implementacje; cache analizy zachowuje dotychczasowe 10 minut.
+
 ### 2026-10-16 — STRAVA-DIAG (US-STRAVA-002)
 
 Dodano bezpieczna diagnostyke nieudanej odpowiedzi HTTP na pobieranie aktywnosci Stravy: `upstreamStatus`, lokalny `reason` (401/403/429/inny HTTP) i `syncRunId` w odpowiedzi API, logu warning i `integration_sync_runs.meta`. Status aplikacji pozostaje 502. Nie zapisujemy surowej odpowiedzi, tokenow ani naglowkow. Test `IntegrationsParityTest.php`: 10 passed, 96 assertions, w tym 401/403/429/503 oraz kontrola, ze diagnostyka zawiera tylko dozwolone pola. Deploy i produkcyjny smoke nieuruchomione; przyczyna awarii NIEZWERYFIKOWANA.

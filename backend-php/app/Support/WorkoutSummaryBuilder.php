@@ -38,7 +38,7 @@ class WorkoutSummaryBuilder
         ];
 
         if (!empty($parsed)) {
-            foreach (['movingTimeSec', 'elapsedTimeSec', 'hrSampleCount'] as $key) {
+            foreach (['movingTimeSec', 'elapsedTimeSec', 'hrSampleCount', 'laps'] as $key) {
                 if (isset($parsed[$key]) && is_numeric($parsed[$key])) {
                     $base[$key] = (int) $parsed[$key];
                 }

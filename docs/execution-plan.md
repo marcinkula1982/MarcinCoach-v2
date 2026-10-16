@@ -77,6 +77,14 @@ Po zamknięciu aktualnego `NOW` przenieś tutaj kolejny pakiet z sekcji `LATER`.
 
 ## DONE - baseline przed tym planem
 
+### 2026-10-16 — GARMIN-TCX-01 — wykonane lokalnie
+
+- Scenariusze: US-GARMIN-004, US-IMPORT-002. Sync pobiera TCX przez istniejacy endpoint connectora i uzupelnia nowe oraz dotychczasowe treningi Garmin wspolnym parserem. Zapis raw XML i metryk oraz pipeline v1/v2 sa transakcyjne; ponowienie nie duplikuje treningow i pomija gotowe pliki. Zachowano sumy, przyciecie, metadane i znane HR przy braku probek w pliku.
+- Maksymalnie 5 pobran na sync, kolejne startuja tylko w pierwszych 20 sekundach etapu TCX; timeout pojedynczego pobrania 10 s. UI/API pokazuja uzupelnione, bledy i oczekujace. Kolejny sync tego samego zakresu podejmuje brakujace pliki. Tryb stub nie pobiera TCX. Dopisano zapis liczby okrazen w wspolnym builderze.
+- Migracja `2026_10_16_000000_expand_workout_raw_tcx_xml` rozszerza XML do LONGTEXT. Wymagana na IQHost; hook nie wykonuje migracji. Down celowo pozostawia szersza kolumne.
+- Weryfikacja: `php artisan test --compact` — 405 passed, 2316 assertions; `npm run build` — OK. Test duzego TCX i migracji wykonany na SQLite; MySQL/IQHost i live download NIEZWERYFIKOWANE. Deploy nieuruchomiony.
+- To etap dostarczenia pliku i istniejacych miar. Siedem zaakceptowanych nowych miar pozostaje do implementacji dla wspolnego mechanizmu importow; cache analizy nadal moze trwac 10 minut. EP-017 (MFA) pozostaje otwarte.
+
 ### 2026-10-16 — STRAVA-DIAG — wykonane lokalnie
 
 - Scenariusz: US-STRAVA-002. Dodano `upstreamStatus`, lokalny kod `reason` i `syncRunId` do odpowiedzi bledu sync, logu warning i meta przebiegu. Bez surowej odpowiedzi Stravy, tokenow i naglowkow.
